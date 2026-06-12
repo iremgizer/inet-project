@@ -45,3 +45,21 @@ def load_topology(topology_type: str):
         return TopologyService.build_topology(topology_type)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+@app.get("/simulations")
+def list_simulations():
+    return simulation_service.storage.list_runs()
+
+@app.get("/simulations/{simulation_run_id}")
+def get_simulation(simulation_run_id: str):
+    run = simulation_service.storage.get_run(simulation_run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Simulation run not found or MongoDB is unavailable")
+    return run
+
+@app.delete("/simulations/{simulation_run_id}")
+def delete_simulation(simulation_run_id: str):
+    deleted = simulation_service.storage.delete_run(simulation_run_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Simulation run not found or MongoDB is unavailable")
+    return {"deleted": True}

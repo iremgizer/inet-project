@@ -1,7 +1,7 @@
 import time
 from typing import List, Dict, Optional
 import networkx as nx
-from app.models import NetworkInput, AlgorithmConfig, PathResult, PathShare, LinkResult, NodeRoleResult, DistanceVectorTableEntry, SimulationResult
+from app.models import NetworkInput, AlgorithmConfig, PathResult, PathShare, LinkResult, NodeRoleResult, DistanceVectorTableEntry, SimulationResult, SimulationTraceEvent
 from app.utils.graph_builder import GraphBuilder
 from app.utils.metrics import Metrics
 
@@ -13,7 +13,20 @@ class DistanceVectorAlgorithm:
         path_results: List[PathResult] = []
         link_loads: Dict[str, float] = {link.id: 0.0 for link in network.links}
         dv_table: List[DistanceVectorTableEntry] = []
+        trace_events: List[SimulationTraceEvent] = []
         debug: List[str] = []
+        step = 1
+
+        trace_events.append(SimulationTraceEvent(
+            stepId=str(step),
+            algorithm="DISTANCE_VECTOR",
+            title="Initialize cost table",
+            description="Create a stable cost/next-hop table for every node and destination.",
+            explanationText="V1 uses instant stable computation for teaching. It does not model asynchronous message exchange.",
+            highlightedNodes=[node.id for node in network.nodes],
+            tablesSnapshot=[],
+        ))
+        step += 1
 
         # Compute stable shortest path costs for every node destination pair.
         try:
@@ -31,6 +44,29 @@ class DistanceVectorAlgorithm:
                 next_hop = DistanceVectorAlgorithm._find_next_hop(node, destination, paths)
                 dv_table.append(DistanceVectorTableEntry(nodeId=node, destinationId=destination, cost=float(cost), nextHop=next_hop))
 
+        trace_events.append(SimulationTraceEvent(
+            stepId=str(step),
+            algorithm="DISTANCE_VECTOR",
+            title="Compute shortest costs",
+            description="Compute stable minimum costs using link weights.",
+            explanationText="This mirrors the converged result of repeated Distance Vector relaxation/update steps.",
+            highlightedNodes=list(graph.nodes),
+            tablesSnapshot=[entry.model_dump() for entry in dv_table],
+            costCalculation="cost(node,destination) is the minimum sum of link weights over all available paths.",
+        ))
+        step += 1
+
+        trace_events.append(SimulationTraceEvent(
+            stepId=str(step),
+            algorithm="DISTANCE_VECTOR",
+            title="Update next-hop table",
+            description="For each destination, store the first hop on the selected shortest path.",
+            explanationText="The next hop tells a router where to forward traffic toward a destination after convergence.",
+            highlightedNodes=list(graph.nodes),
+            tablesSnapshot=[entry.model_dump() for entry in dv_table],
+        ))
+        step += 1
+
         for demand in network.demands:
             if demand.source == demand.target:
                 debug.append(f"Demand {demand.id} source equals target; skipping")
@@ -44,16 +80,44 @@ class DistanceVectorAlgorithm:
                 path_results.append(PathResult(demandId=demand.id, source=demand.source, target=demand.target, paths=[]))
                 continue
             cost = float(lengths[demand.source][demand.target])
+            path_link_ids = DistanceVectorAlgorithm._path_link_ids(path, link_map)
+            trace_events.append(SimulationTraceEvent(
+                stepId=str(step),
+                algorithm="DISTANCE_VECTOR",
+                title="Select shortest path for demand",
+                description=f"Demand {demand.id} uses {' -> '.join(path)} with cost {cost:g}.",
+                explanationText="After the table is stable, traffic follows the next-hop chain for the destination.",
+                highlightedNodes=path,
+                highlightedLinks=path_link_ids,
+                activeDemandId=demand.id,
+                costCalculation=DistanceVectorAlgorithm._path_cost_calculation(path, link_map),
+            ))
+            step += 1
             path_results.append(PathResult(
                 demandId=demand.id,
                 source=demand.source,
                 target=demand.target,
                 paths=[PathShare(nodes=path, cost=cost, trafficShare=demand.amount)],
             ))
+            delta: Dict[str, float] = {}
             for u, v in zip(path, path[1:]):
                 edge_link = link_map.get((u, v))
                 if edge_link:
                     link_loads[edge_link.id] += demand.amount
+                    delta[edge_link.id] = round(delta.get(edge_link.id, 0.0) + demand.amount, 6)
+            trace_events.append(SimulationTraceEvent(
+                stepId=str(step),
+                algorithm="DISTANCE_VECTOR",
+                title="Add traffic to chosen path",
+                description=f"Added {demand.amount} units to {' -> '.join(path)}.",
+                explanationText="Distance Vector V1 routes each demand on one stable shortest path.",
+                highlightedNodes=path,
+                highlightedLinks=path_link_ids,
+                activeDemandId=demand.id,
+                linkLoadDelta=delta,
+                currentLinkLoads={key: round(value, 6) for key, value in link_loads.items()},
+            ))
+            step += 1
 
         link_results: List[LinkResult] = []
         for link in network.links:
@@ -69,9 +133,44 @@ class DistanceVectorAlgorithm:
                 isCongested=utilization > config.congestionThreshold,
                 weight=link.weight,
             ))
+            trace_events.append(SimulationTraceEvent(
+                stepId=str(step),
+                algorithm="DISTANCE_VECTOR",
+                title="Compute link utilization",
+                description=f"Link {link.id} load {round(load, 6)} over capacity {link.capacity}.",
+                explanationText="Utilization is continuous traffic load divided by link capacity.",
+                highlightedNodes=[link.source, link.target],
+                highlightedLinks=[link.id],
+                currentLinkLoads={key: round(value, 6) for key, value in link_loads.items()},
+                formulaText=f"utilization({link.id}) = {round(load, 6)} / {link.capacity} = {round(utilization, 6)}",
+            ))
+            step += 1
 
         node_roles = DistanceVectorAlgorithm._build_node_roles(network, path_results)
         metrics = Metrics.compute_summary(path_results, link_results)
+        congested_links = [link.linkId for link in link_results if link.isCongested]
+        trace_events.append(SimulationTraceEvent(
+            stepId=str(step),
+            algorithm="DISTANCE_VECTOR",
+            title="Mark congested links",
+            description=f"{len(congested_links)} link(s) exceed threshold {config.congestionThreshold}.",
+            explanationText="A link is congested when utilization exceeds the configured threshold.",
+            highlightedLinks=congested_links,
+            currentLinkLoads={key: round(value, 6) for key, value in link_loads.items()},
+            formulaText="isCongested = utilization > congestionThreshold",
+        ))
+        step += 1
+        trace_events.append(SimulationTraceEvent(
+            stepId=str(step),
+            algorithm="DISTANCE_VECTOR",
+            title="Final summary",
+            description="Distance Vector simulation complete.",
+            explanationText="The final table and routed traffic represent the instant stable V1 result.",
+            highlightedLinks=congested_links,
+            tablesSnapshot=[entry.model_dump() for entry in dv_table],
+            currentLinkLoads={key: round(value, 6) for key, value in link_loads.items()},
+            metadata=metrics,
+        ))
         runtime = (time.time() - start) * 1000.0
         return SimulationResult(
             algorithm="DISTANCE_VECTOR",
@@ -79,6 +178,7 @@ class DistanceVectorAlgorithm:
             linkResults=link_results,
             nodeRoles=node_roles,
             distanceVectorTable=dv_table,
+            traceEvents=DistanceVectorAlgorithm._cap_trace(trace_events, config.maxTraceEvents),
             maxUtilization=metrics["maxUtilization"],
             totalDeliveredTraffic=metrics["totalDeliveredTraffic"],
             averagePathCost=metrics["averagePathCost"],
@@ -109,3 +209,32 @@ class DistanceVectorAlgorithm:
                 for node_id in share.nodes[1:-1]:
                     roles[node_id].asIntermediateFor.append(path.demandId)
         return list(roles.values())
+
+    @staticmethod
+    def _path_link_ids(path: List[str], link_map: Dict[tuple, object]) -> List[str]:
+        link_ids: List[str] = []
+        for u, v in zip(path, path[1:]):
+            edge_link = link_map.get((u, v))
+            if edge_link:
+                link_ids.append(edge_link.id)
+        return link_ids
+
+    @staticmethod
+    def _path_cost_calculation(path: List[str], link_map: Dict[tuple, object]) -> str:
+        weights: List[float] = []
+        parts: List[str] = []
+        for u, v in zip(path, path[1:]):
+            edge_link = link_map.get((u, v))
+            if edge_link:
+                weights.append(edge_link.weight)
+                parts.append(f"w({u},{v})")
+        total = sum(weights)
+        weight_text = " + ".join(str(weight).rstrip("0").rstrip(".") for weight in weights)
+        return f"{' -> '.join(path)}: cost = {' + '.join(parts)} = {weight_text} = {total:g}"
+
+    @staticmethod
+    def _cap_trace(events: List[SimulationTraceEvent], max_events: int | None) -> List[SimulationTraceEvent]:
+        # TODO: stream trace events over SSE/WebSocket for large simulations.
+        if max_events and len(events) > max_events:
+            return events[:max_events]
+        return events

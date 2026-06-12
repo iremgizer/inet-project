@@ -18,6 +18,9 @@ const RoutingTablePanel: React.FC<RoutingTablePanelProps> = ({ entries }) => {
   return (
     <div className="panel routing-table-panel">
       <h3>Routing Table</h3>
+      {entries.length > 200 && (
+        <p className="placeholder-note">Large routing table detected. Future versions should use table virtualization.</p>
+      )}
       <div className="table-scroll">
         <table>
           <thead>

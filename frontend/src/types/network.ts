@@ -39,6 +39,7 @@ export interface AlgorithmConfig {
   algorithmType: AlgorithmType;
   objective: ObjectiveType;
   congestionThreshold: number;
+  maxTraceEvents?: number;
 }
 
 export interface SimulationRequest {
@@ -84,16 +85,63 @@ export interface DistanceVectorTableEntry {
   nextHop: string | null;
 }
 
+export interface SimulationTraceEvent {
+  stepId: string;
+  algorithm: string;
+  title: string;
+  description: string;
+  explanationText: string;
+  highlightedNodes: string[];
+  highlightedLinks: string[];
+  activeDemandId?: string | null;
+  pathGroupId?: string | null;
+  pathColor?: string | null;
+  costCalculation?: string | null;
+  formulaText?: string | null;
+  linkLoadDelta?: Record<string, number> | null;
+  currentLinkLoads?: Record<string, number> | null;
+  tablesSnapshot?: unknown;
+  metadata?: Record<string, unknown> | null;
+}
+
 export interface SimulationResult {
+  simulationRunId: string;
   algorithm: string;
   pathResults: PathResult[];
   linkResults: LinkResult[];
   nodeRoles: NodeRoleResult[];
   distanceVectorTable?: DistanceVectorTableEntry[];
+  traceEvents: SimulationTraceEvent[];
   maxUtilization: number;
   totalDeliveredTraffic: number;
   averagePathCost: number;
   congestedLinkCount: number;
   runtimeMs: number;
   debugInfo?: string[];
+}
+
+export interface SavedSimulationSummary {
+  simulationRunId: string;
+  name: string;
+  createdAt: string;
+  algorithm: string;
+  topologyType: string;
+  nodeCount: number;
+  linkCount: number;
+  demandCount: number;
+  maxUtilization: number;
+  congestedLinkCount: number;
+}
+
+export interface SavedSimulationRun {
+  simulationRunId: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  network: NetworkInput;
+  algorithmConfig: AlgorithmConfig;
+  simulationResult: SimulationResult;
+  traceEvents: SimulationTraceEvent[];
+  topologyType: TopologyType;
+  metadata: Record<string, unknown>;
 }

@@ -8,6 +8,8 @@ class TopologyService:
 
     @staticmethod
     def build_topology(topology_type: str) -> NetworkInput:
+        if topology_type == "custom":
+            return NetworkInput(nodes=[], links=[], demands=[], topologyType="custom", isDirected=False)
         if topology_type == "triangle":
             return TopologyService._triangle_topology()
         if topology_type == "line":

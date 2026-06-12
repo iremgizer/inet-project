@@ -1,6 +1,7 @@
 from __future__ import annotations
 from pydantic import BaseModel, Field, validator
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
+from uuid import uuid4
 
 TopologyType = Literal["custom", "triangle", "line", "ring", "mesh", "fat-tree"]
 AlgorithmName = Literal["ECMP", "DISTANCE_VECTOR", "SEGMENT_ROUTING", "CUSTOM_SPLITTING"]
@@ -60,6 +61,7 @@ class AlgorithmConfig(BaseModel):
     algorithmType: AlgorithmType
     objective: ObjectiveType
     congestionThreshold: float = Field(1.0, gt=0)
+    maxTraceEvents: Optional[int] = None
 
 class SimulationRequest(BaseModel):
     network: NetworkInput
@@ -98,15 +100,47 @@ class DistanceVectorTableEntry(BaseModel):
     cost: float
     nextHop: Optional[str]
 
+class SimulationTraceEvent(BaseModel):
+    stepId: str
+    algorithm: str
+    title: str
+    description: str
+    explanationText: str
+    highlightedNodes: List[str] = Field(default_factory=list)
+    highlightedLinks: List[str] = Field(default_factory=list)
+    activeDemandId: Optional[str] = None
+    pathGroupId: Optional[str] = None
+    pathColor: Optional[str] = None
+    costCalculation: Optional[str] = None
+    formulaText: Optional[str] = None
+    linkLoadDelta: Optional[Dict[str, float]] = None
+    currentLinkLoads: Optional[Dict[str, float]] = None
+    tablesSnapshot: Optional[Any] = None
+    metadata: Optional[Dict[str, Any]] = None
+
 class SimulationResult(BaseModel):
+    simulationRunId: str = Field(default_factory=lambda: str(uuid4()))
     algorithm: str
     pathResults: List[PathResult]
     linkResults: List[LinkResult]
     nodeRoles: List[NodeRoleResult]
     distanceVectorTable: Optional[List[DistanceVectorTableEntry]] = None
+    traceEvents: List[SimulationTraceEvent] = Field(default_factory=list)
     maxUtilization: float
     totalDeliveredTraffic: float
     averagePathCost: float
     congestedLinkCount: int
     runtimeMs: float
     debugInfo: Optional[List[str]] = None
+
+class SavedSimulationSummary(BaseModel):
+    simulationRunId: str
+    name: str
+    createdAt: str
+    algorithm: str
+    topologyType: str
+    nodeCount: int
+    linkCount: int
+    demandCount: int
+    maxUtilization: float
+    congestedLinkCount: int

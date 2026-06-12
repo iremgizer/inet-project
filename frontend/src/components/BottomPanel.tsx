@@ -16,6 +16,7 @@ interface BottomPanelProps {
   onThresholdChange: (value: number) => void;
   onSimulate: () => void;
   onResetSimulation: () => void;
+  isRunning: boolean;
 }
 
 const BottomPanel: React.FC<BottomPanelProps> = ({
@@ -33,6 +34,7 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
   onThresholdChange,
   onSimulate,
   onResetSimulation,
+  isRunning,
 }) => {
   const [source, setSource] = useState("");
   const [target, setTarget] = useState("");
@@ -90,8 +92,8 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
           <select value={algorithm} onChange={(e) => onAlgorithmChange(e.target.value as AlgorithmName)}>
             <option value="ECMP">ECMP</option>
             <option value="DISTANCE_VECTOR">Distance Vector</option>
-            <option value="SEGMENT_ROUTING">Segment Routing</option>
-            <option value="CUSTOM_SPLITTING">Custom Splitting</option>
+            <option value="SEGMENT_ROUTING">Segment Routing (planned)</option>
+            <option value="CUSTOM_SPLITTING">Custom Splitting (planned)</option>
           </select>
         </label>
         <label>
@@ -113,7 +115,7 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
           Congestion Threshold
           <input type="number" min="0.1" step="0.1" value={congestionThreshold} onChange={(e) => onThresholdChange(Number(e.target.value))} />
         </label>
-        <button onClick={onSimulate}>Start Simulation</button>
+        <button onClick={onSimulate} disabled={isRunning}>{isRunning ? "Running..." : "Start Simulation"}</button>
         <button onClick={onResetSimulation}>Reset Simulation Result</button>
       </div>
     </div>
