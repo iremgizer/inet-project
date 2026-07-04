@@ -6357,4 +6357,459 @@ tbody tr:hover {
   line-height:1.4
 }
 
+/* ── Dashboard tabs ────────────────────────────────────────────────────────── */
+
+.dash-tabs {
+  display:flex;
+  gap:0;
+  border-bottom:1px solid var(--border);
+  margin-bottom:16px
+}
+
+.dash-tab {
+  padding:7px 16px;
+  font-size:12px;
+  font-weight:500;
+  color:var(--text-3);
+  background:none;
+  border:none;
+  border-bottom:2px solid transparent;
+  cursor:pointer;
+  margin-bottom:-1px;
+  transition:color .12s,border-color .12s;
+  white-space:nowrap
+}
+
+.dash-tab:hover { color:var(--text-1) }
+
+.dash-tab--active {
+  color:var(--accent);
+  border-bottom-color:var(--accent)
+}
+
+.dash-tab-content {
+  display:flex;
+  flex-direction:column;
+  gap:12px
+}
+
+.dash-tab-toolbar {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap
+}
+
+.dash-tab-toolbar-note {
+  font-size:11px;
+  color:var(--text-3);
+  margin-left:4px
+}
+
+/* ── Assignment table ──────────────────────────────────────────────────────── */
+
+.assign-table-wrap {
+  overflow-x:auto;
+  border:1px solid var(--border);
+  border-radius:8px
+}
+
+.assign-table {
+  width:100%;
+  border-collapse:collapse;
+  font-size:12px;
+  min-width:640px
+}
+
+.assign-table th {
+  text-align:left;
+  padding:7px 10px;
+  font-size:11px;
+  font-weight:600;
+  color:var(--text-3);
+  border-bottom:1px solid var(--border);
+  background:var(--bg-2);
+  white-space:nowrap
+}
+
+.assign-table td {
+  padding:7px 10px;
+  border-bottom:1px solid var(--border)
+}
+
+.assign-table tbody tr:last-child td { border-bottom:none }
+
+.assign-table-row:hover { background:var(--bg-2) }
+
+.assign-table-title {
+  font-weight:600;
+  color:var(--text-1);
+  max-width:200px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis
+}
+
+.assign-table-topic { color:var(--text-3) }
+.assign-table-date { color:var(--text-3); white-space:nowrap }
+
+.assign-table-actions {
+  display:flex;
+  gap:4px;
+  flex-wrap:nowrap
+}
+
+.assign-status-pending {
+  font-size:11px;
+  font-weight:600;
+  color:#fbbf24;
+  text-transform:uppercase;
+  letter-spacing:.04em
+}
+
+/* ── btn-xs (extra small button) ──────────────────────────────────────────── */
+
+.btn-xs {
+  padding:3px 7px;
+  font-size:11px;
+  border-radius:4px;
+  display:inline-flex;
+  align-items:center;
+  gap:3px;
+  cursor:pointer;
+  border:1px solid var(--border);
+  background:var(--surface);
+  color:var(--text-2);
+  transition:background .12s,border-color .12s,color .12s;
+  white-space:nowrap
+}
+
+.btn-xs:hover {
+  background:var(--bg-2);
+  color:var(--text-1)
+}
+
+/* ── Mode badge ────────────────────────────────────────────────────────────── */
+
+.mode-badge {
+  display:inline-block;
+  padding:2px 6px;
+  border-radius:3px;
+  font-size:10px;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.04em
+}
+
+.mode-badge--lecture,.mode-badge--assignment {
+  background:rgba(59,130,246,.15);
+  color:#60a5fa
+}
+
+.mode-badge--exercise {
+  background:rgba(34,197,94,.15);
+  color:#4ade80
+}
+
+.mode-badge--challenge {
+  background:rgba(249,115,22,.15);
+  color:#fb923c
+}
+
+/* ── Empty box ─────────────────────────────────────────────────────────────── */
+
+.dash-empty-box {
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  text-align:center;
+  gap:10px;
+  padding:36px 24px;
+  background:var(--surface);
+  border:1px dashed var(--border);
+  border-radius:10px
+}
+
+.dash-empty-icon { color:var(--text-3);opacity:.5 }
+.dash-empty-title { font-size:14px;font-weight:600;color:var(--text-2) }
+.dash-empty-desc { font-size:12px;color:var(--text-3);line-height:1.5;max-width:380px;margin:0 }
+
+/* ── Lab section layout ────────────────────────────────────────────────────── */
+
+.dash-lab-actions {
+  display:flex;
+  gap:10px
+}
+
+.dash-lab-secondary {
+  display:flex;
+  flex-direction:column;
+  gap:10px
+}
+
+.dash-lab-secondary-row {
+  display:flex;
+  gap:10px
+}
+
+/* ── Section toggle ────────────────────────────────────────────────────────── */
+
+.dash-section-toggle {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  background:none;
+  border:none;
+  padding:0;
+  cursor:pointer;
+  font-size:12px;
+  font-weight:600;
+  color:var(--text-2);
+  width:100%
+}
+
+.dash-section-toggle:hover { color:var(--text-1) }
+
+/* ── Assign work modal ─────────────────────────────────────────────────────── */
+
+.assign-modal { max-width:420px }
+
+.assign-modal-body {
+  padding:12px 18px 18px;
+  display:flex;
+  flex-direction:column;
+  gap:14px
+}
+
+.assign-work-meta {
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+  padding:10px 12px;
+  background:var(--bg-2);
+  border:1px solid var(--border);
+  border-left:3px solid var(--accent);
+  border-radius:6px
+}
+
+.assign-work-type {
+  font-size:10px;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--text-3)
+}
+
+.assign-work-title {
+  font-size:13px;
+  font-weight:600;
+  color:var(--text-1)
+}
+
+.assign-work-topic { font-size:11px;color:var(--text-3) }
+
+.assign-section { display:flex;flex-direction:column;gap:6px }
+
+.assign-toggle-row {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:12px;
+  cursor:pointer;
+  font-weight:500
+}
+
+.assign-toggle-row input[type="checkbox"] {
+  cursor:pointer;
+  accent-color:var(--accent)
+}
+
+.assign-student-list {
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  padding-left:6px
+}
+
+.assign-student-row {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:12px;
+  cursor:pointer;
+  padding:5px 7px;
+  border-radius:5px
+}
+
+.assign-student-row:hover { background:var(--bg-2) }
+
+.assign-student-row input[type="checkbox"] {
+  cursor:pointer;
+  accent-color:var(--accent)
+}
+
+.assign-student-name { font-weight:500;color:var(--text-1);flex:1 }
+.assign-student-id { font-size:11px;color:var(--text-3) }
+
+.assign-due-row { display:flex;flex-direction:column;gap:5px }
+
+.assign-due-label {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:12px;
+  font-weight:500;
+  color:var(--text-2)
+}
+
+.assign-due-optional { font-weight:400;color:var(--text-3);font-size:11px }
+
+.assign-due-input {
+  padding:6px 10px;
+  font-size:12px;
+  background:var(--bg);
+  border:1px solid var(--border);
+  border-radius:5px;
+  color:var(--text-1);
+  width:100%;
+  box-sizing:border-box;
+  outline:none
+}
+
+.assign-due-input:focus { border-color:var(--accent) }
+
+.assign-actions {
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+  margin-top:4px
+}
+
+/* ── Student profile picker ────────────────────────────────────────────────── */
+
+.landing-picker-sub {
+  font-size:12px;
+  color:var(--text-3);
+  margin:0;
+  line-height:1.5
+}
+
+.landing-student-picker {
+  display:flex;
+  flex-direction:column;
+  gap:8px
+}
+
+.landing-student-card {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:12px 16px;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:10px;
+  cursor:pointer;
+  text-align:left;
+  width:100%;
+  transition:border-color .12s,background .12s,box-shadow .12s
+}
+
+.landing-student-card:hover {
+  border-color:var(--accent);
+  background:var(--accent-light);
+  box-shadow:0 2px 10px rgba(0,113,227,.1)
+}
+
+.landing-student-name {
+  font-size:13px;
+  font-weight:600;
+  color:var(--text-1)
+}
+
+.landing-student-id {
+  font-size:11px;
+  color:var(--text-3);
+  margin-top:1px
+}
+
+/* ── Student work items ────────────────────────────────────────────────────── */
+
+.dash-work-section { margin-bottom:4px }
+
+.dash-work-section-title {
+  font-size:11px;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--text-3);
+  margin-bottom:8px
+}
+
+.dash-work-item {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:9px 12px;
+  border:1px solid var(--border);
+  border-radius:7px;
+  margin-bottom:6px;
+  background:var(--surface)
+}
+
+.dash-work-info { flex:1;min-width:0 }
+.dash-work-title { font-size:12px;font-weight:600;color:var(--text-1) }
+
+.dash-work-meta {
+  font-size:11px;
+  color:var(--text-3);
+  margin-top:2px
+}
+
+.dash-work-due { color:var(--text-3) }
+
+.dash-work-status {
+  font-size:10px;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  white-space:nowrap;
+  flex-shrink:0
+}
+
+.dash-work-status--pending { color:#fbbf24 }
+.dash-work-status--submitted { color:#4ade80 }
+.dash-work-status--checked { color:#60a5fa }
+
+/* ── No profile message ────────────────────────────────────────────────────── */
+
+.dash-no-profile {
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  text-align:center;
+  padding:40px 20px;
+  color:var(--text-3);
+  font-size:12px;
+  gap:6px
+}
+
+/* ── Manual import row ─────────────────────────────────────────────────────── */
+
+.dash-manual-import {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:10px 12px;
+  background:var(--bg-2);
+  border:1px solid var(--border);
+  border-radius:7px;
+  flex-wrap:wrap
+}
+
+.dash-manual-import-label {
+  font-size:11px;
+  color:var(--text-3);
+  flex:1;
+  min-width:120px
+}
 

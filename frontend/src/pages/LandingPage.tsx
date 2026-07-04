@@ -1,10 +1,13 @@
 import React, { useState } from "react";
-import { BookOpen, GraduationCap, ArrowLeft, LogIn, AlertCircle } from "lucide-react";
+import { BookOpen, GraduationCap, ArrowLeft, LogIn, AlertCircle, ChevronRight } from "lucide-react";
 import { UserRole, demoAuthenticate } from "../utils/demoAuth";
+import { DEMO_STUDENTS } from "../utils/demoUsers";
 
 interface LandingPageProps {
-  onLogin: (role: UserRole) => void;
+  onLogin: (role: UserRole, studentId?: string) => void;
 }
+
+type LandingStep = "select-role" | "login" | "select-student";
 
 const ROLE_META = {
   teacher: {
@@ -22,6 +25,7 @@ const ROLE_META = {
 } as const;
 
 const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
+  const [step, setStep] = useState<LandingStep>("select-role");
   const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -32,9 +36,11 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
     setUsername("");
     setPassword("");
     setError(null);
+    setStep("login");
   };
 
   const handleBack = () => {
+    setStep("select-role");
     setSelectedRole(null);
     setUsername("");
     setPassword("");
@@ -44,15 +50,13 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const role = demoAuthenticate(username, password);
-    if (!role) {
-      setError("Invalid credentials.");
-      return;
+    if (!role) { setError("Invalid credentials."); return; }
+    if (role !== selectedRole) { setError("These credentials belong to a different role."); return; }
+    if (role === "student") {
+      setStep("select-student");
+    } else {
+      onLogin(role);
     }
-    if (role !== selectedRole) {
-      setError("These credentials belong to a different role.");
-      return;
-    }
-    onLogin(role);
   };
 
   return (
@@ -61,12 +65,10 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
         <div className="landing-brand">
           <div className="landing-logo">◈</div>
           <h1 className="landing-title">Network Algorithm Lab</h1>
-          <p className="landing-sub">
-            Interactive routing and traffic engineering learning platform
-          </p>
+          <p className="landing-sub">Interactive routing and traffic engineering learning platform</p>
         </div>
 
-        {!selectedRole ? (
+        {step === "select-role" && (
           <div className="landing-roles">
             {(["teacher", "student"] as UserRole[]).map((role) => {
               const { label, Icon, description } = ROLE_META[role];
@@ -81,27 +83,25 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
                     <div className="landing-role-title">{label}</div>
                     <div className="landing-role-desc">{description}</div>
                   </div>
+                  <ChevronRight size={16} style={{ color: "var(--text-3)", flexShrink: 0 }} />
                 </button>
               );
             })}
           </div>
-        ) : (
+        )}
+
+        {step === "login" && selectedRole && (
           <div className="landing-login-box">
             <button className="landing-back-btn" onClick={handleBack}>
               <ArrowLeft size={13} /> Back
             </button>
-
             <div className="landing-login-role">
-              {selectedRole === "teacher"
-                ? <BookOpen size={16} />
-                : <GraduationCap size={16} />}
+              {selectedRole === "teacher" ? <BookOpen size={16} /> : <GraduationCap size={16} />}
               <span>Sign in as {ROLE_META[selectedRole].label}</span>
             </div>
-
             <div className="demo-auth-notice">
               Demo login — local prototype only. Not for production use.
             </div>
-
             <form className="landing-form" onSubmit={handleSubmit}>
               <input
                 className="landing-input"
@@ -120,19 +120,45 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
                 autoComplete="current-password"
                 onChange={(e) => { setPassword(e.target.value); setError(null); }}
               />
-
               {error && (
                 <div className="landing-error">
                   <AlertCircle size={12} /> {error}
                 </div>
               )}
-
               <button className="btn-primary landing-submit" type="submit">
                 <LogIn size={13} /> Sign in
               </button>
             </form>
-
             <div className="landing-demo-hint">{ROLE_META[selectedRole].hint}</div>
+          </div>
+        )}
+
+        {step === "select-student" && (
+          <div className="landing-login-box">
+            <button className="landing-back-btn" onClick={() => setStep("login")}>
+              <ArrowLeft size={13} /> Back
+            </button>
+            <div className="landing-login-role">
+              <GraduationCap size={16} />
+              <span>Select your profile</span>
+            </div>
+            <p className="landing-picker-sub">Choose which demo student you are for this session.</p>
+            <div className="landing-student-picker">
+              {DEMO_STUDENTS.map((s) => (
+                <button
+                  key={s.studentId}
+                  className="landing-student-card"
+                  onClick={() => onLogin("student", s.studentId)}
+                >
+                  <GraduationCap size={18} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <div className="landing-student-name">{s.name}</div>
+                    <div className="landing-student-id">{s.studentId}</div>
+                  </div>
+                  <ChevronRight size={14} style={{ color: "var(--text-3)", flexShrink: 0 }} />
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>

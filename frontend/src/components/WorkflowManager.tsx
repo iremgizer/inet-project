@@ -21,7 +21,11 @@ import ChallengeWorkspacePage from "../pages/ChallengeWorkspacePage";
 import JsonHelpModal from "./JsonHelpModal";
 import { useToast } from "./Toast";
 import { UserRole } from "../utils/demoAuth";
-import { simulateNetwork, listSavedRuns, getSavedRun, deleteSavedRun, listAssignments, saveAssignment } from "../api/simulationApi";
+import { AssignedWork } from "../types/classroom";
+import { DEMO_STUDENTS } from "../utils/demoUsers";
+import { loadAssignedWorks, saveAssignedWorks, loadCurrentStudentId, saveCurrentStudentId } from "../utils/classroomStorage";
+import { exportAssignmentPdf } from "../utils/pdfExport";
+import { simulateNetwork, listSavedRuns, getSavedRun, deleteSavedRun, listAssignments, saveAssignment, getAssignment } from "../api/simulationApi";
 import { triangleTemplate } from "../utils/topologyTemplates";
 import { applyAutoLayout, generateRandomTopology, generateTopology, RandomGraphConfig, TopologySize } from "../utils/generatedTopologies";
 import {
@@ -159,6 +163,10 @@ const WorkflowManager: React.FC = () => {
   // ── Auth ──────────────────────────────────────────────────────────────────
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
+
+  // ── Classroom distribution ─────────────────────────────────────────────────
+  const [assignedWorks, setAssignedWorks] = useState<AssignedWork[]>(() => loadAssignedWorks());
+  const [currentStudentId, setCurrentStudentId] = useState<string | null>(() => loadCurrentStudentId());
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const traceEvents = simulationResult?.traceEvents ?? [];
@@ -305,14 +313,21 @@ const WorkflowManager: React.FC = () => {
     setAppMode("lab");
   }, []);
 
-  const handleLogin = useCallback((role: UserRole) => {
+  const handleLogin = useCallback((role: UserRole, studentId?: string) => {
     setUserRole(role);
+    if (studentId) {
+      setCurrentStudentId(studentId);
+      saveCurrentStudentId(studentId);
+    }
     setCurrentStep(0);
     setAppMode("lab");
-  }, []);
+    if (role === "teacher") refreshSavedAssignments(); // eslint-disable-line
+  }, []); // eslint-disable-line
 
   const handleLogout = useCallback(() => {
     setUserRole(null);
+    setCurrentStudentId(null);
+    saveCurrentStudentId(null);
     setCurrentStep(0);
     setAppMode("lab");
     setNetwork({ nodes: [], links: [], demands: [], topologyType: "custom", isDirected: false });
@@ -712,6 +727,58 @@ const WorkflowManager: React.FC = () => {
     }
   }, [toast]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Classroom assignment distribution ─────────────────────────────────────
+
+  const handleAssignWork = useCallback((work: AssignedWork) => {
+    setAssignedWorks((prev) => {
+      const updated = [...prev, work];
+      saveAssignedWorks(updated);
+      return updated;
+    });
+    const target =
+      work.assignedTo === "all"
+        ? "all students"
+        : `${(work.assignedTo as string[]).length} student(s)`;
+    toast(`Assigned "${work.workTitle}" to ${target}.`, "success");
+  }, [toast]);
+
+  const handleExportAssignmentById = useCallback((assignmentId: string) => {
+    getAssignment(assignmentId)
+      .then((a) => { downloadAssignmentJson(a); toast("Assignment JSON exported.", "success"); })
+      .catch(() => toast("Could not load assignment. Is MongoDB running?", "error"));
+  }, [toast]); // eslint-disable-line
+
+  const handleExportAssignmentPdf = useCallback((assignmentId: string, includeAnswer: boolean) => {
+    getAssignment(assignmentId)
+      .then((a) => { exportAssignmentPdf(a, { includeAnswer }); toast("PDF exported.", "success"); })
+      .catch(() => toast("Could not load assignment for PDF export.", "error"));
+  }, [toast]); // eslint-disable-line
+
+  const handleOpenAssignedWork = useCallback(async (work: AssignedWork) => {
+    if (work.workType === "assignment") {
+      try {
+        const assignment = await getAssignment(work.workId);
+        setActiveAssignment(assignment);
+        setNetwork(structuredClone(assignment.starterNetwork));
+        setActiveSubmission(createSubmissionTemplate(assignment));
+        setSimulationResult(null);
+        setGradingResult(null);
+        setCurrentAttempt(null);
+        setChallengeGradingResult(null);
+        setAttemptHistory([]);
+        setHintsRevealed(0);
+        setAttemptNumber(1);
+        setCurrentStep(1);
+        setAppMode(assignment.mode === "challenge" ? "challenge" : "student");
+        toast(`Assignment "${assignment.title}" loaded.`, "success");
+      } catch {
+        toast("Could not load assignment. Is MongoDB running?", "error");
+      }
+    } else {
+      setAppMode("challenge");
+    }
+  }, [toast]); // eslint-disable-line
+
   // ── Derived for panels ────────────────────────────────────────────────────
 
   const selectedNode = selectedType === "node"
@@ -1023,7 +1090,9 @@ const WorkflowManager: React.FC = () => {
               </button>
               <span className="topbar-role-badge">
                 {userRole === "teacher" ? <BookOpen size={11} /> : <GraduationCap size={11} />}
-                {userRole === "teacher" ? "Teacher" : "Student"}
+                {userRole === "teacher"
+                  ? "Teacher"
+                  : (DEMO_STUDENTS.find((s) => s.studentId === currentStudentId)?.name?.split(" ")[0] ?? "Student")}
               </span>
               <button className="topbar-logout-btn" onClick={handleLogout} title="Sign out">
                 <LogOut size={13} /> Sign out
@@ -1040,6 +1109,8 @@ const WorkflowManager: React.FC = () => {
             <LandingPage onLogin={handleLogin} />
           ) : userRole === "teacher" ? (
             <TeacherDashboard
+              savedAssignments={savedAssignments}
+              assignedWorks={assignedWorks}
               savedRuns={savedRuns}
               onCreateAssignment={() => handleSwitchMode("teacher")}
               onBuildLab={handleGoToLab}
@@ -1049,9 +1120,16 @@ const WorkflowManager: React.FC = () => {
               onImportJson={() => homeImportRef.current?.click()}
               onDownloadExampleTopology={handleDownloadExample}
               onOpenHelp={() => setShowHelpModal(true)}
+              onAssignWork={handleAssignWork}
+              onExportAssignmentJson={handleExportAssignmentById}
+              onExportAssignmentPdf={handleExportAssignmentPdf}
+              onRefreshAssignments={refreshSavedAssignments}
             />
           ) : (
             <StudentDashboard
+              assignedWorks={assignedWorks}
+              currentStudentId={currentStudentId}
+              currentStudentName={DEMO_STUDENTS.find((s) => s.studentId === currentStudentId)?.name ?? null}
               savedRuns={savedRuns}
               onOpenAssignment={() => handleSwitchMode("student")}
               onOpenChallenges={() => handleSwitchMode("challenge")}
@@ -1059,6 +1137,7 @@ const WorkflowManager: React.FC = () => {
               onLoadLectureExample={handleLoadLectureExample}
               onOpenSavedRuns={() => setSavedRunsOpen(true)}
               onOpenHelp={() => setShowHelpModal(true)}
+              onOpenAssignedWork={handleOpenAssignedWork}
             />
           )}
           <input

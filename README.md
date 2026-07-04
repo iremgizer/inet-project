@@ -63,7 +63,63 @@ inet-project/
 
 The credentials are defined in `frontend/src/utils/demoAuth.ts`.
 
+### Demo student roster
+
+After logging in as a student, the app asks you to choose a demo student profile:
+
+| Student ID | Name |
+|---|---|
+| s001 | Alice Student |
+| s002 | Bob Student |
+| s003 | Charlie Student |
+
+The roster is defined in `frontend/src/utils/demoUsers.ts`. Each student sees only the work their teacher has assigned to them (or work assigned to all students).
+
 ---
+
+## Teacher Workflow
+
+1. Log in as **Teacher** and open the Teacher Dashboard
+2. Go to **Assignments** tab → click **Create New Assignment** to open the Teacher Workspace
+3. Fill in title, topic, starter network, locked fields, task prompt, and expected solution
+4. Click **Save** (requires MongoDB) and optionally **Export JSON** to get `assignment.json`
+5. Back on the dashboard, click **Assign** next to a saved assignment, choose which students receive it and an optional due date, then click **Assign**
+6. To export a PDF version, click **PDF** (student copy, no answer) or **PDF+Ans** (teacher copy with expected solution)
+7. Use the **Assigned Work** tab to see which work has been distributed and to whom
+
+## Student Workflow
+
+1. Log in as **Student**, choose your demo profile (Alice, Bob, or Charlie)
+2. Open **My Work** tab — any work your teacher has assigned appears here
+3. Click **Open** on an assignment to load it into the Student Workspace (requires MongoDB)
+4. Alternatively, import an `assignment.json` directly from **My Assignments** if received by email or file share
+5. Solve the task on the canvas, run the simulation, and fill in any required answers
+6. Click **Export Submission** to save a `submission.json` file and send it to your teacher
+
+## Assignment Distribution
+
+Teachers can assign saved assignments to all students or to specific students. The assignment distribution model:
+
+```
+AssignedWork {
+  workType:   "assignment" | "challenge"
+  workId:     assignmentId from MongoDB
+  assignedTo: "all" | string[]    // studentId[] from the demo roster
+  assignedAt: ISO timestamp
+  dueDate?:   ISO date (optional)
+}
+```
+
+Assigned work is stored in the browser's `localStorage` so it persists across sessions on the same machine. In production this would be server-side.
+
+## PDF Export
+
+Teacher users can export any saved assignment as a PDF directly from the Assignments tab:
+
+- **PDF** — student version (no expected solution)
+- **PDF+Ans** — teacher version (includes expected solution, grading rules, marked with a red banner)
+
+PDF generation is done client-side with [jsPDF](https://github.com/parallax/jsPDF). No server or external service is involved.
 
 ## JSON Workflow
 
@@ -253,4 +309,18 @@ Run Simulation     — execute routing and view link utilization results
   ↓
 Replay Trace       — step through the algorithm's decisions one event at a time
 ```
+
+---
+
+## Future Production Work
+
+This is a university course prototype. Before any real deployment the following are required:
+
+- **Real authentication** — replace `demoAuth.ts` with JWT or institutional SSO (e.g. Shibboleth / OAuth)
+- **Database-backed user management** — store users, roles, and course enrolments in MongoDB or PostgreSQL instead of a hardcoded list
+- **Server-side assignment distribution** — move `assignedWorks` from `localStorage` to a `/assigned-work` API endpoint with per-student access control
+- **Submission queue** — add a backend route for students to submit work; replace the current file-export-and-email flow
+- **Grade book integration** — connect submission scores to a course LMS (Moodle, Canvas) via LTI or REST
+- **Secure file sharing** — replace manual `assignment.json` distribution with signed download links from the backend
+- **Scalability** — the current in-memory Python backend has no concurrency limits; add worker processes and connection pooling for classroom-scale load
 
