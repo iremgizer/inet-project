@@ -21,7 +21,11 @@ import ChallengeWorkspacePage from "../pages/ChallengeWorkspacePage";
 import JsonHelpModal from "./JsonHelpModal";
 import { useToast } from "./Toast";
 import { UserRole } from "../utils/demoAuth";
-import { simulateNetwork, listSavedRuns, getSavedRun, deleteSavedRun, listAssignments, saveAssignment } from "../api/simulationApi";
+import { AssignedWork } from "../types/classroom";
+import { DEMO_STUDENTS } from "../utils/demoUsers";
+import { loadAssignedWorks, saveAssignedWorks, loadCurrentStudentId, saveCurrentStudentId } from "../utils/classroomStorage";
+import { exportAssignmentPdf } from "../utils/pdfExport";
+import { simulateNetwork, listSavedRuns, getSavedRun, deleteSavedRun, listAssignments, saveAssignment, getAssignment } from "../api/simulationApi";
 import { triangleTemplate } from "../utils/topologyTemplates";
 import { applyAutoLayout, generateRandomTopology, generateTopology, RandomGraphConfig, TopologySize } from "../utils/generatedTopologies";
 import {
@@ -41,6 +45,11 @@ import {
 } from "../utils/assignmentJson";
 import { gradeChallenge } from "../utils/challengeGrading";
 import { resolveHints } from "../utils/challengeHints";
+import { EXAMPLE_CHALLENGES } from "../utils/exampleChallenges";
+import {
+  ensureDemoClassroomData, resetDemoClassroomData,
+  loadDemoAssignedWorks, loadDemoAssignmentSummaries,
+} from "../utils/demoClassroomSeed";
 import { saveChallengeAttempt } from "../api/simulationApi";
 import { LectureExample } from "../utils/lectureExamples";
 import {
@@ -134,7 +143,9 @@ const WorkflowManager: React.FC = () => {
   // ── Classroom mode ────────────────────────────────────────────────────────
   const [appMode, setAppMode] = useState<AppMode>("lab");
   const [teacherDraft, setTeacherDraft] = useState<Partial<Assignment>>(newAssignmentDraft());
-  const [savedAssignments, setSavedAssignments] = useState<AssignmentSummary[]>([]);
+  const [savedAssignments, setSavedAssignments] = useState<AssignmentSummary[]>(
+    () => loadDemoAssignmentSummaries()
+  );
   const [activeAssignment, setActiveAssignment] = useState<Assignment | null>(null);
   const [activeSubmission, setActiveSubmission] = useState<StudentSubmission | null>(null);
   const [gradingResult, setGradingResult] = useState<GradingResult | null>(null);
@@ -159,6 +170,17 @@ const WorkflowManager: React.FC = () => {
   // ── Auth ──────────────────────────────────────────────────────────────────
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
+
+  // ── Classroom distribution ─────────────────────────────────────────────────
+  const [assignedWorks, setAssignedWorks] = useState<AssignedWork[]>(() => {
+    ensureDemoClassroomData();
+    const user = loadAssignedWorks();
+    const demo = loadDemoAssignedWorks();
+    // Merge: demo works first, user-added works appended (dedup by assignedWorkId)
+    const seen = new Set(demo.map((w) => w.assignedWorkId));
+    return [...demo, ...user.filter((w) => !seen.has(w.assignedWorkId))];
+  });
+  const [currentStudentId, setCurrentStudentId] = useState<string | null>(() => loadCurrentStudentId());
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const traceEvents = simulationResult?.traceEvents ?? [];
@@ -305,14 +327,21 @@ const WorkflowManager: React.FC = () => {
     setAppMode("lab");
   }, []);
 
-  const handleLogin = useCallback((role: UserRole) => {
+  const handleLogin = useCallback((role: UserRole, studentId?: string) => {
     setUserRole(role);
+    if (studentId) {
+      setCurrentStudentId(studentId);
+      saveCurrentStudentId(studentId);
+    }
     setCurrentStep(0);
     setAppMode("lab");
-  }, []);
+    if (role === "teacher") refreshSavedAssignments(); // eslint-disable-line
+  }, []); // eslint-disable-line
 
   const handleLogout = useCallback(() => {
     setUserRole(null);
+    setCurrentStudentId(null);
+    saveCurrentStudentId(null);
     setCurrentStep(0);
     setAppMode("lab");
     setNetwork({ nodes: [], links: [], demands: [], topologyType: "custom", isDirected: false });
@@ -466,7 +495,15 @@ const WorkflowManager: React.FC = () => {
   }
 
   async function refreshSavedAssignments() {
-    try { setSavedAssignments(await listAssignments()); } catch { /* MongoDB offline */ }
+    const demo = loadDemoAssignmentSummaries();
+    try {
+      const remote = await listAssignments();
+      // Merge: demo summaries always present; remote summaries appended (dedup by assignmentId)
+      const seen = new Set(demo.map((a) => a.assignmentId));
+      setSavedAssignments([...demo, ...remote.filter((a) => !seen.has(a.assignmentId))]);
+    } catch {
+      setSavedAssignments(demo); // MongoDB offline — show demo only
+    }
   }
 
   // ── Classroom handlers ────────────────────────────────────────────────────
@@ -712,6 +749,82 @@ const WorkflowManager: React.FC = () => {
     }
   }, [toast]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Classroom assignment distribution ─────────────────────────────────────
+
+  const handleAssignWork = useCallback((work: AssignedWork) => {
+    setAssignedWorks((prev) => {
+      const updated = [...prev, work];
+      saveAssignedWorks(updated);
+      return updated;
+    });
+    const target =
+      work.assignedTo === "all"
+        ? "all students"
+        : `${(work.assignedTo as string[]).length} student(s)`;
+    toast(`Assigned "${work.workTitle}" to ${target}.`, "success");
+  }, [toast]);
+
+  const handleExportAssignmentById = useCallback((assignmentId: string) => {
+    const local = EXAMPLE_CHALLENGES.find((c) => c.assignmentId === assignmentId);
+    if (local) { downloadAssignmentJson(local); toast("Assignment JSON exported.", "success"); return; }
+    getAssignment(assignmentId)
+      .then((a) => { downloadAssignmentJson(a); toast("Assignment JSON exported.", "success"); })
+      .catch(() => toast("Assignment not found. Is MongoDB running?", "error"));
+  }, [toast]); // eslint-disable-line
+
+  const handleExportAssignmentPdf = useCallback((assignmentId: string, includeAnswer: boolean) => {
+    const local = EXAMPLE_CHALLENGES.find((c) => c.assignmentId === assignmentId);
+    if (local) { exportAssignmentPdf(local, { includeAnswer }); toast("PDF exported.", "success"); return; }
+    getAssignment(assignmentId)
+      .then((a) => { exportAssignmentPdf(a, { includeAnswer }); toast("PDF exported.", "success"); })
+      .catch(() => toast("Assignment not found for PDF export. Is MongoDB running?", "error"));
+  }, [toast]); // eslint-disable-line
+
+  const handleOpenAssignedWork = useCallback(async (work: AssignedWork) => {
+    if (work.workType === "challenge") {
+      // Load directly from EXAMPLE_CHALLENGES — no MongoDB needed
+      const found = EXAMPLE_CHALLENGES.find((c) => c.assignmentId === work.workId);
+      setCurrentAttempt(null);
+      setChallengeGradingResult(null);
+      setAttemptHistory([]);
+      setHintsRevealed(0);
+      setAttemptNumber(1);
+      setSimulationResult(null);
+      setReplayMode(null);
+      setIsTraceMode(false);
+      setIsPlaying(false);
+      if (found) {
+        setActiveAssignment(found);
+        setNetwork(structuredClone(found.starterNetwork));
+        setCurrentStep(1);
+        toast(`Opened "${found.title}".`, "success");
+      } else {
+        setActiveAssignment(null);
+      }
+      setAppMode("challenge");
+    } else {
+      // Regular assignment — try MongoDB, fall back with error message
+      try {
+        const assignment = await getAssignment(work.workId);
+        setActiveAssignment(assignment);
+        setNetwork(structuredClone(assignment.starterNetwork));
+        setActiveSubmission(createSubmissionTemplate(assignment));
+        setSimulationResult(null);
+        setGradingResult(null);
+        setCurrentAttempt(null);
+        setChallengeGradingResult(null);
+        setAttemptHistory([]);
+        setHintsRevealed(0);
+        setAttemptNumber(1);
+        setCurrentStep(1);
+        setAppMode(assignment.mode === "challenge" ? "challenge" : "student");
+        toast(`Assignment "${assignment.title}" loaded.`, "success");
+      } catch {
+        toast("Could not load assignment. Is MongoDB running?", "error");
+      }
+    }
+  }, [toast]); // eslint-disable-line
+
   // ── Derived for panels ────────────────────────────────────────────────────
 
   const selectedNode = selectedType === "node"
@@ -795,6 +908,29 @@ const WorkflowManager: React.FC = () => {
     setIsTraceMode(false);
     setIsPlaying(false);
   }, []); // eslint-disable-line
+
+  const handleOpenChallengeById = useCallback((workId: string) => {
+    const found = EXAMPLE_CHALLENGES.find((c) => c.assignmentId === workId);
+    if (!found) { toast(`Challenge "${workId}" not found in library.`, "error"); return; }
+    clearChallengeState();
+    setActiveAssignment(found);
+    setNetwork(structuredClone(found.starterNetwork));
+    setCurrentStep(1);
+    setAppMode("challenge");
+    toast(`Opened "${found.title}" in Challenge Mode.`, "success");
+  }, [clearChallengeState, toast]); // eslint-disable-line
+
+  const handleResetDemoData = useCallback(() => {
+    resetDemoClassroomData();
+    const demo = loadDemoAssignedWorks();
+    const user = loadAssignedWorks();
+    const seen = new Set(demo.map((w) => w.assignedWorkId));
+    const merged = [...demo, ...user.filter((w) => !seen.has(w.assignedWorkId))];
+    setAssignedWorks(merged);
+    saveAssignedWorks(user); // keep user-assigned works intact
+    setSavedAssignments(loadDemoAssignmentSummaries());
+    toast("Demo data reset to defaults.", "success");
+  }, [toast]); // eslint-disable-line
 
   const handleStartReplay = useCallback(() => {
     setIsTraceMode(true);
@@ -1023,7 +1159,9 @@ const WorkflowManager: React.FC = () => {
               </button>
               <span className="topbar-role-badge">
                 {userRole === "teacher" ? <BookOpen size={11} /> : <GraduationCap size={11} />}
-                {userRole === "teacher" ? "Teacher" : "Student"}
+                {userRole === "teacher"
+                  ? "Teacher"
+                  : (DEMO_STUDENTS.find((s) => s.studentId === currentStudentId)?.name?.split(" ")[0] ?? "Student")}
               </span>
               <button className="topbar-logout-btn" onClick={handleLogout} title="Sign out">
                 <LogOut size={13} /> Sign out
@@ -1040,6 +1178,8 @@ const WorkflowManager: React.FC = () => {
             <LandingPage onLogin={handleLogin} />
           ) : userRole === "teacher" ? (
             <TeacherDashboard
+              savedAssignments={savedAssignments}
+              assignedWorks={assignedWorks}
               savedRuns={savedRuns}
               onCreateAssignment={() => handleSwitchMode("teacher")}
               onBuildLab={handleGoToLab}
@@ -1049,9 +1189,18 @@ const WorkflowManager: React.FC = () => {
               onImportJson={() => homeImportRef.current?.click()}
               onDownloadExampleTopology={handleDownloadExample}
               onOpenHelp={() => setShowHelpModal(true)}
+              onAssignWork={handleAssignWork}
+              onExportAssignmentJson={handleExportAssignmentById}
+              onExportAssignmentPdf={handleExportAssignmentPdf}
+              onRefreshAssignments={refreshSavedAssignments}
+              onOpenChallenge={handleOpenChallengeById}
+              onResetDemoData={handleResetDemoData}
             />
           ) : (
             <StudentDashboard
+              assignedWorks={assignedWorks}
+              currentStudentId={currentStudentId}
+              currentStudentName={DEMO_STUDENTS.find((s) => s.studentId === currentStudentId)?.name ?? null}
               savedRuns={savedRuns}
               onOpenAssignment={() => handleSwitchMode("student")}
               onOpenChallenges={() => handleSwitchMode("challenge")}
@@ -1059,6 +1208,8 @@ const WorkflowManager: React.FC = () => {
               onLoadLectureExample={handleLoadLectureExample}
               onOpenSavedRuns={() => setSavedRunsOpen(true)}
               onOpenHelp={() => setShowHelpModal(true)}
+              onOpenAssignedWork={handleOpenAssignedWork}
+              onOpenChallenge={handleOpenChallengeById}
             />
           )}
           <input

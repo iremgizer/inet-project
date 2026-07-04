@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import {
   GraduationCap, Play, Send, RotateCcw, Download, Upload,
   Lightbulb, ChevronDown, ChevronUp, Clock, Target, AlertCircle,
-  GitCompareArrows,
+  GitCompareArrows, CheckCircle2, X, BookOpen,
 } from "lucide-react";
 import { Assignment } from "../types/assignment";
 import {
@@ -15,7 +15,20 @@ import { EXAMPLE_CHALLENGES } from "../utils/exampleChallenges";
 import FeedbackPanel from "../components/FeedbackPanel";
 import SolutionComparePanel from "../components/SolutionComparePanel";
 
-// ── Difficulty chip ───────────────────────────────────────────────────────────
+// ── Field map: teacher → student UI ──────────────────────────────────────────
+// title                              → quiz header
+// challengeConfig.difficulty         → difficulty badge
+// challengeConfig.expectedTimeMinutes→ time badge
+// challengeConfig.learningObjectives → topic chips
+// studentTask.prompt                 → Question card
+// studentTask.instructions           → "How to solve" collapsible
+// challengeConfig.target             → Goal card
+// challengeConfig.hints              → Hints section (locked / revealed)
+// studentTask.answerFormatDescription→ answer helper text
+// challengeConfig.editableFields     → "You can edit" note in Goal card
+// expectedSolution.explanation       → shown after correct (Official solution)
+
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const DIFF_COLOR: Record<string, string> = {
   beginner:     "chip--green",
@@ -23,156 +36,355 @@ const DIFF_COLOR: Record<string, string> = {
   advanced:     "chip--red",
 };
 
+const STEP_LABELS = ["Read", "Run", "Answer", "Submit", "Learn"] as const;
+
+// ── Progress rail ─────────────────────────────────────────────────────────────
+
+const ProgressRail: React.FC<{ phase: number }> = ({ phase }) => (
+  <div className="cqv-rail">
+    {STEP_LABELS.map((label, i) => (
+      <React.Fragment key={label}>
+        <div className={`cqv-rail-step${i <= phase ? " cqv-rail-step--done" : ""}${i === phase ? " cqv-rail-step--active" : ""}`}>
+          <div className="cqv-rail-dot">
+            {i < phase ? <CheckCircle2 size={9} /> : <span>{i + 1}</span>}
+          </div>
+          <span className="cqv-rail-label">{label}</span>
+        </div>
+        {i < STEP_LABELS.length - 1 && (
+          <div className={`cqv-rail-connector${i < phase ? " cqv-rail-connector--done" : ""}`} />
+        )}
+      </React.Fragment>
+    ))}
+  </div>
+);
+
 // ── Objective chip ────────────────────────────────────────────────────────────
 
 const ObjectiveChip: React.FC<{ obj: LearningObjective }> = ({ obj }) => (
-  <span className="challenge-obj-chip">{obj}</span>
+  <span className="cqv-obj-chip">{obj}</span>
 );
 
-// ── Answer forms (per challenge type) ────────────────────────────────────────
+// ── Goal text ─────────────────────────────────────────────────────────────────
+
+function goalText(type: string, target: Record<string, unknown>): string {
+  switch (type) {
+    case "REDUCE_CONGESTION":
+    case "FIND_ECMP_WEIGHTS":
+      return `Achieve max link utilization ≤ ${(((target.maxUtilizationBelow as number) ?? 1) * 100).toFixed(0)}%`;
+    case "IDENTIFY_CONGESTED_LINKS":
+      return "Identify all links where traffic load exceeds capacity";
+    case "COMPUTE_DV_TABLE":
+      return "Compute the correct path cost and next hop from the routing table";
+    case "COMPUTE_ECMP_SPLIT":
+      return "Compute the traffic share for each equal-cost path";
+    case "PREDICT_SHORTEST_PATH":
+      return "Predict the correct shortest path through the network";
+    default:
+      return "Complete the challenge";
+  }
+}
+
+// ── Hint card ─────────────────────────────────────────────────────────────────
+
+type HintState = "locked" | "next" | "revealed";
+
+const HintCard: React.FC<{
+  hint: ReturnType<typeof resolveHints>[0];
+  state: HintState;
+  index: number;
+  onReveal: () => void;
+  disabled: boolean;
+}> = ({ hint, state, index, onReveal, disabled }) => {
+  if (state === "revealed") {
+    return (
+      <div className={`cqv-hint-card cqv-hint-card--revealed cqv-hint-card--${hint.level}`}>
+        <div className="cqv-hint-header">
+          <Lightbulb size={11} className="cqv-hint-icon" />
+          <span className="cqv-hint-num">Hint {index + 1}</span>
+          <span className="cqv-hint-level">{hint.level.replace("_", " ")}</span>
+        </div>
+        <p className="cqv-hint-title">{hint.title}</p>
+        <p className="cqv-hint-text">{hint.text}</p>
+        {hint.relatedLinkIds.length > 0 && (
+          <div className="cqv-hint-tags">
+            Links: {hint.relatedLinkIds.map(id => (
+              <span key={id} className="fb-tag fb-tag--link">{id}</span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (state === "next") {
+    return (
+      <button className="cqv-hint-unlock" onClick={onReveal} disabled={disabled}>
+        <Lightbulb size={11} />
+        <span>Reveal hint {index + 1} — {hint.title}</span>
+        {hint.revealCostPenalty > 0 && (
+          <span className="cqv-hint-cost">−{hint.revealCostPenalty}pts</span>
+        )}
+      </button>
+    );
+  }
+
+  return (
+    <div className="cqv-hint-locked">
+      <Lightbulb size={10} />
+      <span>Hint {index + 1}</span>
+    </div>
+  );
+};
+
+// ── Answer forms ──────────────────────────────────────────────────────────────
 
 interface AnswerFormProps {
   challengeType: string;
   answers: Record<string, unknown>;
   simResult: SimulationResult | null;
+  assignment: Assignment;
   onChange: (key: string, val: unknown) => void;
 }
 
-const AnswerForm: React.FC<AnswerFormProps> = ({ challengeType, answers, simResult, onChange }) => {
+const AnswerForm: React.FC<AnswerFormProps> = ({
+  challengeType, answers, simResult, assignment, onChange,
+}) => {
+  const links = assignment.starterNetwork.links;
+  const nodes = assignment.starterNetwork.nodes;
+
+  // ── Identify Congested Links: checkbox list ──────────────────────────────────
   if (challengeType === "IDENTIFY_CONGESTED_LINKS") {
+    const selectedIds: string[] = (() => {
+      const raw = answers.congestedLinks;
+      if (Array.isArray(raw)) return raw as string[];
+      if (typeof raw === "string") return raw.split(",").map(s => s.trim()).filter(Boolean);
+      return [];
+    })();
+
+    const toggle = (id: string) => {
+      const next = selectedIds.includes(id)
+        ? selectedIds.filter(l => l !== id)
+        : [...selectedIds, id];
+      onChange("congestedLinks", next);
+    };
+
     return (
-      <div className="challenge-answer-form">
-        <label className="challenge-answer-label">Congested link ID(s)</label>
-        <input
-          className="challenge-answer-input"
-          type="text"
-          placeholder="e.g. v-t  (comma-separate multiple)"
-          value={(answers.congestedLinks as string) ?? ""}
-          onChange={(e) => onChange("congestedLinks", e.target.value)}
-        />
-        {simResult && simResult.linkResults.some((l) => l.isCongested) && (
-          <div className="challenge-answer-hint">
-            Sim result: {simResult.linkResults.filter((l) => l.isCongested).map((l) => l.linkId).join(", ")} shown in red.
-          </div>
+      <div className="cqv-icl-form">
+        <p className="cqv-answer-helper">Select the links you believe are congested — where load exceeds capacity:</p>
+        <div className="cqv-link-checks">
+          {links.map(link => {
+            const isSelected = selectedIds.includes(link.id);
+            const simLink = simResult?.linkResults.find(l => l.linkId === link.id);
+            const fromLabel = nodes.find(n => n.id === link.source)?.label ?? link.source;
+            const toLabel   = nodes.find(n => n.id === link.target)?.label ?? link.target;
+            return (
+              <label
+                key={link.id}
+                className={`cqv-link-option${isSelected ? " cqv-link-option--selected" : ""}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => toggle(link.id)}
+                />
+                <span className="cqv-link-label">{fromLabel} → {toLabel}</span>
+                <span className="cqv-link-id">({link.id})</span>
+                {simResult && simLink && (
+                  <span className={`cqv-link-util${simLink.isCongested ? " cqv-link-util--over" : ""}`}>
+                    {(simLink.utilization * 100).toFixed(0)}%
+                  </span>
+                )}
+              </label>
+            );
+          })}
+        </div>
+        {simResult?.linkResults.some(l => l.isCongested) && (
+          <p className="cqv-answer-helper cqv-answer-helper--hint">
+            Congested links appear red/orange on the canvas and in the Results panel.
+          </p>
         )}
       </div>
     );
   }
 
+  // ── Compute DV Table: structured inputs ──────────────────────────────────────
   if (challengeType === "COMPUTE_DV_TABLE") {
+    const target = assignment.challengeConfig?.target;
+    const expected = target?.expectedDVEntries ?? [];
+    const src = expected[0] ? (nodes.find(n => n.id === expected[0].nodeId)?.label ?? expected[0].nodeId) : null;
+    const dst = expected[0] ? (nodes.find(n => n.id === expected[0].destinationId)?.label ?? expected[0].destinationId) : null;
+
     return (
-      <div className="challenge-answer-form">
-        <label className="challenge-answer-label">Shortest path cost (A → D)</label>
-        <input
-          className="challenge-answer-input"
-          type="number"
-          placeholder="e.g. 30"
-          value={(answers.pathCost as string) ?? ""}
-          onChange={(e) => onChange("pathCost", e.target.value)}
-        />
-        <label className="challenge-answer-label" style={{ marginTop: 8 }}>Next-hop node label</label>
-        <input
-          className="challenge-answer-input"
-          type="text"
-          placeholder="e.g. B"
-          value={(answers.nextHop as string) ?? ""}
-          onChange={(e) => onChange("nextHop", e.target.value)}
-        />
-        {simResult?.distanceVectorTable && (
-          <div className="challenge-answer-hint">
-            DV table available — check the right panel for routing entries.
+      <div className="cqv-dv-form">
+        {src && dst && (
+          <p className="cqv-answer-helper">
+            Compute the shortest path from <strong>{src}</strong> to <strong>{dst}</strong>:
+          </p>
+        )}
+        <div className="cqv-dv-row">
+          <div className="cqv-dv-field">
+            <label className="cqv-field-label">Total path cost</label>
+            <input
+              className="cqv-input"
+              type="number"
+              placeholder="e.g. 30"
+              value={(answers.pathCost as string) ?? ""}
+              onChange={e => onChange("pathCost", e.target.value)}
+            />
           </div>
+          <div className="cqv-dv-field">
+            <label className="cqv-field-label">Next-hop node</label>
+            <input
+              className="cqv-input"
+              type="text"
+              placeholder="e.g. B"
+              value={(answers.nextHop as string) ?? ""}
+              onChange={e => onChange("nextHop", e.target.value)}
+            />
+          </div>
+        </div>
+        {simResult?.distanceVectorTable && (
+          <p className="cqv-answer-helper cqv-answer-helper--hint">
+            The Routing Table panel on the right shows the DV entries — use it to verify.
+          </p>
+        )}
+        {assignment.studentTask.answerFormatDescription && (
+          <p className="cqv-answer-helper">{assignment.studentTask.answerFormatDescription}</p>
         )}
       </div>
     );
   }
 
+  // ── Reduce Congestion / Find ECMP Weights: utilization feedback ───────────────
   if (challengeType === "REDUCE_CONGESTION" || challengeType === "FIND_ECMP_WEIGHTS") {
     const util = simResult?.maxUtilization;
+    const targetUtil = assignment.challengeConfig?.target.maxUtilizationBelow ?? 1.0;
+
     return (
-      <div className="challenge-answer-form">
-        <p className="challenge-answer-hint">
-          Adjust link weights in the canvas, then click <strong>Run Attempt</strong>.
-          The max utilization is captured automatically from the simulation result.
+      <div className="cqv-util-form">
+        <p className="cqv-answer-helper">
+          Adjust link weights in the canvas, then click <strong>Run simulation</strong> to check utilization.
         </p>
-        {util !== undefined && (
-          <div className={`challenge-util-display ${util <= 1.0 ? "challenge-util-display--ok" : "challenge-util-display--bad"}`}>
-            Current max utilization: <strong>{(util * 100).toFixed(1)}%</strong>
-            {util <= 1.0
-              ? " ✓ within target"
-              : ` — target ≤ ${((simResult ? 1.0 : 100)).toFixed(0)}%`}
+        {util !== undefined ? (
+          <div className={`cqv-util-bar${util <= targetUtil ? " cqv-util-bar--ok" : " cqv-util-bar--bad"}`}>
+            <div className="cqv-util-bar-info">
+              <span className="cqv-util-bar-label">Max utilization</span>
+              <span className="cqv-util-bar-target">target ≤ {(targetUtil * 100).toFixed(0)}%</span>
+            </div>
+            <div className="cqv-util-bar-value">
+              {util <= targetUtil && <CheckCircle2 size={13} />}
+              <strong>{(util * 100).toFixed(1)}%</strong>
+            </div>
+          </div>
+        ) : (
+          <div className="cqv-util-pending">Run simulation to see current max utilization</div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Compute ECMP Split ────────────────────────────────────────────────────────
+  if (challengeType === "COMPUTE_ECMP_SPLIT") {
+    const paths = simResult?.pathResults.flatMap((pr, di) =>
+      pr.paths.map((p, pi) => ({ key: `path${di * 10 + pi}`, label: p.nodes.join(" → "), share: p.trafficShare }))
+    ) ?? [];
+
+    return (
+      <div className="cqv-ecmp-form">
+        <p className="cqv-answer-helper">
+          Enter the traffic share (0–1) for each equal-cost path. ECMP splits demand equally among shortest paths.
+        </p>
+        {paths.length > 0 ? (
+          <div className="cqv-ecmp-paths">
+            {paths.map((path, i) => {
+              const splits = (answers.trafficSplits as Record<string, number>) ?? {};
+              return (
+                <div key={path.key} className="cqv-ecmp-path-row">
+                  <span className="cqv-ecmp-path-label">Path {i + 1}: {path.label}</span>
+                  <input
+                    className="cqv-input cqv-input--narrow"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="1"
+                    placeholder="0.5"
+                    value={splits[path.key] ?? ""}
+                    onChange={e => {
+                      const v = parseFloat(e.target.value);
+                      const next = { ...splits, [path.key]: isNaN(v) ? undefined : v } as Record<string, number>;
+                      onChange("trafficSplits", next);
+                      onChange("trafficSharesRaw", Object.values(next).join(", "));
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="cqv-ecmp-paths">
+            <p className="cqv-answer-helper cqv-answer-helper--hint">Run simulation first — paths will appear here.</p>
+            <input
+              className="cqv-input"
+              type="text"
+              placeholder="e.g. 0.5, 0.5  (one share per path)"
+              value={(answers.trafficSharesRaw as string) ?? ""}
+              onChange={e => {
+                const vals = e.target.value.split(",").map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
+                onChange("trafficSharesRaw", e.target.value);
+                const splits: Record<string, number> = {};
+                vals.forEach((v, i) => { splits[`path${i}`] = v; });
+                onChange("trafficSplits", splits);
+              }}
+            />
           </div>
         )}
       </div>
     );
   }
 
-  if (challengeType === "COMPUTE_ECMP_SPLIT") {
-    return (
-      <div className="challenge-answer-form">
-        <label className="challenge-answer-label">Traffic share for each path (0–1, comma-separated)</label>
-        <input
-          className="challenge-answer-input"
-          type="text"
-          placeholder="e.g. 0.5, 0.5  (one value per path)"
-          value={(answers.trafficSharesRaw as string) ?? ""}
-          onChange={(e) => {
-            const vals = e.target.value.split(",").map((s) => parseFloat(s.trim())).filter((n) => !isNaN(n));
-            onChange("trafficSharesRaw", e.target.value);
-            // Attempt to parse demand key; for simplicity key=demand0,demand1,...
-            const splits: Record<string, number> = {};
-            vals.forEach((v, i) => { splits[`path${i}`] = v; });
-            onChange("trafficSplits", splits);
-          }}
-        />
-        <p className="challenge-answer-hint">Enter one traffic share per equal-cost path (e.g. 0.5 for 50%).</p>
-      </div>
-    );
-  }
-
+  // ── Predict Shortest Path ─────────────────────────────────────────────────────
   if (challengeType === "PREDICT_SHORTEST_PATH") {
     return (
-      <div className="challenge-answer-form">
-        <label className="challenge-answer-label">Shortest path (node IDs or labels, comma-separated)</label>
+      <div className="cqv-path-form">
+        <label className="cqv-field-label">
+          Shortest path — enter node labels separated by commas or arrows
+        </label>
         <input
-          className="challenge-answer-input"
+          className="cqv-input"
           type="text"
-          placeholder="e.g. A, B, C, D"
+          placeholder="e.g. A, B, C, D  or  A → B → C → D"
           value={(answers.predictedPath as string) ?? ""}
-          onChange={(e) => onChange("predictedPath", e.target.value)}
+          onChange={e => onChange("predictedPath", e.target.value)}
         />
+        {assignment.studentTask.answerFormatDescription && (
+          <p className="cqv-answer-helper">{assignment.studentTask.answerFormatDescription}</p>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="challenge-answer-form">
-      <p className="challenge-answer-hint">Run the simulation, then observe the results panel.</p>
-    </div>
+    <p className="cqv-answer-helper">Run the simulation, then observe the results in the right panel.</p>
   );
 };
 
 // ── Attempt history row ───────────────────────────────────────────────────────
 
 const HistoryRow: React.FC<{ entry: AttemptHistoryEntry }> = ({ entry }) => (
-  <div className={`challenge-history-row ${entry.isCorrect ? "challenge-history-row--pass" : ""}`}>
-    <span className="challenge-history-num">#{entry.attemptNumber}</span>
-    <span className="challenge-history-score">{entry.score}/{entry.maxScore}</span>
+  <div className={`cqv-history-row${entry.isCorrect ? " cqv-history-row--pass" : ""}`}>
+    <span className="cqv-history-num">#{entry.attemptNumber}</span>
+    <span className="cqv-history-score">{entry.score}/{entry.maxScore}</span>
     {entry.maxUtilization !== undefined && (
-      <span className="challenge-history-util">
-        {(entry.maxUtilization * 100).toFixed(1)}% util
-      </span>
+      <span className="cqv-history-util">{(entry.maxUtilization * 100).toFixed(1)}%</span>
     )}
-    {entry.hintsUsed > 0 && (
-      <span className="challenge-history-hints">{entry.hintsUsed}h</span>
-    )}
-    <span className="challenge-history-time">
+    {entry.hintsUsed > 0 && <span className="cqv-history-hints">{entry.hintsUsed}h</span>}
+    <span className="cqv-history-time">
       {new Date(entry.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
     </span>
   </div>
 );
 
-// ── Import screen (when no assignment loaded) ─────────────────────────────────
+// ── Import / start screen ─────────────────────────────────────────────────────
 
 const ChallengeImportScreen: React.FC<{ onLoad: (a: Assignment) => void }> = ({ onLoad }) => {
   const [error, setError] = useState<string | null>(null);
@@ -200,21 +412,21 @@ const ChallengeImportScreen: React.FC<{ onLoad: (a: Assignment) => void }> = ({ 
 
       <label
         className={`student-drop-zone${dragging ? " student-drop-zone--drag" : ""}`}
-        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragOver={e => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
-        onDrop={(e) => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }}
+        onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }}
       >
         <Upload size={20} />
         <span>Drop challenge JSON here or click to browse</span>
         <input type="file" accept=".json" style={{ display: "none" }}
-          onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }} />
+          onChange={e => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }} />
       </label>
 
       {error && <div className="student-import-error"><AlertCircle size={13} /> {error}</div>}
 
       <div className="challenge-built-in-label">Or start from a built-in challenge</div>
       <div className="challenge-built-in-cards">
-        {EXAMPLE_CHALLENGES.map((ch) => (
+        {EXAMPLE_CHALLENGES.map(ch => (
           <button key={ch.assignmentId} className="challenge-built-in-card" onClick={() => onLoad(ch)}>
             <span className={`chip ${DIFF_COLOR[ch.challengeConfig?.difficulty ?? "beginner"]}`}>
               {ch.challengeConfig?.difficulty ?? "beginner"}
@@ -269,32 +481,23 @@ const ChallengeWorkspacePage: React.FC<ChallengeWorkspacePageProps> = ({
   onStartCompare,
   onExitReplay,
 }) => {
-  const [answers, setAnswers] = useState<Record<string, unknown>>(currentAttempt?.submittedAnswers ?? {});
+  const [answers, setAnswers] = useState<Record<string, unknown>>(
+    currentAttempt?.submittedAnswers ?? {},
+  );
+  const [showInstructions, setShowInstructions] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
 
-  if (!assignment) {
-    return <ChallengeImportScreen onLoad={onLoadAssignment} />;
-  }
+  if (!assignment) return <ChallengeImportScreen onLoad={onLoadAssignment} />;
 
   const config = assignment.challengeConfig;
   const hints = config ? resolveHints(config.challengeType, config.hints) : [];
   const attemptsUsed = attemptHistory.length;
   const attemptsLeft = config ? config.maxAttempts - attemptsUsed : Infinity;
   const exhausted = attemptsLeft <= 0;
-  const alreadyCorrect = attemptHistory.some((h) => h.isCorrect);
+  const alreadyCorrect = attemptHistory.some(h => h.isCorrect);
 
-  const handleAnswerChange = (key: string, val: unknown) => {
-    setAnswers((prev) => ({ ...prev, [key]: val }));
-  };
-
-  const handleSubmit = () => {
-    // For REDUCE_CONGESTION, auto-fill maxUtilization from sim result
-    const finalAnswers = { ...answers };
-    if (config?.challengeType === "REDUCE_CONGESTION" || config?.challengeType === "FIND_ECMP_WEIGHTS") {
-      finalAnswers.maxUtilization = simulationResult?.maxUtilization;
-    }
-    onSubmitAttempt(finalAnswers);
-  };
+  // Quiz phase: 0=Read, 1=Run(unused slot), 2=Answer, 3=Submit(unused), 4=Learn
+  const quizPhase: number = gradingResult ? 4 : simulationResult ? 2 : 0;
 
   const showSolution = (() => {
     if (!config) return false;
@@ -303,244 +506,283 @@ const ChallengeWorkspacePage: React.FC<ChallengeWorkspacePageProps> = ({
     return false;
   })();
 
-  return (
-    <div className="challenge-workspace">
-      {/* ── Header ── */}
-      <div className="challenge-header">
-        <div className="challenge-role-badge">
-          <GraduationCap size={12} /> Challenge Mode
-        </div>
-        <button className="student-clear-btn" onClick={onClearAssignment}>
-          Change challenge
-        </button>
-      </div>
+  const handleAnswerChange = (key: string, val: unknown) => {
+    setAnswers(prev => ({ ...prev, [key]: val }));
+  };
 
-      {/* ── Assignment info card ── */}
-      <div className="challenge-info-card">
-        <div className="challenge-meta-row">
+  const handleSubmit = () => {
+    const finalAnswers = { ...answers };
+    if (
+      config?.challengeType === "REDUCE_CONGESTION" ||
+      config?.challengeType === "FIND_ECMP_WEIGHTS"
+    ) {
+      finalAnswers.maxUtilization = simulationResult?.maxUtilization;
+    }
+    onSubmitAttempt(finalAnswers);
+  };
+
+  const hasTrace = (simulationResult?.traceEvents.length ?? 0) > 0;
+
+  return (
+    <div className="cqv-panel">
+
+      {/* ── Header ── */}
+      <div className="cqv-header">
+        <div className="cqv-header-top">
+          <div className="cqv-role-badge"><GraduationCap size={11} /> Challenge</div>
+          <button className="cqv-change-btn" onClick={onClearAssignment}>Change</button>
+        </div>
+        <h2 className="cqv-title">{assignment.title}</h2>
+        <div className="cqv-badges">
           {config && (
-            <span className={`chip ${DIFF_COLOR[config.difficulty]}`}>
-              {config.difficulty}
-            </span>
+            <span className={`chip ${DIFF_COLOR[config.difficulty]}`}>{config.difficulty}</span>
           )}
           <span className="chip chip--topic">{assignment.topic.replace("_", " ")}</span>
           {config?.expectedTimeMinutes && (
-            <span className="challenge-time-badge">
+            <span className="cqv-time-badge">
               <Clock size={10} /> ~{config.expectedTimeMinutes}m
             </span>
           )}
-          <span className="challenge-attempts-badge">
-            Attempt {attemptsUsed + 1}{config ? ` / ${config.maxAttempts}` : ""}
+          <span className="cqv-attempts-badge">
+            {attemptsLeft === Infinity
+              ? "Unlimited attempts"
+              : `${attemptsLeft} attempt${attemptsLeft !== 1 ? "s" : ""} left`}
           </span>
         </div>
-        <div className="challenge-title">{assignment.title}</div>
         {config?.learningObjectives && config.learningObjectives.length > 0 && (
-          <div className="challenge-objectives">
-            {config.learningObjectives.map((obj) => <ObjectiveChip key={obj} obj={obj} />)}
+          <div className="cqv-objectives">
+            {config.learningObjectives.map(obj => <ObjectiveChip key={obj} obj={obj} />)}
           </div>
         )}
       </div>
 
-      {/* ── Task prompt ── */}
-      <div className="challenge-task-section">
-        <div className="challenge-section-label">Task</div>
-        <p className="challenge-prompt">{assignment.studentTask.prompt}</p>
-        {assignment.studentTask.instructions && (
-          <div className="challenge-instructions">
-            {assignment.studentTask.instructions.split("\n").map((line, i) => (
-              <div key={i} className="challenge-instruction-line">{line}</div>
-            ))}
-          </div>
-        )}
-        {config && (
-          <div className="challenge-goal-card">
-            <Target size={11} />
-            <span>
-              {config.challengeType === "REDUCE_CONGESTION" || config.challengeType === "FIND_ECMP_WEIGHTS"
-                ? `Goal: max utilization ≤ ${((config.target.maxUtilizationBelow ?? 1) * 100).toFixed(0)}%`
-                : config.challengeType === "IDENTIFY_CONGESTED_LINKS"
-                  ? "Goal: identify all congested links"
-                  : config.challengeType === "COMPUTE_DV_TABLE"
-                    ? "Goal: compute cost and next hop correctly"
-                    : config.challengeType === "COMPUTE_ECMP_SPLIT"
-                      ? "Goal: compute traffic shares for each path"
-                      : "Goal: predict the correct shortest path"
-              }
-            </span>
+      {/* ── Progress rail ── */}
+      <ProgressRail phase={quizPhase} />
+
+      {/* ── Question card ── */}
+      <div className="cqv-question-card">
+        <div className="cqv-card-eyebrow">Question</div>
+        <p className="cqv-question-text">{assignment.studentTask.prompt}</p>
+      </div>
+
+      {/* ── Goal card ── */}
+      {config && (
+        <div className="cqv-goal-card">
+          <Target size={12} className="cqv-goal-icon" />
+          <div className="cqv-goal-body">
+            <div className="cqv-card-eyebrow">Goal</div>
+            <p className="cqv-goal-text">
+              {goalText(config.challengeType, config.target as Record<string, unknown>)}
+            </p>
             {config.editableFields.length > 0 && (
-              <span className="challenge-editable-badge">
-                Editable: {config.editableFields.join(", ")}
-              </span>
+              <div className="cqv-editable-note">
+                You can edit: {config.editableFields.join(", ")}
+              </div>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* ── How to solve (collapsible) ── */}
+      {assignment.studentTask.instructions && (
+        <div className="cqv-collapsible">
+          <button
+            className="cqv-collapsible-btn"
+            onClick={() => setShowInstructions(p => !p)}
+          >
+            <BookOpen size={11} />
+            <span>How to solve</span>
+            {showInstructions ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+          </button>
+          {showInstructions && (
+            <div className="cqv-collapsible-body">
+              {assignment.studentTask.instructions.split("\n").map((line, i) => (
+                <div key={i} className="cqv-instruction-line">{line}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Hints ── */}
       {hints.length > 0 && (
-        <div className="challenge-hints-section">
-          <div className="challenge-section-label">Hints</div>
+        <div className="cqv-hints-section">
+          <div className="cqv-section-label">
+            Hints <span className="cqv-hint-counter">({hintsRevealed}/{hints.length} revealed)</span>
+          </div>
           {hints.map((hint, idx) => {
-            const revealed = idx < hintsRevealed;
-            const isNext = idx === hintsRevealed;
+            const state: HintState =
+              idx < hintsRevealed ? "revealed"
+              : idx === hintsRevealed ? "next"
+              : "locked";
             return (
-              <div key={hint.hintId} className="challenge-hint-wrapper">
-                {revealed ? (
-                  <div className={`challenge-hint-card challenge-hint-card--${hint.level}`}>
-                    <div className="challenge-hint-header">
-                      <Lightbulb size={11} />
-                      <span className="challenge-hint-level">{hint.level.replace("_", " ")}</span>
-                      <span className="challenge-hint-title">{hint.title}</span>
-                    </div>
-                    <p className="challenge-hint-text">{hint.text}</p>
-                    {hint.relatedLinkIds.length > 0 && (
-                      <div className="challenge-hint-tags">
-                        Links: {hint.relatedLinkIds.map((id) => (
-                          <span key={id} className="fb-tag fb-tag--link">{id}</span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : isNext ? (
-                  <button
-                    className="challenge-hint-reveal-btn"
-                    onClick={onRevealHint}
-                    disabled={alreadyCorrect || exhausted}
-                  >
-                    <Lightbulb size={12} />
-                    Reveal hint {idx + 1}
-                    {hint.revealCostPenalty > 0 && (
-                      <span className="challenge-hint-penalty">
-                        −{hint.revealCostPenalty}pts
-                      </span>
-                    )}
-                  </button>
-                ) : null}
-              </div>
+              <HintCard
+                key={hint.hintId}
+                hint={hint}
+                state={state}
+                index={idx}
+                onReveal={onRevealHint}
+                disabled={alreadyCorrect || exhausted}
+              />
             );
           })}
         </div>
       )}
 
-      {/* ── Answer form ── */}
+      {/* ── Run simulation ── */}
+      <div className="cqv-run-section">
+        <button
+          className="btn-primary cqv-run-btn"
+          onClick={onRunAttempt}
+          disabled={exhausted && !alreadyCorrect}
+        >
+          <Play size={13} /> Run simulation
+        </button>
+        {!simulationResult && !gradingResult && (
+          <p className="cqv-run-hint">Run to see how traffic flows through the network</p>
+        )}
+        {simulationResult && !gradingResult && (
+          <p className="cqv-run-ok">
+            <CheckCircle2 size={11} /> Simulation complete — enter your answer below
+          </p>
+        )}
+      </div>
+
+      {/* ── Answer card ── */}
       {!exhausted && !alreadyCorrect && (
-        <div className="challenge-answer-section">
-          <div className="challenge-section-label">Your answer</div>
-          {config && (
-            <AnswerForm
-              challengeType={config.challengeType}
-              answers={answers}
-              simResult={simulationResult}
-              onChange={handleAnswerChange}
-            />
+        <div className={`cqv-answer-card${!simulationResult ? " cqv-answer-card--inactive" : ""}`}>
+          <div className="cqv-card-eyebrow">Your answer</div>
+          {!simulationResult ? (
+            <div className="cqv-answer-gate">
+              <AlertCircle size={12} /> Run simulation first to activate answer input
+            </div>
+          ) : (
+            config && (
+              <AnswerForm
+                challengeType={config.challengeType}
+                answers={answers}
+                simResult={simulationResult}
+                assignment={assignment}
+                onChange={handleAnswerChange}
+              />
+            )
           )}
         </div>
       )}
 
-      {/* ── Feedback ── */}
+      {/* ── Submit / Reset ── */}
+      {!exhausted && !alreadyCorrect && (
+        <div className="cqv-submit-row">
+          <button
+            className="btn-primary cqv-submit-btn"
+            onClick={handleSubmit}
+            disabled={!simulationResult}
+            title={!simulationResult ? "Run simulation first" : ""}
+          >
+            <Send size={13} /> Submit answer
+          </button>
+          <button className="btn-secondary btn-sm" onClick={onResetAttempt}>
+            <RotateCcw size={12} /> Reset
+          </button>
+        </div>
+      )}
+
+      {/* ── Status notices ── */}
+      {exhausted && !alreadyCorrect && (
+        <div className="cqv-notice cqv-notice--exhausted">
+          <AlertCircle size={12} /> All attempts used. Export your work and ask your teacher for review.
+        </div>
+      )}
+      {alreadyCorrect && (
+        <div className="cqv-notice cqv-notice--success">
+          <CheckCircle2 size={12} /> Challenge complete — well done!
+        </div>
+      )}
+
+      {/* ── Result card ── */}
       {gradingResult && (
-        <div className="challenge-feedback-section">
-          <div className="challenge-section-label">Feedback</div>
+        <div className={`cqv-result-card${gradingResult.isCorrect ? " cqv-result-card--correct" : " cqv-result-card--incorrect"}`}>
+          <div className="cqv-result-header">
+            <div className={`cqv-result-icon${gradingResult.isCorrect ? " cqv-result-icon--correct" : " cqv-result-icon--incorrect"}`}>
+              {gradingResult.isCorrect ? <CheckCircle2 size={18} /> : <X size={18} />}
+            </div>
+            <div className="cqv-result-body">
+              <div className="cqv-result-verdict">
+                {gradingResult.isCorrect ? "Correct!" : "Not quite"}
+              </div>
+              <div className="cqv-result-score-line">
+                {gradingResult.score} / {gradingResult.maxScore} pts
+                <span className="cqv-result-pct">({gradingResult.percentage}%)</span>
+                {gradingResult.hintsUsed > 0 && (
+                  <span className="cqv-result-hints-note">
+                    · {gradingResult.hintsUsed} hint{gradingResult.hintsUsed > 1 ? "s" : ""} used
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
           <FeedbackPanel
             result={gradingResult}
             officialSolution={assignment.expectedSolution?.explanation}
             showOfficialSolution={showSolution}
           />
 
-          {/* Replay / compare entry points */}
-          <div className="replay-actions">
-            {(simulationResult?.traceEvents.length ?? 0) > 0 && onStartReplay && (
+          {/* Replay / compare buttons */}
+          <div className="cqv-result-actions">
+            {hasTrace && onStartReplay && (
               <button
                 className={`btn-sm ${gradingResult.isCorrect ? "btn-primary" : "btn-secondary"}`}
                 onClick={onStartReplay}
-                title="Step through the solution trace in the right panel"
               >
-                <Play size={12} /> Replay Solution
+                <Play size={12} /> Replay solution
               </button>
             )}
             {onStartCompare && (
               <button
                 className={`btn-sm ${gradingResult.isCorrect ? "btn-secondary" : "btn-primary"}`}
                 onClick={onStartCompare}
-                title="Compare your answer with the correct answer"
               >
-                <GitCompareArrows size={12} /> Compare with Correct
+                <GitCompareArrows size={12} /> Compare with correct
               </button>
             )}
           </div>
 
-          {/* Replay trace active banner */}
+          {/* Replay active banner */}
           {replayMode === "trace" && (
-            <div className="replay-trace-banner">
-              <Play size={11} />
-              Solution replay active — step through in the right panel
+            <div className="cqv-replay-banner">
+              <Play size={11} /> Replay active — step through in the right panel
               {onExitReplay && (
-                <button onClick={onExitReplay}>Exit replay</button>
+                <button className="cqv-replay-exit" onClick={onExitReplay}>Exit</button>
               )}
             </div>
           )}
 
-          {/* Inline comparison panel */}
+          {/* Inline compare panel */}
           {replayMode === "compare" && onExitReplay && (
             <SolutionComparePanel result={gradingResult} onClose={onExitReplay} />
           )}
         </div>
       )}
 
-      {/* ── Actions ── */}
-      <div className="challenge-actions">
-        <button
-          className="btn-primary btn-sm"
-          onClick={onRunAttempt}
-          disabled={exhausted && !alreadyCorrect}
-        >
-          <Play size={13} /> Run Attempt
+      {/* ── Footer ── */}
+      <div className="cqv-footer">
+        <button className="btn-secondary btn-xs" onClick={onExportAttempt}>
+          <Download size={11} /> Export attempt
         </button>
-        <button
-          className="btn-secondary btn-sm"
-          onClick={handleSubmit}
-          disabled={!simulationResult || exhausted || alreadyCorrect}
-          title={!simulationResult ? "Run the simulation first" : exhausted ? "No attempts left" : ""}
-        >
-          <Send size={13} /> Submit Attempt
-        </button>
-        <button className="btn-secondary btn-sm" onClick={onResetAttempt}>
-          <RotateCcw size={13} /> Reset
-        </button>
-        <button className="btn-secondary btn-sm" onClick={onExportAttempt}>
-          <Download size={13} /> Export
-        </button>
+        {attemptHistory.length > 0 && (
+          <button className="cqv-history-toggle" onClick={() => setShowHistory(p => !p)}>
+            History ({attemptHistory.length})
+            {showHistory ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+          </button>
+        )}
       </div>
 
-      {exhausted && !alreadyCorrect && (
-        <div className="challenge-exhausted-notice">
-          <AlertCircle size={12} /> Maximum attempts reached. Export your work and ask your teacher.
-        </div>
-      )}
-
-      {alreadyCorrect && (
-        <div className="challenge-success-notice">
-          Challenge complete! Well done.
-        </div>
-      )}
-
-      {/* ── Attempt history ── */}
-      {attemptHistory.length > 0 && (
-        <div className="challenge-history">
-          <button
-            className="challenge-history-toggle"
-            onClick={() => setShowHistory((p) => !p)}
-          >
-            <span>Attempt history ({attemptHistory.length})</span>
-            {showHistory ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-          </button>
-          {showHistory && (
-            <div className="challenge-history-list">
-              {[...attemptHistory].reverse().map((entry) => (
-                <HistoryRow key={entry.attemptNumber} entry={entry} />
-              ))}
-            </div>
-          )}
+      {showHistory && (
+        <div className="cqv-history-list">
+          {[...attemptHistory].reverse().map(entry => (
+            <HistoryRow key={entry.attemptNumber} entry={entry} />
+          ))}
         </div>
       )}
     </div>
