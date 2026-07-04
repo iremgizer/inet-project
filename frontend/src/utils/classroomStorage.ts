@@ -64,3 +64,30 @@ export function appendActivity(event: ActivityEvent): void {
     // Ignore
   }
 }
+
+// ── Teacher notes ─────────────────────────────────────────────────────────────
+
+const TEACHER_NOTES_KEY = "inet-teacher-notes";
+
+export function loadTeacherNotes(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(TEACHER_NOTES_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveTeacherNote(reviewId: string, note: string): void {
+  try {
+    const existing = loadTeacherNotes();
+    if (note.trim()) {
+      existing[reviewId] = note;
+    } else {
+      delete existing[reviewId];
+    }
+    localStorage.setItem(TEACHER_NOTES_KEY, JSON.stringify(existing));
+  } catch {
+    // Ignore
+  }
+}

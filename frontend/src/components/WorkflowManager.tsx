@@ -45,6 +45,7 @@ import {
 } from "../utils/assignmentJson";
 import { gradeChallenge } from "../utils/challengeGrading";
 import { resolveHints } from "../utils/challengeHints";
+import { EXAMPLE_CHALLENGES } from "../utils/exampleChallenges";
 import { saveChallengeAttempt } from "../api/simulationApi";
 import { LectureExample } from "../utils/lectureExamples";
 import {
@@ -863,6 +864,17 @@ const WorkflowManager: React.FC = () => {
     setIsPlaying(false);
   }, []); // eslint-disable-line
 
+  const handleOpenChallengeById = useCallback((workId: string) => {
+    const found = EXAMPLE_CHALLENGES.find((c) => c.assignmentId === workId);
+    if (!found) { toast(`Challenge "${workId}" not found in library.`, "error"); return; }
+    clearChallengeState();
+    setActiveAssignment(found);
+    setNetwork(structuredClone(found.starterNetwork));
+    setCurrentStep(1);
+    setAppMode("challenge");
+    toast(`Opened "${found.title}" in Challenge Mode.`, "success");
+  }, [clearChallengeState, toast]); // eslint-disable-line
+
   const handleStartReplay = useCallback(() => {
     setIsTraceMode(true);
     setActiveStepIndex(0);
@@ -1124,6 +1136,7 @@ const WorkflowManager: React.FC = () => {
               onExportAssignmentJson={handleExportAssignmentById}
               onExportAssignmentPdf={handleExportAssignmentPdf}
               onRefreshAssignments={refreshSavedAssignments}
+              onOpenChallenge={handleOpenChallengeById}
             />
           ) : (
             <StudentDashboard

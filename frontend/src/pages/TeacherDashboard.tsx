@@ -1,8 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   FileText, Network, BookOpen, Clock, FileJson, HelpCircle, RefreshCw,
   ArrowRight, ChevronDown, ChevronUp, Check, Lightbulb, Users, Download, FileDown,
-  LayoutDashboard,
+  LayoutDashboard, ClipboardList,
 } from "lucide-react";
 import { LectureExample, LECTURE_EXAMPLES } from "../utils/lectureExamples";
 import { SavedSimulationSummary } from "../types/network";
@@ -11,6 +11,8 @@ import { AssignedWork } from "../types/classroom";
 import { DEMO_STUDENTS } from "../utils/demoUsers";
 import AssignWorkModal from "../components/AssignWorkModal";
 import TeacherOverviewPage from "./TeacherOverviewPage";
+import SubmissionReviewCenter from "../components/SubmissionReviewCenter";
+import { buildReviewRecords } from "../utils/reviewService";
 
 type Tab = "overview" | "assignments" | "submissions" | "lab";
 
@@ -30,6 +32,7 @@ interface TeacherDashboardProps {
   onExportAssignmentJson: (assignmentId: string) => void;
   onExportAssignmentPdf: (assignmentId: string, includeAnswer: boolean) => void;
   onRefreshAssignments: () => void;
+  onOpenChallenge?: (workId: string) => void;
 }
 
 interface PendingAssign {
@@ -73,8 +76,15 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onExportAssignmentJson,
   onExportAssignmentPdf,
   onRefreshAssignments,
+  onOpenChallenge,
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+
+  const reviewRecords = useMemo(
+    () => buildReviewRecords(assignedWorks, savedAssignments),
+    [assignedWorks, savedAssignments],
+  );
+  const pendingReviews = reviewRecords.filter((r) => r.status === "needs_review").length;
   const [showLectures, setShowLectures] = useState(false);
   const [expandedEx, setExpandedEx] = useState<string | null>(null);
   const [pendingAssign, setPendingAssign] = useState<PendingAssign | null>(null);
@@ -96,7 +106,15 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           >
             {t === "overview" && <><LayoutDashboard size={11} /> Overview</>}
             {t === "assignments" && `Assignments${savedAssignments.length > 0 ? ` (${savedAssignments.length})` : ""}`}
-            {t === "submissions" && `Assigned Work${assignedWorks.length > 0 ? ` (${assignedWorks.length})` : ""}`}
+            {t === "submissions" && (
+              <>
+                <ClipboardList size={11} />
+                Submissions
+                {pendingReviews > 0 && (
+                  <span className="dash-tab-badge src-status-badge src-status--red">{pendingReviews}</span>
+                )}
+              </>
+            )}
             {t === "lab" && "Lab & Demos"}
           </button>
         ))}
@@ -214,52 +232,13 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         </div>
       )}
 
-      {/* ── Submissions / Assigned Work tab ── */}
+      {/* ── Submissions tab ── */}
       {activeTab === "submissions" && (
-        <div className="dash-tab-content">
-          {assignedWorks.length === 0 ? (
-            <div className="dash-empty-box">
-              <div className="dash-empty-icon"><Users size={22} /></div>
-              <div className="dash-empty-title">No work assigned yet</div>
-              <p className="dash-empty-desc">
-                Go to the <strong>Assignments</strong> tab, click <strong>Assign</strong> next to an
-                assignment, and choose which students receive it.
-              </p>
-            </div>
-          ) : (
-            <>
-              <div className="assign-table-wrap">
-                <table className="assign-table">
-                  <thead>
-                    <tr>
-                      <th>Assignment</th>
-                      <th>Type</th>
-                      <th>Assigned To</th>
-                      <th>Due</th>
-                      <th>Assigned On</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {assignedWorks.map((w) => (
-                      <tr key={w.assignedWorkId} className="assign-table-row">
-                        <td className="assign-table-title">{w.workTitle}</td>
-                        <td><ModeBadge mode={w.workType} /></td>
-                        <td className="assign-table-topic">{assignedToLabel(w)}</td>
-                        <td className="assign-table-date">{w.dueDate ? formatDate(w.dueDate) : "—"}</td>
-                        <td className="assign-table-date">{formatDate(w.assignedAt)}</td>
-                        <td><span className="assign-status-pending">Pending</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="dash-placeholder-note" style={{ marginTop: 14 }}>
-                Submission status is not tracked in this prototype. Ask students to export
-                <code>submission.json</code> and share it with you directly.
-              </div>
-            </>
-          )}
+        <div className="dash-tab-content" style={{ padding: 0 }}>
+          <SubmissionReviewCenter
+            records={reviewRecords}
+            onOpenChallenge={(workId) => onOpenChallenge?.(workId)}
+          />
         </div>
       )}
 
