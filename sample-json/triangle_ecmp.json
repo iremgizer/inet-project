@@ -1,0 +1,19 @@
+{
+  "name": "Triangle ECMP Lecture Example",
+  "topologyType": "triangle",
+  "isDirected": false,
+  "nodes": [
+    { "id": "u", "label": "u", "x": 250, "y": 80  },
+    { "id": "v", "label": "v", "x": 80,  "y": 340 },
+    { "id": "t", "label": "t", "x": 420, "y": 340 }
+  ],
+  "links": [
+    { "id": "u-v", "source": "u", "target": "v", "weight": 1, "capacity": 1 },
+    { "id": "v-t", "source": "v", "target": "t", "weight": 1, "capacity": 1 },
+    { "id": "u-t", "source": "u", "target": "t", "weight": 2, "capacity": 1 }
+  ],
+  "demands": [
+    { "id": "d1", "source": "u", "target": "t", "amount": 1.5 },
+    { "id": "d2", "source": "v", "target": "t", "amount": 0.5 }
+  ]
+}

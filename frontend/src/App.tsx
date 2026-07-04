@@ -1,7 +1,10 @@
 import WorkflowManager from "./components/WorkflowManager";
+import { ToastProvider } from "./components/Toast";
 
-const App = () => {
-  return <WorkflowManager />;
-};
+const App = () => (
+  <ToastProvider>
+    <WorkflowManager />
+  </ToastProvider>
+);
 
 export default App;

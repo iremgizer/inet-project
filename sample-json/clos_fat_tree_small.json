@@ -1,0 +1,26 @@
+{
+  "name": "Small Clos / Fat-Tree (2-Spine, 4-Leaf)",
+  "topologyType": "fat-tree",
+  "isDirected": false,
+  "nodes": [
+    { "id": "SP1", "label": "Spine-1", "x": 160, "y":  60 },
+    { "id": "SP2", "label": "Spine-2", "x": 360, "y":  60 },
+    { "id": "L1",  "label": "Leaf-1",  "x":  60, "y": 220 },
+    { "id": "L2",  "label": "Leaf-2",  "x": 200, "y": 220 },
+    { "id": "L3",  "label": "Leaf-3",  "x": 320, "y": 220 },
+    { "id": "L4",  "label": "Leaf-4",  "x": 460, "y": 220 }
+  ],
+  "links": [
+    { "id": "SP1-L1", "source": "SP1", "target": "L1", "weight": 1, "capacity": 10 },
+    { "id": "SP1-L2", "source": "SP1", "target": "L2", "weight": 1, "capacity": 10 },
+    { "id": "SP1-L3", "source": "SP1", "target": "L3", "weight": 1, "capacity": 10 },
+    { "id": "SP1-L4", "source": "SP1", "target": "L4", "weight": 1, "capacity": 10 },
+    { "id": "SP2-L1", "source": "SP2", "target": "L1", "weight": 1, "capacity": 10 },
+    { "id": "SP2-L2", "source": "SP2", "target": "L2", "weight": 1, "capacity": 10 },
+    { "id": "SP2-L3", "source": "SP2", "target": "L3", "weight": 1, "capacity": 10 },
+    { "id": "SP2-L4", "source": "SP2", "target": "L4", "weight": 1, "capacity": 10 }
+  ],
+  "demands": [
+    { "id": "d1", "source": "L1", "target": "L3", "amount": 2 }
+  ]
+}

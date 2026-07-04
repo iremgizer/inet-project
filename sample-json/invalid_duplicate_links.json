@@ -1,0 +1,17 @@
+{
+  "_comment": "INTENTIONALLY INVALID: two links share the same id 'u-v', which the validator rejects as duplicate",
+  "name": "Invalid - Duplicate Link IDs",
+  "topologyType": "custom",
+  "isDirected": false,
+  "nodes": [
+    { "id": "u", "label": "u", "x": 100, "y": 200 },
+    { "id": "v", "label": "v", "x": 350, "y": 200 }
+  ],
+  "links": [
+    { "id": "u-v", "source": "u", "target": "v", "weight": 1, "capacity": 10 },
+    { "id": "u-v", "source": "u", "target": "v", "weight": 2, "capacity": 10 }
+  ],
+  "demands": [
+    { "id": "d1", "source": "u", "target": "v", "amount": 1 }
+  ]
+}

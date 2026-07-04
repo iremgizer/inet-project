@@ -1,4 +1,4 @@
-export type TopologyType = "custom" | "triangle" | "line" | "ring" | "mesh" | "fat-tree";
+export type TopologyType = "custom" | "triangle" | "line" | "ring" | "mesh" | "fat-tree" | "grid" | "path" | "cycle" | "random";
 export type AlgorithmName = "ECMP" | "DISTANCE_VECTOR" | "SEGMENT_ROUTING" | "CUSTOM_SPLITTING";
 export type AlgorithmType = "exact" | "real_world_heuristic" | "custom";
 export type ObjectiveType = "minimize_max_utilization" | "minimize_path_cost";
