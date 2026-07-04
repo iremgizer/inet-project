@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import {
   FileText, Network, BookOpen, Clock, FileJson, HelpCircle, RefreshCw,
   ArrowRight, ChevronDown, ChevronUp, Check, Lightbulb, Users, Download, FileDown,
+  LayoutDashboard,
 } from "lucide-react";
 import { LectureExample, LECTURE_EXAMPLES } from "../utils/lectureExamples";
 import { SavedSimulationSummary } from "../types/network";
@@ -9,8 +10,9 @@ import { AssignmentSummary } from "../types/assignment";
 import { AssignedWork } from "../types/classroom";
 import { DEMO_STUDENTS } from "../utils/demoUsers";
 import AssignWorkModal from "../components/AssignWorkModal";
+import TeacherOverviewPage from "./TeacherOverviewPage";
 
-type Tab = "assignments" | "submissions" | "lab";
+type Tab = "overview" | "assignments" | "submissions" | "lab";
 
 interface TeacherDashboardProps {
   savedAssignments: AssignmentSummary[];
@@ -72,7 +74,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onExportAssignmentPdf,
   onRefreshAssignments,
 }) => {
-  const [activeTab, setActiveTab] = useState<Tab>("assignments");
+  const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [showLectures, setShowLectures] = useState(false);
   const [expandedEx, setExpandedEx] = useState<string | null>(null);
   const [pendingAssign, setPendingAssign] = useState<PendingAssign | null>(null);
@@ -86,18 +88,34 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
       {/* ── Tabs ── */}
       <div className="dash-tabs">
-        {(["assignments", "submissions", "lab"] as Tab[]).map((t) => (
+        {(["overview", "assignments", "submissions", "lab"] as Tab[]).map((t) => (
           <button
             key={t}
             className={`dash-tab${activeTab === t ? " dash-tab--active" : ""}`}
             onClick={() => setActiveTab(t)}
           >
-            {t === "assignments" && "Assignments"}
+            {t === "overview" && <><LayoutDashboard size={11} /> Overview</>}
+            {t === "assignments" && `Assignments${savedAssignments.length > 0 ? ` (${savedAssignments.length})` : ""}`}
             {t === "submissions" && `Assigned Work${assignedWorks.length > 0 ? ` (${assignedWorks.length})` : ""}`}
             {t === "lab" && "Lab & Demos"}
           </button>
         ))}
       </div>
+
+      {/* ── Overview tab ── */}
+      {activeTab === "overview" && (
+        <TeacherOverviewPage
+          savedAssignments={savedAssignments}
+          assignedWorks={assignedWorks}
+          savedRuns={savedRuns}
+          onCreateAssignment={onCreateAssignment}
+          onBuildLab={onBuildLab}
+          onOpenChallenges={onOpenChallenges}
+          onOpenSavedRuns={onOpenSavedRuns}
+          onImportJson={onImportJson}
+          onOpenHelp={onOpenHelp}
+        />
+      )}
 
       {/* ── Assignments tab ── */}
       {activeTab === "assignments" && (

@@ -1,4 +1,5 @@
 import { AssignedWork } from "../types/classroom";
+import { ActivityEvent } from "../types/analytics";
 
 const ASSIGNED_WORKS_KEY = "inet-assigned-works";
 const CURRENT_STUDENT_KEY = "inet-current-student";
@@ -35,6 +36,30 @@ export function saveCurrentStudentId(studentId: string | null): void {
     } else {
       localStorage.removeItem(CURRENT_STUDENT_KEY);
     }
+  } catch {
+    // Ignore
+  }
+}
+
+// ── Activity log ──────────────────────────────────────────────────────────────
+
+const ACTIVITY_KEY = "inet-activity-log";
+const MAX_EVENTS = 50;
+
+export function loadActivityLog(): ActivityEvent[] {
+  try {
+    const raw = localStorage.getItem(ACTIVITY_KEY);
+    return raw ? (JSON.parse(raw) as ActivityEvent[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function appendActivity(event: ActivityEvent): void {
+  try {
+    const existing = loadActivityLog();
+    const updated = [event, ...existing.filter(e => e.id !== event.id)].slice(0, MAX_EVENTS);
+    localStorage.setItem(ACTIVITY_KEY, JSON.stringify(updated));
   } catch {
     // Ignore
   }
