@@ -125,6 +125,17 @@ const Section: React.FC<{
   );
 };
 
+// ── Field visibility badge ────────────────────────────────────────────────────
+
+const FieldNote: React.FC<{ type: "student" | "grading" | "teacher" }> = ({ type }) => {
+  const cfg = {
+    student: { cls: "tcb-note--student", text: "Shown to students" },
+    grading: { cls: "tcb-note--grading", text: "Used for grading" },
+    teacher: { cls: "tcb-note--teacher", text: "Teacher only" },
+  }[type];
+  return <span className={`tcb-field-note ${cfg.cls}`}>{cfg.text}</span>;
+};
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 const TeacherWorkspacePage: React.FC<TeacherWorkspacePageProps> = ({
@@ -237,7 +248,7 @@ const TeacherWorkspacePage: React.FC<TeacherWorkspacePageProps> = ({
         {/* ── Section 1: Basic info ── */}
         <Section title="Basic Info">
           <div className="teacher-field">
-            <label>Title *</label>
+            <label>Title * <FieldNote type="student" /></label>
             <input
               type="text"
               value={draft.title ?? ""}
@@ -246,7 +257,7 @@ const TeacherWorkspacePage: React.FC<TeacherWorkspacePageProps> = ({
             />
           </div>
           <div className="teacher-field">
-            <label>Course</label>
+            <label>Course <FieldNote type="teacher" /></label>
             <input
               type="text"
               value={draft.course ?? ""}
@@ -256,7 +267,7 @@ const TeacherWorkspacePage: React.FC<TeacherWorkspacePageProps> = ({
           </div>
           <div className="teacher-field-row">
             <div className="teacher-field">
-              <label>Topic *</label>
+              <label>Topic * <FieldNote type="student" /></label>
               <select
                 value={draft.topic ?? "ECMP"}
                 onChange={(e) => onDraftChange({ topic: e.target.value as AssignmentTopic })}
@@ -279,7 +290,7 @@ const TeacherWorkspacePage: React.FC<TeacherWorkspacePageProps> = ({
             </div>
           </div>
           <div className="teacher-field">
-            <label>Description</label>
+            <label>Description <FieldNote type="student" /></label>
             <textarea
               rows={2}
               value={draft.description ?? ""}
@@ -373,9 +384,9 @@ const TeacherWorkspacePage: React.FC<TeacherWorkspacePageProps> = ({
         </Section>
 
         {/* ── Section 5: Task definition ── */}
-        <Section title="Student Task">
+        <Section title="Problem Statement">
           <div className="teacher-field">
-            <label>Task type *</label>
+            <label>Task type * <FieldNote type="grading" /></label>
             <select
               value={task.taskType}
               onChange={(e) => onDraftChange({ studentTask: { ...task, taskType: e.target.value as TaskType } })}
@@ -386,28 +397,30 @@ const TeacherWorkspacePage: React.FC<TeacherWorkspacePageProps> = ({
             </select>
           </div>
           <div className="teacher-field">
-            <label>Prompt *</label>
+            <label>Question (prompt) * <FieldNote type="student" /></label>
             <textarea
               rows={3}
-              placeholder="The main question or task shown to students."
+              placeholder="The main question shown to students — clear, specific, and self-contained."
               value={task.prompt}
               onChange={(e) => onDraftChange({ studentTask: { ...task, prompt: e.target.value } })}
             />
+            <p className="teacher-field-hint">Appears as the Question card in the student quiz screen.</p>
           </div>
           <div className="teacher-field">
-            <label>Step-by-step instructions</label>
+            <label>How to solve — step-by-step instructions <FieldNote type="student" /></label>
             <textarea
               rows={3}
-              placeholder={"1. Do this.\n2. Then this.\n3. Enter your answer."}
+              placeholder={"1. Click Run simulation.\n2. Observe which links turn red.\n3. Select those links and submit."}
               value={task.instructions}
               onChange={(e) => onDraftChange({ studentTask: { ...task, instructions: e.target.value } })}
             />
+            <p className="teacher-field-hint">Shown in a collapsible "How to solve" section below the question.</p>
           </div>
           <div className="teacher-field">
-            <label>Answer format hint</label>
+            <label>Answer format hint <FieldNote type="student" /></label>
             <input
               type="text"
-              placeholder='e.g. "Enter the link ID (e.g. v-t)"'
+              placeholder='e.g. "Enter the link ID, e.g. v-t"'
               value={task.answerFormatDescription}
               onChange={(e) => onDraftChange({ studentTask: { ...task, answerFormatDescription: e.target.value } })}
             />
@@ -497,17 +510,65 @@ const TeacherWorkspacePage: React.FC<TeacherWorkspacePageProps> = ({
           </label>
         </Section>
 
-        {/* ── Section 8: Challenge Configuration (only when mode = challenge) ── */}
+        {/* ── Section 8: Challenge Builder (only when mode = challenge) ── */}
         {draft.mode === "challenge" && (() => {
           const cfg: ChallengeConfig = draft.challengeConfig ?? defaultChallengeConfig();
           const updateCfg = (updates: Partial<ChallengeConfig>) =>
             onDraftChange({ challengeConfig: { ...cfg, ...updates } });
 
+          const needsUtilTarget =
+            cfg.challengeType === "REDUCE_CONGESTION" ||
+            cfg.challengeType === "FIND_ECMP_WEIGHTS";
+          const needsCongestedLinks =
+            cfg.challengeType === "IDENTIFY_CONGESTED_LINKS";
+
           return (
-            <Section title="Challenge Settings" collapsible defaultOpen={false}>
+            <Section
+              key={`challenge-cfg-${draft.mode}`}
+              title="Challenge Builder"
+              collapsible
+              defaultOpen
+            >
+              {/* Mapping reference */}
+              <div className="tcb-mapping-box">
+                <div className="tcb-mapping-title">What students see</div>
+                <div className="tcb-mapping-row">
+                  <span className="tcb-mapping-field">Question (prompt)</span>
+                  <span className="tcb-mapping-arrow">→</span>
+                  <span className="tcb-mapping-dest">Question card</span>
+                </div>
+                <div className="tcb-mapping-row">
+                  <span className="tcb-mapping-field">How to solve</span>
+                  <span className="tcb-mapping-arrow">→</span>
+                  <span className="tcb-mapping-dest">Collapsible guide</span>
+                </div>
+                <div className="tcb-mapping-row">
+                  <span className="tcb-mapping-field">Difficulty / time</span>
+                  <span className="tcb-mapping-arrow">→</span>
+                  <span className="tcb-mapping-dest">Header badges</span>
+                </div>
+                <div className="tcb-mapping-row">
+                  <span className="tcb-mapping-field">Learning objectives</span>
+                  <span className="tcb-mapping-arrow">→</span>
+                  <span className="tcb-mapping-dest">Topic chips</span>
+                </div>
+                <div className="tcb-mapping-row">
+                  <span className="tcb-mapping-field">Hints</span>
+                  <span className="tcb-mapping-arrow">→</span>
+                  <span className="tcb-mapping-dest">Locked hint cards</span>
+                </div>
+                <div className="tcb-mapping-row">
+                  <span className="tcb-mapping-field">Target / answer</span>
+                  <span className="tcb-mapping-arrow">→</span>
+                  <span className="tcb-mapping-dest">Grading (not shown)</span>
+                </div>
+              </div>
+
+              {/* 1. Challenge basics */}
+              <div className="tcb-sub-heading">1 · Challenge basics</div>
               <div className="teacher-field-row">
                 <div className="teacher-field">
-                  <label>Challenge type *</label>
+                  <label>Challenge type * <FieldNote type="grading" /></label>
                   <select
                     value={cfg.challengeType}
                     onChange={(e) => {
@@ -521,7 +582,7 @@ const TeacherWorkspacePage: React.FC<TeacherWorkspacePageProps> = ({
                   </select>
                 </div>
                 <div className="teacher-field">
-                  <label>Difficulty</label>
+                  <label>Difficulty <FieldNote type="student" /></label>
                   <select
                     value={cfg.difficulty}
                     onChange={(e) => updateCfg({ difficulty: e.target.value as ChallengeDifficulty })}
@@ -535,14 +596,14 @@ const TeacherWorkspacePage: React.FC<TeacherWorkspacePageProps> = ({
 
               <div className="teacher-field-row">
                 <div className="teacher-field">
-                  <label>Expected time (min)</label>
+                  <label>Expected time (min) <FieldNote type="student" /></label>
                   <input
                     type="number" min={1} value={cfg.expectedTimeMinutes}
                     onChange={(e) => updateCfg({ expectedTimeMinutes: Math.max(1, +e.target.value) })}
                   />
                 </div>
                 <div className="teacher-field">
-                  <label>Max attempts</label>
+                  <label>Max attempts <FieldNote type="student" /></label>
                   <input
                     type="number" min={1} max={20} value={cfg.maxAttempts}
                     onChange={(e) => updateCfg({ maxAttempts: Math.max(1, +e.target.value) })}
@@ -551,38 +612,7 @@ const TeacherWorkspacePage: React.FC<TeacherWorkspacePageProps> = ({
               </div>
 
               <div className="teacher-field">
-                <label>Show official solution</label>
-                <select
-                  value={cfg.showOfficialSolution}
-                  onChange={(e) => updateCfg({ showOfficialSolution: e.target.value as SolutionVisibility })}
-                >
-                  {SOLUTION_VISIBILITY.map((sv) => (
-                    <option key={sv.value} value={sv.value}>{sv.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="teacher-field">
-                <label>What students can edit</label>
-                {EDITABLE_FIELDS.map(({ value, label }) => (
-                  <label key={value} className="teacher-check-row">
-                    <input
-                      type="checkbox"
-                      checked={cfg.editableFields.includes(value)}
-                      onChange={(e) => {
-                        const next = e.target.checked
-                          ? [...cfg.editableFields, value]
-                          : cfg.editableFields.filter((f) => f !== value);
-                        updateCfg({ editableFields: next });
-                      }}
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-
-              <div className="teacher-field">
-                <label>Learning objectives</label>
+                <label>Learning objectives <FieldNote type="student" /></label>
                 <div className="teacher-algo-checks">
                   {ALL_OBJECTIVES.map((obj) => (
                     <label key={obj} className="teacher-check-row">
@@ -602,84 +632,122 @@ const TeacherWorkspacePage: React.FC<TeacherWorkspacePageProps> = ({
                 </div>
               </div>
 
-              {/* Target conditions */}
+              {/* 2. Student interaction */}
+              <div className="tcb-sub-heading">2 · Student interaction</div>
               <div className="teacher-field">
-                <label>Target: max utilization below (0–∞)</label>
-                <input
-                  type="number" min={0} step={0.1}
-                  placeholder="e.g. 1.0"
-                  value={cfg.target.maxUtilizationBelow ?? ""}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    updateCfg({ target: { ...cfg.target, maxUtilizationBelow: isNaN(v) ? undefined : v } });
-                  }}
-                />
-              </div>
-              <div className="teacher-field">
-                <label>Target: expected congested link IDs (comma-separated)</label>
-                <input
-                  type="text"
-                  placeholder="e.g. v-t"
-                  value={(cfg.target.congestedLinks ?? []).join(", ")}
-                  onChange={(e) => {
-                    const ids = e.target.value.split(",").map((s) => s.trim()).filter(Boolean);
-                    updateCfg({ target: { ...cfg.target, congestedLinks: ids } });
-                  }}
-                />
+                <label>What students can edit <FieldNote type="student" /></label>
+                {EDITABLE_FIELDS.map(({ value, label }) => (
+                  <label key={value} className="teacher-check-row">
+                    <input
+                      type="checkbox"
+                      checked={cfg.editableFields.includes(value)}
+                      onChange={(e) => {
+                        const next = e.target.checked
+                          ? [...cfg.editableFields, value]
+                          : cfg.editableFields.filter((f) => f !== value);
+                        updateCfg({ editableFields: next });
+                      }}
+                    />
+                    {label}
+                  </label>
+                ))}
               </div>
 
-              {/* Hint manager */}
-              <div className="teacher-field">
-                <label>Hints ({cfg.hints.length})</label>
+              {/* 3. Correct answer / target */}
+              <div className="tcb-sub-heading">3 · Correct answer <FieldNote type="grading" /></div>
+
+              {needsUtilTarget && (
+                <div className="teacher-field">
+                  <label>Max utilization target (e.g. 1.0 = 100%)</label>
+                  <input
+                    type="number" min={0} step={0.1}
+                    placeholder="e.g. 1.0"
+                    value={cfg.target.maxUtilizationBelow ?? ""}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      updateCfg({ target: { ...cfg.target, maxUtilizationBelow: isNaN(v) ? undefined : v } });
+                    }}
+                  />
+                  <p className="teacher-field-hint">Student passes when simulated max utilization ≤ this value.</p>
+                </div>
+              )}
+
+              {needsCongestedLinks && (
+                <div className="teacher-field">
+                  <label>Expected congested link IDs (comma-separated)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. v-t"
+                    value={(cfg.target.congestedLinks ?? []).join(", ")}
+                    onChange={(e) => {
+                      const ids = e.target.value.split(",").map((s) => s.trim()).filter(Boolean);
+                      updateCfg({ target: { ...cfg.target, congestedLinks: ids } });
+                    }}
+                  />
+                  <p className="teacher-field-hint">The link IDs that should be congested after running ECMP.</p>
+                </div>
+              )}
+
+              {!needsUtilTarget && !needsCongestedLinks && (
                 <p className="teacher-field-hint">
-                  Default hints are auto-generated based on challenge type. Customise them below.
+                  For this challenge type, grading is derived automatically from the simulation result.
+                  Set the expected DV entries or path below in the Expected Solution section.
                 </p>
-                {cfg.hints.map((hint, idx) => (
-                  <div key={hint.hintId} className="teacher-hint-row">
-                    <div className="teacher-hint-idx">#{idx + 1} {hint.level.replace("_", " ")}</div>
+              )}
+
+              {/* 4. Hints */}
+              <div className="tcb-sub-heading">
+                4 · Hints ({cfg.hints.length}) <FieldNote type="student" />
+              </div>
+              <p className="teacher-field-hint">
+                Hints are revealed one at a time when the student asks. Penalties reduce their score.
+              </p>
+              {cfg.hints.map((hint, idx) => (
+                <div key={hint.hintId} className="teacher-hint-row">
+                  <div className="teacher-hint-idx">#{idx + 1} — {hint.level.replace("_", " ")}</div>
+                  <input
+                    type="text"
+                    className="teacher-hint-title-input"
+                    value={hint.title}
+                    placeholder="Hint title (visible to student before reveal)"
+                    onChange={(e) => {
+                      const next = cfg.hints.map((h, i) => i === idx ? { ...h, title: e.target.value } : h);
+                      updateCfg({ hints: next });
+                    }}
+                  />
+                  <textarea
+                    rows={2}
+                    value={hint.text}
+                    placeholder="Hint content (revealed when student clicks)"
+                    onChange={(e) => {
+                      const next = cfg.hints.map((h, i) => i === idx ? { ...h, text: e.target.value } : h);
+                      updateCfg({ hints: next });
+                    }}
+                  />
+                  <div className="teacher-hint-penalty-row">
+                    <label>Penalty (pts):</label>
                     <input
-                      type="text"
-                      className="teacher-hint-title-input"
-                      value={hint.title}
-                      placeholder="Hint title"
+                      type="number" min={0} max={100}
+                      value={hint.revealCostPenalty}
                       onChange={(e) => {
-                        const next = cfg.hints.map((h, i) => i === idx ? { ...h, title: e.target.value } : h);
+                        const next = cfg.hints.map((h, i) =>
+                          i === idx ? { ...h, revealCostPenalty: Math.min(100, Math.max(0, +e.target.value)) } : h,
+                        );
                         updateCfg({ hints: next });
                       }}
                     />
-                    <textarea
-                      rows={2}
-                      value={hint.text}
-                      placeholder="Hint text"
-                      onChange={(e) => {
-                        const next = cfg.hints.map((h, i) => i === idx ? { ...h, text: e.target.value } : h);
-                        updateCfg({ hints: next });
-                      }}
-                    />
-                    <div className="teacher-hint-penalty-row">
-                      <label>Point penalty:</label>
-                      <input
-                        type="number" min={0} max={100}
-                        value={hint.revealCostPenalty}
-                        onChange={(e) => {
-                          const next = cfg.hints.map((h, i) =>
-                            i === idx ? { ...h, revealCostPenalty: Math.min(100, Math.max(0, +e.target.value)) } : h,
-                          );
-                          updateCfg({ hints: next });
-                        }}
-                      />
-                      <button
-                        className="btn-secondary btn-sm"
-                        onClick={() => updateCfg({ hints: cfg.hints.filter((_, i) => i !== idx) })}
-                      >
-                        Remove
-                      </button>
-                    </div>
+                    <button
+                      className="btn-secondary btn-sm"
+                      onClick={() => updateCfg({ hints: cfg.hints.filter((_, i) => i !== idx) })}
+                    >
+                      Remove
+                    </button>
                   </div>
-                ))}
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                 <button
                   className="btn-secondary btn-sm"
-                  style={{ marginTop: 6 }}
                   onClick={() => {
                     const newHint: Hint = {
                       hintId: `hint-${Date.now()}`,
@@ -697,11 +765,24 @@ const TeacherWorkspacePage: React.FC<TeacherWorkspacePageProps> = ({
                 </button>
                 <button
                   className="btn-secondary btn-sm"
-                  style={{ marginLeft: 6, marginTop: 6 }}
                   onClick={() => updateCfg({ hints: getDefaultHints(cfg.challengeType) })}
                 >
                   Reset to defaults
                 </button>
+              </div>
+
+              {/* 5. Solution visibility */}
+              <div className="tcb-sub-heading">5 · Solution visibility <FieldNote type="teacher" /></div>
+              <div className="teacher-field">
+                <label>Show official solution to student</label>
+                <select
+                  value={cfg.showOfficialSolution}
+                  onChange={(e) => updateCfg({ showOfficialSolution: e.target.value as SolutionVisibility })}
+                >
+                  {SOLUTION_VISIBILITY.map((sv) => (
+                    <option key={sv.value} value={sv.value}>{sv.label}</option>
+                  ))}
+                </select>
               </div>
             </Section>
           );
