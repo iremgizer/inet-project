@@ -3,14 +3,23 @@ import { AssignmentSummary } from "../types/assignment";
 import { ReviewRecord, ReviewStatus } from "../types/review";
 import { DEMO_STUDENTS } from "./demoUsers";
 
-// ── Demo performance constants (mirrors analyticsService DEMO_PERF) ───────────
-// These seed the review center so it is never empty in the prototype.
-// In production, replace with real StudentSubmission / ChallengeAttempt records
-// fetched from MongoDB.
-
+/**
+ * DEMO_RECORDS — canonical demo submission state.
+ *
+ * Covers every (student, assigned-work) combination so the review center
+ * is always fully populated without needing MongoDB or real submissions.
+ *
+ * Alice  (s001): ECMP Triangle ✓ checked 88 | DV P4 in_progress | Reduce not_started
+ * Bob    (s002): ECMP Triangle not_started | Reduce Congestion ✗ needs_review 55 | DV in_progress
+ * Charlie(s003): ECMP Triangle not_started | Reduce Congestion not_started
+ *                (DV P4 not assigned to Charlie)
+ *
+ * dueDate mirrors DEMO_ASSIGNED_WORKS in demoClassroomSeed.ts
+ */
 const DEMO_RECORDS: ReviewRecord[] = [
+  // ── Alice ─────────────────────────────────────────────────────────────────
   {
-    reviewId: "demo-r1",
+    reviewId: "demo-r-alice-ecmp",
     workType: "challenge",
     workId: "challenge-ecmp-triangle-congestion",
     workTitle: "ECMP Triangle: Find the Congested Link",
@@ -22,12 +31,29 @@ const DEMO_RECORDS: ReviewRecord[] = [
     status: "checked",
     score: 88, maxScore: 100, percentage: 88,
     attempts: 1, hintsUsed: 0, replayUsed: true,
-    submittedAt: new Date(Date.now() - 2 * 60_000).toISOString(),
-    dueDate: null,
+    submittedAt: new Date(Date.now() - 2 * 24 * 3_600_000).toISOString(),
+    dueDate: "2026-07-10T23:59:00.000Z",
     isDemo: true,
   },
   {
-    reviewId: "demo-r2",
+    reviewId: "demo-r-alice-dv",
+    workType: "challenge",
+    workId: "challenge-dv-p4-table",
+    workTitle: "Distance Vector P4: Compute the Routing Table",
+    topic: "DISTANCE_VECTOR",
+    difficulty: "beginner",
+    algorithm: "DISTANCE_VECTOR",
+    studentId: "s001",
+    studentName: "Alice Student",
+    status: "in_progress",
+    score: null, maxScore: 100, percentage: null,
+    attempts: 1, hintsUsed: 1, replayUsed: false,
+    submittedAt: null,
+    dueDate: "2026-07-12T23:59:00.000Z",
+    isDemo: true,
+  },
+  {
+    reviewId: "demo-r-alice-reduce",
     workType: "challenge",
     workId: "challenge-reduce-ecmp-congestion",
     workTitle: "Reduce Congestion: Adjust Link Weights",
@@ -36,32 +62,34 @@ const DEMO_RECORDS: ReviewRecord[] = [
     algorithm: "ECMP",
     studentId: "s001",
     studentName: "Alice Student",
-    status: "submitted",
-    score: 92, maxScore: 100, percentage: 92,
-    attempts: 2, hintsUsed: 0, replayUsed: false,
-    submittedAt: new Date(Date.now() - 28 * 60_000).toISOString(),
-    dueDate: null,
+    status: "not_started",
+    score: null, maxScore: 100, percentage: null,
+    attempts: 0, hintsUsed: 0, replayUsed: false,
+    submittedAt: null,
+    dueDate: "2026-07-15T23:59:00.000Z",
     isDemo: true,
   },
+
+  // ── Bob ───────────────────────────────────────────────────────────────────
   {
-    reviewId: "demo-r3",
+    reviewId: "demo-r-bob-ecmp",
     workType: "challenge",
-    workId: "challenge-reduce-ecmp-congestion",
-    workTitle: "Reduce Congestion: Adjust Link Weights",
+    workId: "challenge-ecmp-triangle-congestion",
+    workTitle: "ECMP Triangle: Find the Congested Link",
     topic: "ECMP",
-    difficulty: "intermediate",
+    difficulty: "beginner",
     algorithm: "ECMP",
     studentId: "s002",
     studentName: "Bob Student",
-    status: "needs_review",
-    score: 55, maxScore: 100, percentage: 55,
-    attempts: 3, hintsUsed: 2, replayUsed: true,
-    submittedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
-    dueDate: null,
+    status: "not_started",
+    score: null, maxScore: 100, percentage: null,
+    attempts: 0, hintsUsed: 0, replayUsed: false,
+    submittedAt: null,
+    dueDate: "2026-07-10T23:59:00.000Z",
     isDemo: true,
   },
   {
-    reviewId: "demo-r4",
+    reviewId: "demo-r-bob-dv",
     workType: "challenge",
     workId: "challenge-dv-p4-table",
     workTitle: "Distance Vector P4: Compute the Routing Table",
@@ -74,11 +102,30 @@ const DEMO_RECORDS: ReviewRecord[] = [
     score: null, maxScore: 100, percentage: null,
     attempts: 1, hintsUsed: 1, replayUsed: false,
     submittedAt: null,
-    dueDate: null,
+    dueDate: "2026-07-12T23:59:00.000Z",
     isDemo: true,
   },
   {
-    reviewId: "demo-r5",
+    reviewId: "demo-r-bob-reduce",
+    workType: "challenge",
+    workId: "challenge-reduce-ecmp-congestion",
+    workTitle: "Reduce Congestion: Adjust Link Weights",
+    topic: "ECMP",
+    difficulty: "intermediate",
+    algorithm: "ECMP",
+    studentId: "s002",
+    studentName: "Bob Student",
+    status: "needs_review",
+    score: 55, maxScore: 100, percentage: 55,
+    attempts: 3, hintsUsed: 2, replayUsed: false,
+    submittedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+    dueDate: "2026-07-15T23:59:00.000Z",
+    isDemo: true,
+  },
+
+  // ── Charlie ───────────────────────────────────────────────────────────────
+  {
+    reviewId: "demo-r-charlie-ecmp",
     workType: "challenge",
     workId: "challenge-ecmp-triangle-congestion",
     workTitle: "ECMP Triangle: Find the Congested Link",
@@ -87,28 +134,28 @@ const DEMO_RECORDS: ReviewRecord[] = [
     algorithm: "ECMP",
     studentId: "s003",
     studentName: "Charlie Student",
-    status: "needs_review",
-    score: 35, maxScore: 100, percentage: 35,
-    attempts: 3, hintsUsed: 2, replayUsed: false,
-    submittedAt: new Date(Date.now() - 5 * 3_600_000).toISOString(),
-    dueDate: null,
+    status: "not_started",
+    score: null, maxScore: 100, percentage: null,
+    attempts: 0, hintsUsed: 0, replayUsed: false,
+    submittedAt: null,
+    dueDate: "2026-07-10T23:59:00.000Z",
     isDemo: true,
   },
   {
-    reviewId: "demo-r6",
+    reviewId: "demo-r-charlie-reduce",
     workType: "challenge",
-    workId: "challenge-dv-p4-table",
-    workTitle: "Distance Vector P4: Compute the Routing Table",
-    topic: "DISTANCE_VECTOR",
-    difficulty: "beginner",
-    algorithm: "DISTANCE_VECTOR",
+    workId: "challenge-reduce-ecmp-congestion",
+    workTitle: "Reduce Congestion: Adjust Link Weights",
+    topic: "ECMP",
+    difficulty: "intermediate",
+    algorithm: "ECMP",
     studentId: "s003",
     studentName: "Charlie Student",
     status: "not_started",
     score: null, maxScore: 100, percentage: null,
     attempts: 0, hintsUsed: 0, replayUsed: false,
     submittedAt: null,
-    dueDate: null,
+    dueDate: "2026-07-15T23:59:00.000Z",
     isDemo: true,
   },
 ];

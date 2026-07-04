@@ -363,6 +363,67 @@ Replay Trace       — step through the algorithm's decisions one event at a tim
 
 ---
 
+## Midterm Demo Script
+
+Use this script for the live demo. Allow approximately 15 minutes. MongoDB is **optional** — all demo data is pre-loaded in localStorage.
+
+### Part 1 — Teacher view (5 min)
+
+1. Open the app at `http://localhost:5173`
+2. Click **Teacher login**, enter `teacher` / `teacher`
+3. On the **Teacher Dashboard → Overview** tab, point out: assignment count, pending-review badge, student completion breakdown
+4. Switch to **Assignments** tab — three demo assignments appear immediately (ECMP Triangle, Reduce Congestion, DV P4). Note: "demo data always shown — MongoDB adds more"
+5. Switch to **Submissions** tab — the review center shows 8 pre-seeded rows across Alice, Bob, and Charlie. Point out:
+   - Bob's Reduce Congestion is flagged **Needs Review** (score 55, 3 attempts)
+   - Click that row to open the slide-in drawer — show teacher notes (auto-saved), assignment prompt, expected answer, score breakdown
+   - Click **Export CSV** to download the gradebook
+
+### Part 2 — Challenge mode (5 min)
+
+6. On the **Lab & Demos** tab, click **Challenge Library**
+7. Open **ECMP Triangle: Find the Congested Link**
+   - Point out the task description, progressive hints, and the attempt counter
+   - Run ECMP simulation using the **Run** button
+   - Reveal hint 1, then submit an answer — show the graded feedback panel and score badge
+8. Go back, open **Reduce Congestion: Adjust Link Weights**
+   - Adjust link weights on the canvas, re-run ECMP — watch utilizations drop
+   - Submit and show the score
+
+### Part 3 — Student view (5 min)
+
+9. Log out → log in as `student` / `student` → choose **Alice**
+10. **My Work** tab — three assigned challenges appear (ECMP Triangle ✓ 88%, DV P4 in progress, Reduce Congestion not started). Click **Review** on the ECMP Triangle to reopen the result
+11. Switch to **Overview** tab — show metric cards (4 challenges solved, avg score 88%), Continue Learning panel, and Your Insights
+12. Switch to **Progress** tab — show topic progress bars and achievement badges
+13. Switch to **Timeline** tab — show chronological activity log
+14. Log out → log in as **Bob** — show a different progress state (1 solved, hints used, Reduce Congestion needs retry)
+
+### Demo Tips
+
+- Demo data survives **page refresh** — no MongoDB required for the demo
+- If data looks wrong: Teacher Dashboard → Lab & Demos → Demo Tools → **Reset demo data**
+- If everything is broken: Demo Tools → **Clear all local data & reload**
+
+---
+
+## Known Limitations
+
+These are intentional scope decisions for a university course prototype, not bugs.
+
+| Area | Limitation |
+|---|---|
+| Authentication | Credentials are hardcoded in `demoAuth.ts`. No real login, JWT, or session management. |
+| Assignment persistence | Without MongoDB, assignments created in Teacher Workspace are lost on page reload. Demo assignments always reload from localStorage. |
+| Student assignment access | Without MongoDB, challenge-type assignments open from local memory. Assignment-type (non-challenge) works require MongoDB to load their topology. |
+| Locked fields | `lockedFields` and `challengeConfig.editableFields` are displayed in the task panel but not enforced on the canvas — students can still drag nodes or change weights. |
+| Attempt integrity | `maxAttempts` is enforced in-memory. A student can bypass it by reloading the page. |
+| Grading | All grading is client-side. Expected answers are visible in the assignment JSON file. |
+| Segment Routing | Stub only — returns empty results. Planned for a future sprint. |
+| Concurrency | The FastAPI backend is single-worker with no connection pooling. Not suitable for classroom-scale simultaneous users. |
+| DV convergence | Distance Vector runs to full convergence synchronously. Async Bellman-Ford with failure simulation is not implemented. |
+
+---
+
 ## Future Production Work
 
 This is a university course prototype. Before any real deployment the following are required:

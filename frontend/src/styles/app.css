@@ -8773,3 +8773,12 @@ tbody tr:hover {
 .spd-empty-icon { color:var(--text-muted); opacity:.4 }
 .spd-empty-title { font-size:14px; font-weight:600; color:var(--text-primary) }
 .spd-empty-desc  { font-size:12px; color:var(--text-muted); max-width:300px }
+
+/* ── Demo Tools panel (Teacher Dashboard → Lab & Demos tab) ──────────────────── */
+.demo-tools-panel       { margin-top:10px; background:var(--surface-secondary,#f5f6f8); border:1px solid var(--border-color,#e0e0e8); border-radius:8px; padding:12px 14px; display:flex; flex-direction:column; gap:10px }
+.demo-tools-note        { display:flex; align-items:flex-start; gap:6px; font-size:12px; color:var(--text-muted,#888); line-height:1.5 }
+.demo-tools-note svg    { flex-shrink:0; margin-top:1px; color:var(--amber-600,#b45309) }
+.demo-tools-actions     { display:flex; flex-wrap:wrap; gap:8px }
+.demo-tools-legend      { border-top:1px solid var(--border-color,#e0e0e8); padding-top:8px; display:flex; flex-direction:column; gap:4px }
+.demo-tools-legend-row  { font-size:11px; color:var(--text-muted,#888); line-height:1.5 }
+.demo-tools-legend-row strong { color:var(--text-secondary,#555) }

@@ -46,6 +46,10 @@ import {
 import { gradeChallenge } from "../utils/challengeGrading";
 import { resolveHints } from "../utils/challengeHints";
 import { EXAMPLE_CHALLENGES } from "../utils/exampleChallenges";
+import {
+  ensureDemoClassroomData, resetDemoClassroomData,
+  loadDemoAssignedWorks, loadDemoAssignmentSummaries,
+} from "../utils/demoClassroomSeed";
 import { saveChallengeAttempt } from "../api/simulationApi";
 import { LectureExample } from "../utils/lectureExamples";
 import {
@@ -139,7 +143,9 @@ const WorkflowManager: React.FC = () => {
   // ── Classroom mode ────────────────────────────────────────────────────────
   const [appMode, setAppMode] = useState<AppMode>("lab");
   const [teacherDraft, setTeacherDraft] = useState<Partial<Assignment>>(newAssignmentDraft());
-  const [savedAssignments, setSavedAssignments] = useState<AssignmentSummary[]>([]);
+  const [savedAssignments, setSavedAssignments] = useState<AssignmentSummary[]>(
+    () => loadDemoAssignmentSummaries()
+  );
   const [activeAssignment, setActiveAssignment] = useState<Assignment | null>(null);
   const [activeSubmission, setActiveSubmission] = useState<StudentSubmission | null>(null);
   const [gradingResult, setGradingResult] = useState<GradingResult | null>(null);
@@ -166,7 +172,14 @@ const WorkflowManager: React.FC = () => {
   const [showHelpModal, setShowHelpModal] = useState(false);
 
   // ── Classroom distribution ─────────────────────────────────────────────────
-  const [assignedWorks, setAssignedWorks] = useState<AssignedWork[]>(() => loadAssignedWorks());
+  const [assignedWorks, setAssignedWorks] = useState<AssignedWork[]>(() => {
+    ensureDemoClassroomData();
+    const user = loadAssignedWorks();
+    const demo = loadDemoAssignedWorks();
+    // Merge: demo works first, user-added works appended (dedup by assignedWorkId)
+    const seen = new Set(demo.map((w) => w.assignedWorkId));
+    return [...demo, ...user.filter((w) => !seen.has(w.assignedWorkId))];
+  });
   const [currentStudentId, setCurrentStudentId] = useState<string | null>(() => loadCurrentStudentId());
 
   // ── Derived ───────────────────────────────────────────────────────────────
@@ -482,7 +495,15 @@ const WorkflowManager: React.FC = () => {
   }
 
   async function refreshSavedAssignments() {
-    try { setSavedAssignments(await listAssignments()); } catch { /* MongoDB offline */ }
+    const demo = loadDemoAssignmentSummaries();
+    try {
+      const remote = await listAssignments();
+      // Merge: demo summaries always present; remote summaries appended (dedup by assignmentId)
+      const seen = new Set(demo.map((a) => a.assignmentId));
+      setSavedAssignments([...demo, ...remote.filter((a) => !seen.has(a.assignmentId))]);
+    } catch {
+      setSavedAssignments(demo); // MongoDB offline — show demo only
+    }
   }
 
   // ── Classroom handlers ────────────────────────────────────────────────────
@@ -744,19 +765,45 @@ const WorkflowManager: React.FC = () => {
   }, [toast]);
 
   const handleExportAssignmentById = useCallback((assignmentId: string) => {
+    const local = EXAMPLE_CHALLENGES.find((c) => c.assignmentId === assignmentId);
+    if (local) { downloadAssignmentJson(local); toast("Assignment JSON exported.", "success"); return; }
     getAssignment(assignmentId)
       .then((a) => { downloadAssignmentJson(a); toast("Assignment JSON exported.", "success"); })
-      .catch(() => toast("Could not load assignment. Is MongoDB running?", "error"));
+      .catch(() => toast("Assignment not found. Is MongoDB running?", "error"));
   }, [toast]); // eslint-disable-line
 
   const handleExportAssignmentPdf = useCallback((assignmentId: string, includeAnswer: boolean) => {
+    const local = EXAMPLE_CHALLENGES.find((c) => c.assignmentId === assignmentId);
+    if (local) { exportAssignmentPdf(local, { includeAnswer }); toast("PDF exported.", "success"); return; }
     getAssignment(assignmentId)
       .then((a) => { exportAssignmentPdf(a, { includeAnswer }); toast("PDF exported.", "success"); })
-      .catch(() => toast("Could not load assignment for PDF export.", "error"));
+      .catch(() => toast("Assignment not found for PDF export. Is MongoDB running?", "error"));
   }, [toast]); // eslint-disable-line
 
   const handleOpenAssignedWork = useCallback(async (work: AssignedWork) => {
-    if (work.workType === "assignment") {
+    if (work.workType === "challenge") {
+      // Load directly from EXAMPLE_CHALLENGES — no MongoDB needed
+      const found = EXAMPLE_CHALLENGES.find((c) => c.assignmentId === work.workId);
+      setCurrentAttempt(null);
+      setChallengeGradingResult(null);
+      setAttemptHistory([]);
+      setHintsRevealed(0);
+      setAttemptNumber(1);
+      setSimulationResult(null);
+      setReplayMode(null);
+      setIsTraceMode(false);
+      setIsPlaying(false);
+      if (found) {
+        setActiveAssignment(found);
+        setNetwork(structuredClone(found.starterNetwork));
+        setCurrentStep(1);
+        toast(`Opened "${found.title}".`, "success");
+      } else {
+        setActiveAssignment(null);
+      }
+      setAppMode("challenge");
+    } else {
+      // Regular assignment — try MongoDB, fall back with error message
       try {
         const assignment = await getAssignment(work.workId);
         setActiveAssignment(assignment);
@@ -775,8 +822,6 @@ const WorkflowManager: React.FC = () => {
       } catch {
         toast("Could not load assignment. Is MongoDB running?", "error");
       }
-    } else {
-      setAppMode("challenge");
     }
   }, [toast]); // eslint-disable-line
 
@@ -874,6 +919,18 @@ const WorkflowManager: React.FC = () => {
     setAppMode("challenge");
     toast(`Opened "${found.title}" in Challenge Mode.`, "success");
   }, [clearChallengeState, toast]); // eslint-disable-line
+
+  const handleResetDemoData = useCallback(() => {
+    resetDemoClassroomData();
+    const demo = loadDemoAssignedWorks();
+    const user = loadAssignedWorks();
+    const seen = new Set(demo.map((w) => w.assignedWorkId));
+    const merged = [...demo, ...user.filter((w) => !seen.has(w.assignedWorkId))];
+    setAssignedWorks(merged);
+    saveAssignedWorks(user); // keep user-assigned works intact
+    setSavedAssignments(loadDemoAssignmentSummaries());
+    toast("Demo data reset to defaults.", "success");
+  }, [toast]); // eslint-disable-line
 
   const handleStartReplay = useCallback(() => {
     setIsTraceMode(true);
@@ -1137,6 +1194,7 @@ const WorkflowManager: React.FC = () => {
               onExportAssignmentPdf={handleExportAssignmentPdf}
               onRefreshAssignments={refreshSavedAssignments}
               onOpenChallenge={handleOpenChallengeById}
+              onResetDemoData={handleResetDemoData}
             />
           ) : (
             <StudentDashboard

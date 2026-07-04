@@ -2,7 +2,7 @@ import React, { useState, useMemo } from "react";
 import {
   FileText, Network, BookOpen, Clock, FileJson, HelpCircle, RefreshCw,
   ArrowRight, ChevronDown, ChevronUp, Check, Lightbulb, Users, Download, FileDown,
-  LayoutDashboard, ClipboardList,
+  LayoutDashboard, ClipboardList, RotateCcw, Database, AlertTriangle,
 } from "lucide-react";
 import { LectureExample, LECTURE_EXAMPLES } from "../utils/lectureExamples";
 import { SavedSimulationSummary } from "../types/network";
@@ -33,6 +33,7 @@ interface TeacherDashboardProps {
   onExportAssignmentPdf: (assignmentId: string, includeAnswer: boolean) => void;
   onRefreshAssignments: () => void;
   onOpenChallenge?: (workId: string) => void;
+  onResetDemoData?: () => void;
 }
 
 interface PendingAssign {
@@ -77,8 +78,10 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onExportAssignmentPdf,
   onRefreshAssignments,
   onOpenChallenge,
+  onResetDemoData,
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [showDemoTools, setShowDemoTools] = useState(false);
 
   const reviewRecords = useMemo(
     () => buildReviewRecords(assignedWorks, savedAssignments),
@@ -147,8 +150,8 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             </button>
             <span className="dash-tab-toolbar-note">
               {savedAssignments.length > 0
-                ? `${savedAssignments.length} assignment${savedAssignments.length > 1 ? "s" : ""} saved`
-                : "Requires MongoDB"}
+                ? `${savedAssignments.length} assignment${savedAssignments.length > 1 ? "s" : ""} · demo data always shown`
+                : "Demo data shown · MongoDB adds more"}
             </span>
           </div>
 
@@ -343,6 +346,46 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </div>
+
+          {/* Demo tools */}
+          <div className="dash-section" style={{ marginTop: 12 }}>
+            <button
+              className="dash-section-title dash-section-toggle"
+              onClick={() => setShowDemoTools((p) => !p)}
+            >
+              <Database size={13} /> Demo Tools
+              {showDemoTools ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            </button>
+            {showDemoTools && (
+              <div className="demo-tools-panel">
+                <div className="demo-tools-note">
+                  <AlertTriangle size={11} />
+                  Prototype demo data. Stored in your browser's localStorage. Resets only when you click below.
+                </div>
+                <div className="demo-tools-actions">
+                  <button
+                    className="btn-secondary btn-sm"
+                    onClick={onResetDemoData}
+                    title="Restore demo assignments, students, and submissions to defaults"
+                  >
+                    <RotateCcw size={11} /> Reset demo data
+                  </button>
+                  <button
+                    className="btn-secondary btn-sm"
+                    onClick={() => { localStorage.clear(); window.location.reload(); }}
+                    title="Clear ALL browser storage and reload — use to start completely fresh"
+                  >
+                    Clear all local data &amp; reload
+                  </button>
+                </div>
+                <div className="demo-tools-legend">
+                  <div className="demo-tools-legend-row"><strong>Demo students:</strong> Alice (s001) · Bob (s002) · Charlie (s003)</div>
+                  <div className="demo-tools-legend-row"><strong>Demo challenges:</strong> ECMP Triangle · Reduce Congestion · Distance Vector P4</div>
+                  <div className="demo-tools-legend-row"><strong>MongoDB:</strong> optional — assignments and submissions fall back to localStorage when offline.</div>
+                </div>
               </div>
             )}
           </div>
