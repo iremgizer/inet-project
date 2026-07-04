@@ -17,10 +17,14 @@ export const triangleTemplate: NetworkInput = {
 };
 
 export const topologyOptions = [
-  { value: "custom", label: "Custom" },
-  { value: "triangle", label: "Triangle" },
-  { value: "line", label: "Line" },
-  { value: "ring", label: "Ring" },
-  { value: "mesh", label: "Mesh" },
-  { value: "fat-tree", label: "Fat-Tree" },
+  { value: "custom",    label: "Custom" },
+  { value: "triangle",  label: "Triangle" },
+  { value: "ring",      label: "Ring" },
+  { value: "mesh",      label: "Mesh" },
+  { value: "fat-tree",  label: "Clos Fat-Tree" },
+  { value: "grid",      label: "Grid" },
+  { value: "path",      label: "Path Graph" },
+  { value: "cycle",     label: "Cycle" },
+  { value: "random",    label: "Random" },
+  { value: "line",      label: "Line" },
 ];

@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { Plus, Trash2, Waypoints } from "lucide-react";
 import { NodeInput, TrafficDemandInput } from "../types/network";
 
 interface TrafficConfigurationPageProps {
@@ -8,6 +9,8 @@ interface TrafficConfigurationPageProps {
   onDeleteDemand: (id: string) => void;
   onBack: () => void;
   onNext: () => void;
+  initialSource?: string | null;
+  onConsumeInitialSource?: () => void;
 }
 
 const TrafficConfigurationPage: React.FC<TrafficConfigurationPageProps> = ({
@@ -17,56 +20,116 @@ const TrafficConfigurationPage: React.FC<TrafficConfigurationPageProps> = ({
   onDeleteDemand,
   onBack,
   onNext,
+  initialSource,
+  onConsumeInitialSource,
 }) => {
-  const [source, setSource] = useState("");
+  const [source, setSource] = useState(initialSource ?? "");
   const [target, setTarget] = useState("");
   const [amount, setAmount] = useState(1);
 
-  const addDemand = () => {
-    if (!source || !target || source === target) return;
+  useEffect(() => {
+    if (initialSource) {
+      setSource(initialSource);
+      onConsumeInitialSource?.();
+    }
+  }, [initialSource, onConsumeInitialSource]);
+
+  const canAdd = source && target && source !== target && amount > 0;
+
+  const add = () => {
+    if (!canAdd) return;
     onAddDemand({ source, target, amount });
     setSource("");
     setTarget("");
     setAmount(1);
   };
 
-  return (
-    <div className="workflow-page">
-      <div className="page-kicker">Step 2 · Configure Traffic</div>
-      <h2>Define what must be routed</h2>
-      <p className="page-subtitle">A traffic demand says how much continuous flow should travel from one node to another.</p>
+  const nodeLabel = (id: string) => nodes.find((n) => n.id === id)?.label ?? id;
 
-      <div className="form-section">
-        <h3>Add Traffic Demand</h3>
-        <label>Source<select value={source} onChange={(event) => setSource(event.target.value)}><option value="">Select</option>{nodes.map((node) => <option key={node.id} value={node.id}>{node.label}</option>)}</select></label>
-        <label>Destination<select value={target} onChange={(event) => setTarget(event.target.value)}><option value="">Select</option>{nodes.map((node) => <option key={node.id} value={node.id}>{node.label}</option>)}</select></label>
-        <label>Amount<input type="number" min="0" step="0.1" value={amount} onChange={(event) => setAmount(Number(event.target.value))} /></label>
-        <button onClick={addDemand} disabled={nodes.length < 2}>Add Demand</button>
+  return (
+    <div className="page">
+      <div className="stage-kicker">
+        <Waypoints size={13} />
+        Traffic
+      </div>
+      <h2 className="page-title">Define traffic flows</h2>
+      <p className="page-subtitle">
+        Add demands — each one describes traffic that must travel from one node to another.
+      </p>
+
+      {/* Add demand form */}
+      <div className="form-card">
+        <div className="form-row">
+          <label className="field">
+            <span>From</span>
+            <select className="select-input" value={source} onChange={(e) => setSource(e.target.value)}>
+              <option value="">Node…</option>
+              {nodes.map((n) => (
+                <option key={n.id} value={n.id}>{n.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>To</span>
+            <select className="select-input" value={target} onChange={(e) => setTarget(e.target.value)}>
+              <option value="">Node…</option>
+              {nodes.map((n) => (
+                <option key={n.id} value={n.id}>{n.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Amount</span>
+            <input
+              className="number-input"
+              type="number"
+              min="0.1"
+              step="0.1"
+              value={amount}
+              onChange={(e) => setAmount(Number(e.target.value))}
+            />
+          </label>
+        </div>
+        <button
+          className="btn-primary btn-sm"
+          onClick={add}
+          disabled={!canAdd || nodes.length < 2}
+        >
+          <Plus size={14} /> Add demand
+        </button>
       </div>
 
-      <div className="demand-list guided-list">
-        <h3>Demand List</h3>
-        {demands.length === 0 ? <p>No demands yet.</p> : (
-          <ul>
-            {demands.map((demand) => (
-              <li key={demand.id}>
-                <span>{demand.source} to {demand.target}: {demand.amount}</span>
-                <button onClick={() => onDeleteDemand(demand.id)}>Delete</button>
+      {/* Demand list */}
+      {demands.length === 0 ? (
+        <div className="empty-state">
+          No demands yet.
+        </div>
+      ) : (
+        <>
+          <div className="section-label">{demands.length} demand{demands.length !== 1 ? "s" : ""}</div>
+          <ul className="demand-list">
+            {demands.map((d) => (
+              <li key={d.id} className="demand-item">
+                <div className="demand-route">
+                  <span className="demand-node">{nodeLabel(d.source)}</span>
+                  <span className="demand-arrow">→</span>
+                  <span className="demand-node">{nodeLabel(d.target)}</span>
+                </div>
+                <span className="demand-amount">{d.amount}</span>
+                <button className="icon-btn danger" onClick={() => onDeleteDemand(d.id)} title="Delete demand">
+                  <Trash2 size={12} />
+                </button>
               </li>
             ))}
           </ul>
-        )}
-      </div>
+        </>
+      )}
 
-      <div className="education-note">
-        <h3>What is a traffic demand?</h3>
-        <p><strong>A to D : 10</strong> means 10 units of traffic must be routed from A to D.</p>
-        <p>The simulator treats this as continuous flow, not individual packets.</p>
-      </div>
-
-      <div className="workflow-actions">
-        <button className="secondary" onClick={onBack}>Back</button>
-        <button onClick={onNext}>Next: Choose Algorithm</button>
+      <div className="page-actions">
+        <button className="btn-secondary btn-sm" onClick={onBack}>Back</button>
+        <button className="btn-primary" onClick={onNext} disabled={demands.length === 0}>
+          Next: Algorithm →
+        </button>
       </div>
     </div>
   );

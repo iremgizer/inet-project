@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "topology.schema.json",
+  "title": "Network Topology",
+  "description": "JSON format for importing/exporting network topologies into the Network Algorithm Visualizer.",
+  "type": "object",
+  "required": ["nodes", "links"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Optional human-readable name for this topology."
+    },
+    "topologyType": {
+      "type": "string",
+      "enum": ["custom", "triangle", "ring", "mesh", "fat-tree", "clos-fat-tree", "line", "grid", "path", "cycle", "random"],
+      "default": "custom"
+    },
+    "isDirected": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether links are directed (true) or undirected (false)."
+    },
+    "nodes": {
+      "type": "array",
+      "description": "List of nodes in the network.",
+      "items": {
+        "type": "object",
+        "required": ["id", "label"],
+        "properties": {
+          "id":    { "type": "string", "description": "Unique node identifier." },
+          "label": { "type": "string", "description": "Display label shown on the canvas." },
+          "x":     { "type": "number", "description": "Canvas x-position (optional; auto-layout if omitted)." },
+          "y":     { "type": "number", "description": "Canvas y-position (optional; auto-layout if omitted)." }
+        }
+      },
+      "minItems": 1
+    },
+    "links": {
+      "type": "array",
+      "description": "List of links between nodes.",
+      "items": {
+        "type": "object",
+        "required": ["id", "source", "target"],
+        "properties": {
+          "id":       { "type": "string", "description": "Unique link identifier." },
+          "source":   { "type": "string", "description": "Source node id." },
+          "target":   { "type": "string", "description": "Target node id." },
+          "weight":   { "type": "number", "minimum": 0, "default": 1, "description": "Routing cost. Lower weight = preferred path." },
+          "capacity": { "type": "number", "minimum": 0.01, "default": 10, "description": "Max traffic before congestion." }
+        }
+      }
+    },
+    "demands": {
+      "type": "array",
+      "description": "Optional traffic demands to pre-load.",
+      "items": {
+        "type": "object",
+        "required": ["id", "source", "target", "amount"],
+        "properties": {
+          "id":     { "type": "string" },
+          "source": { "type": "string" },
+          "target": { "type": "string" },
+          "amount": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "P4 Shortest-Path Exercise",
+  "topologyType": "line",
+  "isDirected": false,
+  "nodes": [
+    { "id": "A", "label": "A", "x": 80,  "y": 200 },
+    { "id": "B", "label": "B", "x": 220, "y": 200 },
+    { "id": "C", "label": "C", "x": 360, "y": 200 },
+    { "id": "D", "label": "D", "x": 500, "y": 200 }
+  ],
+  "links": [
+    { "id": "A-B", "source": "A", "target": "B", "weight": 10, "capacity": 10 },
+    { "id": "B-C", "source": "B", "target": "C", "weight": 10, "capacity": 10 },
+    { "id": "C-D", "source": "C", "target": "D", "weight": 10, "capacity": 10 }
+  ],
+  "demands": [
+    { "id": "d1", "source": "A", "target": "D", "amount": 5 }
+  ]
+}

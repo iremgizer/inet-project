@@ -1,5 +1,7 @@
-import React from "react";
+import React, { useState } from "react";
+import { ChevronDown, ChevronUp, Zap, GitBranch } from "lucide-react";
 import { AlgorithmConfig, AlgorithmName } from "../types/network";
+import TermHint from "../components/TermHint";
 
 interface AlgorithmSelectionPageProps {
   algorithmConfig: AlgorithmConfig;
@@ -10,36 +12,33 @@ interface AlgorithmSelectionPageProps {
   onStartSimulation: () => void;
 }
 
-const algorithmCards = [
+const algorithms = [
   {
     id: "ECMP" as AlgorithmName,
-    title: "ECMP",
-    difficulty: "Beginner",
-    definition: "Equal-Cost Multi-Path routing uses every shortest path with the same total weight.",
-    advantages: "Simple, intuitive, balances flow across equal routes.",
-    disadvantages: "Cannot use longer paths even if they have spare capacity.",
-    formula: "Path Cost = Sum of Link Weights; Traffic Share = Demand / Equal-Cost Path Count",
-    example: "If A-B-C and A-D-C both cost 5, ECMP splits the demand across both.",
+    name: "ECMP",
+    fullName: "Equal-Cost Multi-Path",
+    level: "Beginner",
+    tagline: "Splits traffic equally across all shortest paths.",
+    detail: "Finds every path with the same minimum cost and divides traffic evenly between them. Simple, predictable, and widely used in real networks.",
+    formula: "share per path = demand ÷ number of equal-cost paths",
   },
   {
     id: "DISTANCE_VECTOR" as AlgorithmName,
-    title: "Distance Vector",
-    difficulty: "Intermediate",
-    definition: "Each node stores a cost and next hop for every destination.",
-    advantages: "Explains distributed routing and Bellman-Ford reasoning.",
-    disadvantages: "Real networks need convergence handling, which is deferred in V1.",
-    formula: "Cost(x,d) = min(linkWeight(x,n) + Cost(n,d))",
-    example: "Node A forwards toward C through neighbor B if B gives the lowest total cost.",
+    name: "Distance Vector",
+    fullName: "Bellman-Ford Distance Vector",
+    level: "Intermediate",
+    tagline: "Builds a next-hop table by learning from neighbors.",
+    detail: "Each node advertises its distance to every destination. Routers iteratively update until convergence. Shows how real protocols like RIP work.",
+    formula: "cost = min(neighbor cost + link weight)",
   },
   {
     id: "SEGMENT_ROUTING" as AlgorithmName,
-    title: "Segment Routing",
-    difficulty: "Coming soon",
-    definition: "Routes through planned waypoints or segments.",
-    advantages: "Powerful for policy routing.",
-    disadvantages: "Placeholder in this version.",
-    formula: "Planned extension",
-    example: "Future: force A to reach D through B first.",
+    name: "Segment Routing",
+    fullName: "Segment Routing",
+    level: "Coming soon",
+    tagline: "Route traffic through explicit waypoints.",
+    detail: "Planned extension — allows specifying exact paths through the network.",
+    formula: "–",
   },
 ];
 
@@ -51,53 +50,104 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
   onBack,
   onStartSimulation,
 }) => {
-  const selected = algorithmCards.find((card) => card.id === algorithmConfig.selectedAlgorithm) || algorithmCards[0];
+  const [showTheory, setShowTheory] = useState(false);
+  const selected = algorithms.find((a) => a.id === algorithmConfig.selectedAlgorithm) ?? algorithms[0];
+  const isPlaceholder = selected.id === "SEGMENT_ROUTING";
+
   return (
-    <div className="workflow-page">
-      <div className="page-kicker">Step 3 · Choose Algorithm</div>
-      <h2>Select the routing idea to study</h2>
-      <p className="page-subtitle">The algorithm decides which paths carry the traffic demand.</p>
+    <div className="page">
+      <div className="stage-kicker">
+        <GitBranch size={13} />
+        Algorithm
+      </div>
+      <h2 className="page-title">Choose routing algorithm</h2>
 
-      <div className="algorithm-card-grid">
-        {algorithmCards.map((card) => (
-          <button
-            key={card.id}
-            className={`algorithm-choice-card ${algorithmConfig.selectedAlgorithm === card.id ? "selected" : ""}`}
-            onClick={() => onAlgorithmChange(card.id)}
-          >
-            <strong>{card.title}</strong>
-            <span>{card.difficulty}</span>
-            <p>{card.definition}</p>
-          </button>
-        ))}
+      <div className="algo-card-list">
+        {algorithms.map((a) => {
+          const isSelected = algorithmConfig.selectedAlgorithm === a.id;
+          const isDisabled = a.level === "Coming soon";
+          return (
+            <button
+              key={a.id}
+              className={`algo-card ${isSelected ? "algo-card--selected" : ""} ${isDisabled ? "algo-card--disabled" : ""}`}
+              onClick={() => !isDisabled && onAlgorithmChange(a.id)}
+              disabled={isDisabled}
+            >
+              <div className="algo-card-header">
+                <div className="algo-card-name">
+                  <strong>{a.name}</strong>
+                </div>
+                <span className={`level-badge ${
+                  a.level === "Beginner" ? "level-beginner"
+                  : a.level === "Coming soon" ? "level-soon"
+                  : "level-mid"
+                }`}>
+                  {a.level}
+                </span>
+              </div>
+              <p>{a.tagline}</p>
+              {isSelected && !isDisabled && (
+                <div className="algo-card-selected-indicator">
+                  <span>Selected</span>
+                </div>
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      <div className="education-note theory-panel">
-        <h3>{selected.title} Theory</h3>
-        <p><strong>Definition:</strong> {selected.definition}</p>
-        <p><strong>Advantages:</strong> {selected.advantages}</p>
-        <p><strong>Disadvantages:</strong> {selected.disadvantages}</p>
-        <pre>{selected.formula}</pre>
-        <p><strong>Worked example:</strong> {selected.example}</p>
-        {selected.id === "SEGMENT_ROUTING" && <p className="placeholder-note">Segment Routing is planned and returns placeholder output in V1.</p>}
-      </div>
+      {/* Theory toggle */}
+      <button className="collapse-toggle" onClick={() => setShowTheory((p) => !p)}>
+        {showTheory ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+        {showTheory ? "Hide" : "How"} {selected.name} works
+      </button>
+      {showTheory && (
+        <div className="theory-box">
+          <p>{selected.detail}</p>
+          <pre className="formula-block">{selected.formula}</pre>
+          {isPlaceholder && (
+            <div className="notice notice--warning">
+              Segment Routing is a placeholder. Select ECMP or Distance Vector to simulate.
+            </div>
+          )}
+        </div>
+      )}
 
-      <div className="form-section">
-        <label>
-          Congestion Threshold
+      {/* Congestion threshold */}
+      <div className="threshold-row">
+        <label className="field field--inline">
+          <span className="field-label-row">
+            Congestion threshold
+            <TermHint
+              term="Congestion threshold"
+              shortDefinition="A link is marked congested when its utilization exceeds this value. Default is 1.0 (100% of capacity)."
+              formula="congested if load / capacity > threshold"
+            />
+          </span>
           <input
+            className="number-input number-input--sm"
             type="number"
             min="0.1"
             step="0.1"
             value={algorithmConfig.congestionThreshold}
-            onChange={(event) => onThresholdChange(Number(event.target.value))}
+            onChange={(e) => onThresholdChange(Number(e.target.value))}
           />
         </label>
       </div>
 
-      <div className="workflow-actions">
-        <button className="secondary" onClick={onBack}>Back</button>
-        <button onClick={onStartSimulation} disabled={isRunning}>{isRunning ? "Running..." : "Start Simulation"}</button>
+      <div className="page-actions">
+        <button className="btn-secondary btn-sm" onClick={onBack}>Back</button>
+        <button
+          className="btn-primary btn-run"
+          onClick={onStartSimulation}
+          disabled={isRunning || isPlaceholder}
+        >
+          {isRunning ? (
+            <><span className="spinner" /> Running…</>
+          ) : (
+            <><Zap size={14} /> Run simulation</>
+          )}
+        </button>
       </div>
     </div>
   );

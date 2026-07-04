@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "submission.schema.json",
+  "title": "StudentSubmission",
+  "description": "Network Lab student submission file format.",
+  "type": "object",
+  "required": ["assignmentId", "submittedNetwork", "submittedAlgorithmConfig"],
+  "properties": {
+    "submissionId": { "type": "string", "description": "Unique ID. Auto-generated if omitted." },
+    "assignmentId": { "type": "string" },
+    "studentName": { "type": "string", "default": "" },
+    "submittedNetwork": {
+      "type": "object",
+      "description": "The network state at submission time (same schema as assignment.starterNetwork).",
+      "required": ["nodes", "links", "demands", "topologyType", "isDirected"]
+    },
+    "submittedAlgorithmConfig": {
+      "type": "object",
+      "required": ["selectedAlgorithm", "algorithmType", "objective", "congestionThreshold"],
+      "properties": {
+        "selectedAlgorithm": {
+          "type": "string",
+          "enum": ["ECMP", "DISTANCE_VECTOR", "SEGMENT_ROUTING", "CUSTOM_SPLITTING"]
+        },
+        "algorithmType": {
+          "type": "string",
+          "enum": ["exact", "real_world_heuristic", "custom"]
+        },
+        "objective": {
+          "type": "string",
+          "enum": ["minimize_max_utilization", "minimize_path_cost"]
+        },
+        "congestionThreshold": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "submittedAnswers": {
+      "type": "object",
+      "description": "Task-specific answers keyed by field name.",
+      "additionalProperties": true
+    },
+    "createdAt": { "type": "string", "format": "date-time" }
+  }
+}
