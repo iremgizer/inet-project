@@ -75,6 +75,57 @@ After logging in as a student, the app asks you to choose a demo student profile
 
 The roster is defined in `frontend/src/utils/demoUsers.ts`. Each student sees only the work their teacher has assigned to them (or work assigned to all students).
 
+Each demo student has different pre-seeded progress data, so the Student Dashboard shows realistic but distinct experiences:
+
+| Student | Strengths | Status |
+|---|---|---|
+| Alice (s001) | ECMP, Congestion | 4 challenges solved, avg score 88% |
+| Bob (s002) | Shortest Path | 1 challenge solved, avg score 65%, using hints |
+| Charlie (s003) | Getting started | 0 challenges solved, needs encouragement |
+
+---
+
+## Student Progress Dashboard
+
+After logging in as a student, the **Student Dashboard** provides a full learner portal:
+
+### Overview tab
+- Personalised greeting with an average-score ring indicator
+- 8 metric cards: assigned work, completed, in progress, needs retry, best score, challenges solved, hints used, replays watched
+- **Continue Learning** — 3 recommended next actions (challenges, lectures, lab), with progress bars and CTA buttons (Start / Continue / Retry)
+- **Your Insights** — 3–5 AI-derived observations about the student's performance patterns
+
+### Progress tab
+- **Topic Progress** — 8 topic cards (ECMP, Distance Vector, Congestion, Traffic Engineering, Shortest Path, Routing Tables, Link Weights, Capacity), each showing status (Not Started / Learning / Completed), a progress bar, score, description, and a next-step action button
+- **Achievements** — 6 badges (First Simulation, ECMP Explorer, Congestion Detective, Replay Learner, No-Hint Solver, Challenge Streak) with locked/unlocked states and unlock dates
+
+### My Work tab
+- Filter bar: All / Active / Completed / Needs attention (with a red badge count)
+- Assignments and Challenges shown separately, each row shows status badge, score, attempts, last activity, and a context-aware CTA (Start / Continue / Retry / Review)
+- Inline lecture examples panel (collapsed by default)
+- JSON import fallback
+
+### Timeline tab
+- Chronological activity log: submissions, attempts, hints revealed, replays watched, lectures opened, simulation runs
+- Color-coded icons per event type
+- Relative timestamps ("just now", "2h ago", "yesterday")
+
+### Prototype data model
+
+Progress data is seeded in `frontend/src/utils/studentProgressService.ts` and parameterised per student ID. The service exports:
+
+| Function | Description |
+|---|---|
+| `computeStudentOverview` | Aggregate metrics (completed, avg score, hints, replays) |
+| `computeTopicProgress` | Per-topic status, progress %, score, next action |
+| `computeContinueLearning` | 3 recommended next-step items |
+| `computeStudentTimeline` | Chronological activity events |
+| `computeStudentAchievements` | All 6 badges with locked/unlocked state |
+| `computeStudentInsights` | 3–5 personalised insight cards |
+| `getStudentWorkRecord` | Per-student status/score for a specific work item |
+
+In production, replace the `SEED` object with real queries to MongoDB submission and attempt collections.
+
 ---
 
 ## Teacher Workflow

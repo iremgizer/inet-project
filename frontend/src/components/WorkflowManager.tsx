@@ -1151,6 +1151,7 @@ const WorkflowManager: React.FC = () => {
               onOpenSavedRuns={() => setSavedRunsOpen(true)}
               onOpenHelp={() => setShowHelpModal(true)}
               onOpenAssignedWork={handleOpenAssignedWork}
+              onOpenChallenge={handleOpenChallengeById}
             />
           )}
           <input
