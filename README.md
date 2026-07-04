@@ -216,14 +216,3 @@ Run Simulation     — execute routing and view link utilization results
 Replay Trace       — step through the algorithm's decisions one event at a time
 ```
 
----
-
-## License
-
-MIT License
-
----
-
-## Acknowledgements
-
-Developed as part of the **Algorithms for Network Systems** course at **Technische Universität Berlin**.
