@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Network, Waypoints, GitBranch, BarChart3, CheckCircle2, BookOpen, Clock, GraduationCap, Target, ChevronLeft, ChevronRight } from "lucide-react";
+import { Network, Waypoints, GitBranch, BarChart3, CheckCircle2, BookOpen, Clock, GraduationCap, Target, ChevronLeft, ChevronRight, LogOut } from "lucide-react";
 import ReactFlowCanvas from "./ReactFlowCanvas";
 import MetricsPanel from "./MetricsPanel";
 import RoutingTablePanel from "./RoutingTablePanel";
@@ -8,7 +8,9 @@ import NodeDetailPanel from "./NodeDetailPanel";
 import LinkDetailPanel from "./LinkDetailPanel";
 import SavedRunsDrawer from "./SavedRunsDrawer";
 import CanvasToolbar from "./CanvasToolbar";
-import WelcomePage from "../pages/WelcomePage";
+import LandingPage from "../pages/LandingPage";
+import TeacherDashboard from "../pages/TeacherDashboard";
+import StudentDashboard from "../pages/StudentDashboard";
 import NetworkBuilderPage from "../pages/NetworkBuilderPage";
 import TrafficConfigurationPage from "../pages/TrafficConfigurationPage";
 import AlgorithmSelectionPage from "../pages/AlgorithmSelectionPage";
@@ -16,7 +18,9 @@ import SimulationStudioPage from "../pages/SimulationStudioPage";
 import TeacherWorkspacePage from "../pages/TeacherWorkspacePage";
 import StudentWorkspacePage from "../pages/StudentWorkspacePage";
 import ChallengeWorkspacePage from "../pages/ChallengeWorkspacePage";
+import JsonHelpModal from "./JsonHelpModal";
 import { useToast } from "./Toast";
+import { UserRole } from "../utils/demoAuth";
 import { simulateNetwork, listSavedRuns, getSavedRun, deleteSavedRun, listAssignments, saveAssignment } from "../api/simulationApi";
 import { triangleTemplate } from "../utils/topologyTemplates";
 import { applyAutoLayout, generateRandomTopology, generateTopology, RandomGraphConfig, TopologySize } from "../utils/generatedTopologies";
@@ -151,6 +155,10 @@ const WorkflowManager: React.FC = () => {
 
   // ── Home page import ref ──────────────────────────────────────────────────
   const homeImportRef = useRef<HTMLInputElement>(null);
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  const [userRole, setUserRole] = useState<UserRole | null>(null);
+  const [showHelpModal, setShowHelpModal] = useState(false);
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const traceEvents = simulationResult?.traceEvents ?? [];
@@ -295,6 +303,39 @@ const WorkflowManager: React.FC = () => {
     setIsTraceMode(false);
     setIsPlaying(false);
     setAppMode("lab");
+  }, []);
+
+  const handleLogin = useCallback((role: UserRole) => {
+    setUserRole(role);
+    setCurrentStep(0);
+    setAppMode("lab");
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    setUserRole(null);
+    setCurrentStep(0);
+    setAppMode("lab");
+    setNetwork({ nodes: [], links: [], demands: [], topologyType: "custom", isDirected: false });
+    setSimulationResult(null);
+    setLectureInsight(null);
+    setSelectedType(null);
+    setSelectedId(null);
+    setIsTraceMode(false);
+    setIsPlaying(false);
+    setActiveAssignment(null);
+    setActiveSubmission(null);
+    setGradingResult(null);
+    setChallengeGradingResult(null);
+    setAttemptHistory([]);
+    setHintsRevealed(0);
+    setAttemptNumber(1);
+  }, []);
+
+  const handleGoToLab = useCallback(() => {
+    setAppMode("lab");
+    setNetwork({ nodes: [], links: [], demands: [], topologyType: "custom", isDirected: false });
+    setSimulationResult(null);
+    setCurrentStep(1);
   }, []);
 
   const handleSelectAndLoadTopology = useCallback((type: TopologyType) => {
@@ -932,62 +973,94 @@ const WorkflowManager: React.FC = () => {
           </nav>
         )}
 
-        {/* ── Mode tabs ── */}
-        <nav className="mode-tabs" aria-label="Application mode">
-          <button
-            className={`mode-tab${appMode === "lab" ? " mode-tab--active" : ""}`}
-            onClick={() => handleSwitchMode("lab")}
-          >
-            <Network size={12} /> Lab
-          </button>
-          <button
-            className={`mode-tab${appMode === "student" ? " mode-tab--active" : ""}`}
-            onClick={() => handleSwitchMode("student")}
-          >
-            <GraduationCap size={12} /> Student
-          </button>
-          <button
-            className={`mode-tab${appMode === "challenge" ? " mode-tab--active" : ""}`}
-            onClick={() => handleSwitchMode("challenge")}
-          >
-            <Target size={12} /> Challenge
-          </button>
-          <button
-            className={`mode-tab${appMode === "teacher" ? " mode-tab--active" : ""}`}
-            onClick={() => handleSwitchMode("teacher")}
-          >
-            <BookOpen size={12} /> Teacher
-          </button>
-        </nav>
+        {/* ── Mode tabs — role-filtered, hidden at dashboard ── */}
+        {userRole && !(appMode === "lab" && currentStep === 0) && (
+          <nav className="mode-tabs" aria-label="Application mode">
+            <button
+              className={`mode-tab${appMode === "lab" ? " mode-tab--active" : ""}`}
+              onClick={() => handleSwitchMode("lab")}
+            >
+              <Network size={12} /> Lab
+            </button>
+            {userRole === "teacher" && (
+              <button
+                className={`mode-tab${appMode === "teacher" ? " mode-tab--active" : ""}`}
+                onClick={() => handleSwitchMode("teacher")}
+              >
+                <BookOpen size={12} /> Teacher
+              </button>
+            )}
+            {userRole === "student" && (
+              <>
+                <button
+                  className={`mode-tab${appMode === "student" ? " mode-tab--active" : ""}`}
+                  onClick={() => handleSwitchMode("student")}
+                >
+                  <GraduationCap size={12} /> Student
+                </button>
+                <button
+                  className={`mode-tab${appMode === "challenge" ? " mode-tab--active" : ""}`}
+                  onClick={() => handleSwitchMode("challenge")}
+                >
+                  <Target size={12} /> Challenge
+                </button>
+              </>
+            )}
+          </nav>
+        )}
 
         <div className="topbar-actions">
-          <button
-            className="topbar-action-btn"
-            onClick={() => setSavedRunsOpen(true)}
-            title="Saved runs"
-            aria-label="Open saved runs"
-          >
-            <Clock size={14} />
-            {savedRuns.length > 0 && <span className="topbar-badge">{savedRuns.length}</span>}
-          </button>
+          {userRole && (
+            <>
+              <button
+                className="topbar-action-btn"
+                onClick={() => setSavedRunsOpen(true)}
+                title="Saved runs"
+                aria-label="Open saved runs"
+              >
+                <Clock size={14} />
+                {savedRuns.length > 0 && <span className="topbar-badge">{savedRuns.length}</span>}
+              </button>
+              <span className="topbar-role-badge">
+                {userRole === "teacher" ? <BookOpen size={11} /> : <GraduationCap size={11} />}
+                {userRole === "teacher" ? "Teacher" : "Student"}
+              </span>
+              <button className="topbar-logout-btn" onClick={handleLogout} title="Sign out">
+                <LogOut size={13} /> Sign out
+              </button>
+            </>
+          )}
         </div>
       </header>
 
       {/* ── Main content ── */}
       {appMode === "lab" && currentStep === 0 ? (
         <main className="home-fullpage">
-          <WelcomePage
-            savedRuns={savedRuns}
-            onBuildNetwork={() => {
-              setNetwork({ nodes: [], links: [], demands: [], topologyType: "custom", isDirected: false });
-              setCurrentStep(1);
-            }}
-            onLoadSavedRun={handleLoadSavedRun}
-            onOpenSavedRuns={() => setSavedRunsOpen(true)}
-            onLoadLectureExample={handleLoadLectureExample}
-            onImportJson={() => homeImportRef.current?.click()}
-            onSwitchMode={handleSwitchMode}
-          />
+          {!userRole ? (
+            <LandingPage onLogin={handleLogin} />
+          ) : userRole === "teacher" ? (
+            <TeacherDashboard
+              savedRuns={savedRuns}
+              onCreateAssignment={() => handleSwitchMode("teacher")}
+              onBuildLab={handleGoToLab}
+              onLoadLectureExample={handleLoadLectureExample}
+              onOpenChallenges={() => handleSwitchMode("challenge")}
+              onOpenSavedRuns={() => setSavedRunsOpen(true)}
+              onImportJson={() => homeImportRef.current?.click()}
+              onDownloadExampleTopology={handleDownloadExample}
+              onOpenHelp={() => setShowHelpModal(true)}
+            />
+          ) : (
+            <StudentDashboard
+              savedRuns={savedRuns}
+              onOpenAssignment={() => handleSwitchMode("student")}
+              onOpenChallenges={() => handleSwitchMode("challenge")}
+              onBuildLab={handleGoToLab}
+              onLoadLectureExample={handleLoadLectureExample}
+              onOpenSavedRuns={() => setSavedRunsOpen(true)}
+              onOpenHelp={() => setShowHelpModal(true)}
+            />
+          )}
           <input
             ref={homeImportRef}
             type="file"
@@ -1099,13 +1172,22 @@ const WorkflowManager: React.FC = () => {
       )}
 
       {/* ── Saved runs drawer ── */}
-      <SavedRunsDrawer
-        open={savedRunsOpen}
-        runs={savedRuns}
-        onClose={() => setSavedRunsOpen(false)}
-        onRefresh={refreshSavedRuns}
-        onLoad={handleLoadSavedRun}
-        onDelete={handleDeleteSavedRun}
+      {userRole && (
+        <SavedRunsDrawer
+          open={savedRunsOpen}
+          runs={savedRuns}
+          onClose={() => setSavedRunsOpen(false)}
+          onRefresh={refreshSavedRuns}
+          onLoad={handleLoadSavedRun}
+          onDelete={handleDeleteSavedRun}
+        />
+      )}
+
+      {/* ── JSON help modal ── */}
+      <JsonHelpModal
+        open={showHelpModal}
+        onClose={() => setShowHelpModal(false)}
+        onDownloadExampleTopology={handleDownloadExample}
       />
     </div>
   );

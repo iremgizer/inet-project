@@ -50,6 +50,44 @@ inet-project/
 
 ---
 
+## Demo Login
+
+> **Warning:** This login is for local prototype and demo purposes only.
+> It is **not** production authentication. Before any deployment, replace it with
+> secure authentication (JWT, OAuth, or institutional SSO) and database-backed user management.
+
+| Role | Username | Password |
+|---|---|---|
+| Teacher | `teacher` | `teacher` |
+| Student | `student` | `student` |
+
+The credentials are defined in `frontend/src/utils/demoAuth.ts`.
+
+---
+
+## JSON Workflow
+
+Students do not write JSON manually. The workflow is:
+
+```
+Teacher  → creates assignment.json in Teacher Workspace → shares with students
+Student  → imports assignment.json via My Assignments  → solves task on canvas
+Student  → exports submission.json                     → sends to teacher
+Teacher  → reviews submission.json or saved submissions
+```
+
+### Schema files
+
+| File | Location |
+|---|---|
+| `topology.schema.json` | `frontend/src/schemas/topology.schema.json` |
+| `assignment.schema.json` | `frontend/src/schemas/assignment.schema.json` |
+| `submission.schema.json` | `frontend/src/schemas/submission.schema.json` |
+
+These schemas are used internally by the app to validate imported files. Students do not need to read or edit them.
+
+---
+
 ## Requirements
 
 - **Node.js** v18 or later
