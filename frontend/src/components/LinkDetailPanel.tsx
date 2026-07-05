@@ -15,6 +15,9 @@ interface LinkDetailPanelProps {
   result: SimulationResult | null;
   onUpdate: (id: string, update: Partial<LinkInput>) => void;
   onDelete: (id: string) => void;
+  canEditLinks?: boolean;
+  canEditWeights?: boolean;
+  canEditCapacities?: boolean;
 }
 
 const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
@@ -23,6 +26,9 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
   result,
   onUpdate,
   onDelete,
+  canEditLinks = true,
+  canEditWeights = true,
+  canEditCapacities = true,
 }) => {
   const [showFormula, setShowFormula] = useState(false);
 
@@ -47,8 +53,9 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
         <button
           className="icon-btn danger"
           onClick={() => onDelete(link.id)}
-          title="Delete link"
+          title={canEditLinks ? "Delete link" : "Locked by teacher"}
           aria-label="Delete link"
+          disabled={!canEditLinks}
         >
           <Trash2 size={13} />
         </button>
@@ -64,6 +71,16 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
       {/* Parameters */}
       <div className="detail-section">
         <div className="detail-section-title">Parameters</div>
+        {(!canEditWeights || !canEditCapacities) && (
+          <div className="locked-notice">
+            <span className="locked-notice-icon">🔒</span>
+            {!canEditWeights && !canEditCapacities
+              ? "Weights and capacities locked by teacher"
+              : !canEditWeights
+              ? "Weight locked by teacher"
+              : "Capacity locked by teacher"}
+          </div>
+        )}
         <div className="param-grid">
           <label className="field">
             <span className="field-label-row">
@@ -81,6 +98,7 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
               step="0.1"
               value={link.weight}
               onChange={(e) => onUpdate(link.id, { weight: Number(e.target.value) })}
+              disabled={!canEditWeights}
             />
           </label>
           <label className="field">
@@ -99,6 +117,7 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
               step="0.1"
               value={link.capacity}
               onChange={(e) => onUpdate(link.id, { capacity: Number(e.target.value) })}
+              disabled={!canEditCapacities}
             />
           </label>
         </div>

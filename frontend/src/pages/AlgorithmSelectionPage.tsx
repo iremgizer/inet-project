@@ -10,6 +10,7 @@ interface AlgorithmSelectionPageProps {
   onThresholdChange: (value: number) => void;
   onBack: () => void;
   onStartSimulation: () => void;
+  canChooseAlgorithm?: boolean;
 }
 
 const algorithms = [
@@ -49,6 +50,7 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
   onThresholdChange,
   onBack,
   onStartSimulation,
+  canChooseAlgorithm = true,
 }) => {
   const [showTheory, setShowTheory] = useState(false);
   const selected = algorithms.find((a) => a.id === algorithmConfig.selectedAlgorithm) ?? algorithms[0];
@@ -62,16 +64,23 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
       </div>
       <h2 className="page-title">Choose routing algorithm</h2>
 
+      {!canChooseAlgorithm && (
+        <div className="locked-notice">
+          <span className="locked-notice-icon">🔒</span> Algorithm locked by teacher
+        </div>
+      )}
+
       <div className="algo-card-list">
         {algorithms.map((a) => {
           const isSelected = algorithmConfig.selectedAlgorithm === a.id;
-          const isDisabled = a.level === "Coming soon";
+          const isDisabled = a.level === "Coming soon" || !canChooseAlgorithm;
           return (
             <button
               key={a.id}
               className={`algo-card ${isSelected ? "algo-card--selected" : ""} ${isDisabled ? "algo-card--disabled" : ""}`}
               onClick={() => !isDisabled && onAlgorithmChange(a.id)}
               disabled={isDisabled}
+              title={!canChooseAlgorithm && a.level !== "Coming soon" ? "Locked by teacher" : undefined}
             >
               <div className="algo-card-header">
                 <div className="algo-card-name">

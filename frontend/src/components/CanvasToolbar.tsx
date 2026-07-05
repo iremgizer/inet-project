@@ -9,6 +9,7 @@ interface CanvasToolbarProps {
   onExportJson: () => void;
   onDownloadExample: () => void;
   onReset: () => void;
+  canEditNodes?: boolean;
 }
 
 const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
@@ -19,6 +20,7 @@ const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
   onExportJson,
   onDownloadExample,
   onReset,
+  canEditNodes = true,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -34,7 +36,12 @@ const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
     <div className="canvas-toolbar">
       {/* Build group */}
       <div className="canvas-toolbar-group">
-        <button className="ctb-btn ctb-btn--primary" onClick={onAddNode} title="Add node">
+        <button
+          className="ctb-btn ctb-btn--primary"
+          onClick={onAddNode}
+          title={canEditNodes ? "Add node" : "Locked by teacher"}
+          disabled={!canEditNodes}
+        >
           <Plus size={14} />
           <span>Add node</span>
         </button>

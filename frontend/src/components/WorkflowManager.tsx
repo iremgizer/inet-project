@@ -25,7 +25,7 @@ import { AssignedWork } from "../types/classroom";
 import { DEMO_STUDENTS } from "../utils/demoUsers";
 import { loadAssignedWorks, saveAssignedWorks, loadCurrentStudentId, saveCurrentStudentId } from "../utils/classroomStorage";
 import { exportAssignmentPdf } from "../utils/pdfExport";
-import { simulateNetwork, listSavedRuns, getSavedRun, deleteSavedRun, listAssignments, saveAssignment, getAssignment } from "../api/simulationApi";
+import { simulateNetwork, listSavedRuns, getSavedRun, deleteSavedRun, listAssignments, saveAssignment, getAssignment, gradeAttempt } from "../api/simulationApi";
 import { triangleTemplate } from "../utils/topologyTemplates";
 import { applyAutoLayout, generateRandomTopology, generateTopology, RandomGraphConfig, TopologySize } from "../utils/generatedTopologies";
 import {
@@ -57,6 +57,7 @@ import {
   Assignment,
   AssignmentSummary,
   GradingResult,
+  LockedFields,
   StudentSubmission,
 } from "../types/assignment";
 import {
@@ -187,6 +188,24 @@ const WorkflowManager: React.FC = () => {
   const currentTraceEvent = isTraceMode ? (traceEvents[activeStepIndex] ?? null) : null;
   const linkResults = simulationResult?.linkResults ?? [];
 
+  // ── Locked fields — all-open in lab/teacher, assignment-driven in student/challenge ──
+  const ALL_OPEN: LockedFields = {
+    canEditNodes: true, canEditLinks: true, canEditWeights: true,
+    canEditCapacities: true, canEditDemands: true, canChooseAlgorithm: true,
+  };
+  const DEFAULT_LOCKED: LockedFields = {
+    canEditNodes: false, canEditLinks: false, canEditWeights: true,
+    canEditCapacities: false, canEditDemands: false, canChooseAlgorithm: false,
+  };
+
+  const effectiveLockedFields = useMemo<LockedFields>(() => {
+    if (appMode === "lab" || appMode === "teacher") return ALL_OPEN;
+    return activeAssignment?.lockedFields ?? DEFAULT_LOCKED;
+  }, [appMode, activeAssignment]); // eslint-disable-line
+
+  const lockedFieldsRef = useRef<LockedFields>(effectiveLockedFields);
+  useEffect(() => { lockedFieldsRef.current = effectiveLockedFields; }, [effectiveLockedFields]);
+
   // ── Playback interval ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!isPlaying || traceEvents.length === 0) return;
@@ -205,6 +224,7 @@ const WorkflowManager: React.FC = () => {
   // ── Network operations ────────────────────────────────────────────────────
 
   const handleAddNode = useCallback(() => {
+    if (!lockedFieldsRef.current.canEditNodes) { toast("Node editing is locked by the teacher.", "info"); return; }
     const index = network.nodes.length + 1;
     const newNode: NodeInput = {
       id: makeId("node"),
@@ -214,9 +234,10 @@ const WorkflowManager: React.FC = () => {
       visualType: "node",
     };
     setNetwork((prev) => ({ ...prev, nodes: [...prev.nodes, newNode] }));
-  }, [network.nodes.length]);
+  }, [network.nodes.length, toast]);
 
   const handleDeleteNode = useCallback((id: string) => {
+    if (!lockedFieldsRef.current.canEditNodes) { toast("Node editing is locked by the teacher.", "info"); return; }
     setNetwork((prev) => ({
       ...prev,
       nodes: prev.nodes.filter((n) => n.id !== id),
@@ -226,16 +247,18 @@ const WorkflowManager: React.FC = () => {
     setSelectedType(null);
     setSelectedId(null);
     setSimulationResult(null);
-  }, []);
+  }, [toast]);
 
   const handleDeleteLink = useCallback((id: string) => {
+    if (!lockedFieldsRef.current.canEditLinks) { toast("Link editing is locked by the teacher.", "info"); return; }
     setNetwork((prev) => ({ ...prev, links: prev.links.filter((l) => l.id !== id) }));
     setSelectedType(null);
     setSelectedId(null);
     setSimulationResult(null);
-  }, []);
+  }, [toast]);
 
   const handleAddLink = useCallback((source: string, target: string) => {
+    if (!lockedFieldsRef.current.canEditLinks) { toast("Link editing is locked by the teacher.", "info"); return; }
     const duplicate = network.links.some(
       (l) =>
         (l.source === source && l.target === target) ||
@@ -250,21 +273,26 @@ const WorkflowManager: React.FC = () => {
   }, [network.links, network.isDirected, toast]);
 
   const handleUpdateNode = useCallback((id: string, update: Partial<NodeInput>) => {
+    if (!lockedFieldsRef.current.canEditNodes) { toast("Node editing is locked by the teacher.", "info"); return; }
     setNetwork((prev) => ({
       ...prev,
       nodes: prev.nodes.map((n) => (n.id === id ? { ...n, ...update } : n)),
     }));
-  }, []);
+  }, [toast]);
 
   const handleUpdateLink = useCallback((id: string, update: Partial<LinkInput>) => {
+    const lf = lockedFieldsRef.current;
+    if ("weight" in update && !lf.canEditWeights) { toast("Link weights are locked by the teacher.", "info"); return; }
+    if ("capacity" in update && !lf.canEditCapacities) { toast("Link capacities are locked by the teacher.", "info"); return; }
     setNetwork((prev) => ({
       ...prev,
       links: prev.links.map((l) => (l.id === id ? { ...l, ...update } : l)),
     }));
     setSimulationResult(null);
-  }, []);
+  }, [toast]);
 
   const handleMoveNode = useCallback((id: string, x: number, y: number) => {
+    if (!lockedFieldsRef.current.canEditNodes) return;
     setNetwork((prev) => ({
       ...prev,
       nodes: prev.nodes.map((n) => (n.id === id ? { ...n, x, y } : n)),
@@ -272,17 +300,19 @@ const WorkflowManager: React.FC = () => {
   }, []);
 
   const handleAddDemand = useCallback((partial: Omit<TrafficDemandInput, "id">) => {
+    if (!lockedFieldsRef.current.canEditDemands) { toast("Traffic demands are locked by the teacher.", "info"); return; }
     setNetwork((prev) => ({
       ...prev,
       demands: [...prev.demands, { ...partial, id: makeId("demand") }],
     }));
     setSimulationResult(null);
-  }, []);
+  }, [toast]);
 
   const handleDeleteDemand = useCallback((id: string) => {
+    if (!lockedFieldsRef.current.canEditDemands) { toast("Traffic demands are locked by the teacher.", "info"); return; }
     setNetwork((prev) => ({ ...prev, demands: prev.demands.filter((d) => d.id !== id) }));
     setSimulationResult(null);
-  }, []);
+  }, [toast]);
 
   const handleLoadTopology = useCallback(() => {
     try {
@@ -615,7 +645,23 @@ const WorkflowManager: React.FC = () => {
     }
     const attempt = buildCurrentAttempt(answers);
     setCurrentAttempt(attempt);
-    const result = gradeChallenge(attempt, activeAssignment, simulationResult, hintsRevealed);
+
+    // Try server-side grading first; fall back to client-side if backend is unreachable.
+    let result;
+    try {
+      result = await gradeAttempt({
+        assignmentId: activeAssignment.assignmentId,
+        assignment: activeAssignment as unknown as Record<string, unknown>,
+        submittedNetwork: network,
+        submittedAlgorithmConfig: algorithmConfig,
+        submittedAnswers: answers,
+        hintsUsed: hintsRevealed,
+      });
+    } catch {
+      toast("Backend unavailable — using local grading.", "info");
+      result = gradeChallenge(attempt, activeAssignment, simulationResult, hintsRevealed);
+    }
+
     setChallengeGradingResult(result);
 
     // Record history entry
@@ -864,6 +910,7 @@ const WorkflowManager: React.FC = () => {
           onNext={() => setCurrentStep(3)}
           initialSource={prefillDemandSource}
           onConsumeInitialSource={() => setPrefillDemandSource(null)}
+          canEditDemands={effectiveLockedFields.canEditDemands}
         />
       );
     if (currentStep === 3)
@@ -879,6 +926,7 @@ const WorkflowManager: React.FC = () => {
           }
           onBack={() => setCurrentStep(2)}
           onStartSimulation={handleSimulate}
+          canChooseAlgorithm={effectiveLockedFields.canChooseAlgorithm}
         />
       );
     return (
@@ -1053,6 +1101,7 @@ const WorkflowManager: React.FC = () => {
           onStartConnect={currentStep === 1 ? handleStartConnect : undefined}
           onAddDemandFrom={handleAddDemandFrom}
           onCenterNode={handleCenterNode}
+          canEditNodes={effectiveLockedFields.canEditNodes}
         />
       );
     if (selectedLink)
@@ -1063,6 +1112,9 @@ const WorkflowManager: React.FC = () => {
           result={simulationResult}
           onUpdate={handleUpdateLink}
           onDelete={handleDeleteLink}
+          canEditLinks={effectiveLockedFields.canEditLinks}
+          canEditWeights={effectiveLockedFields.canEditWeights}
+          canEditCapacities={effectiveLockedFields.canEditCapacities}
         />
       );
 
@@ -1263,6 +1315,7 @@ const WorkflowManager: React.FC = () => {
               onExportJson={handleExportJson}
               onDownloadExample={handleDownloadExample}
               onReset={handleResetNetwork}
+              canEditNodes={effectiveLockedFields.canEditNodes}
             />
           )}
 
@@ -1293,6 +1346,8 @@ const WorkflowManager: React.FC = () => {
             isSimulated={!!simulationResult}
             isTraceMode={isTraceMode}
             readonly={currentStep === 0}
+            canEditNodes={effectiveLockedFields.canEditNodes}
+            canEditLinks={effectiveLockedFields.canEditLinks}
             fitViewTrigger={fitViewTrigger}
             connectSourceId={connectSourceId}
             centerNodeRequest={centerNodeRequest}

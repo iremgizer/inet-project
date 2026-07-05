@@ -123,6 +123,8 @@ interface ReactFlowCanvasProps {
   isSimulated: boolean;
   isTraceMode: boolean;
   readonly?: boolean;
+  canEditNodes?: boolean;
+  canEditLinks?: boolean;
   fitViewTrigger?: number;
   connectSourceId?: string | null;
   centerNodeRequest?: { id: string; nonce: number } | null;
@@ -148,6 +150,8 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
   isSimulated,
   isTraceMode,
   readonly = false,
+  canEditNodes = true,
+  canEditLinks = true,
   fitViewTrigger,
   connectSourceId = null,
   centerNodeRequest,
@@ -376,8 +380,8 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
         deleteKeyCode="Delete"
         fitView
         fitViewOptions={{ padding: 0.15 }}
-        nodesDraggable={!readonly}
-        nodesConnectable={!readonly}
+        nodesDraggable={!readonly && canEditNodes}
+        nodesConnectable={!readonly && canEditLinks}
         elementsSelectable={!readonly}
         minZoom={0.15}
         maxZoom={3}

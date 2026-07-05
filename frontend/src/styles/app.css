@@ -8805,3 +8805,18 @@ tbody tr:hover {
 
 /* ── Guest topbar badge ───────────────────────────────────────────────────────── */
 .topbar-role-badge--guest { background:var(--surface-secondary,#f0f0f5); color:var(--text-muted,#666) }
+
+/* ── Locked-field notices (student/challenge mode) ───────────────────────────── */
+.locked-notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted, #888);
+  background: var(--surface-secondary, #f5f6f8);
+  border: 1px solid var(--border-color, #e0e0e8);
+  border-radius: 6px;
+  padding: 5px 9px;
+  margin-bottom: 8px;
+}
+.locked-notice-icon { font-style: normal; font-size: 12px; }

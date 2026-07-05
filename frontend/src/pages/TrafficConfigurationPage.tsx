@@ -11,6 +11,7 @@ interface TrafficConfigurationPageProps {
   onNext: () => void;
   initialSource?: string | null;
   onConsumeInitialSource?: () => void;
+  canEditDemands?: boolean;
 }
 
 const TrafficConfigurationPage: React.FC<TrafficConfigurationPageProps> = ({
@@ -22,6 +23,7 @@ const TrafficConfigurationPage: React.FC<TrafficConfigurationPageProps> = ({
   onNext,
   initialSource,
   onConsumeInitialSource,
+  canEditDemands = true,
 }) => {
   const [source, setSource] = useState(initialSource ?? "");
   const [target, setTarget] = useState("");
@@ -56,6 +58,12 @@ const TrafficConfigurationPage: React.FC<TrafficConfigurationPageProps> = ({
       <p className="page-subtitle">
         Add demands — each one describes traffic that must travel from one node to another.
       </p>
+
+      {!canEditDemands && (
+        <div className="locked-notice">
+          <span className="locked-notice-icon">🔒</span> Traffic demands are locked by teacher
+        </div>
+      )}
 
       {/* Add demand form */}
       <div className="form-card">
@@ -93,7 +101,7 @@ const TrafficConfigurationPage: React.FC<TrafficConfigurationPageProps> = ({
         <button
           className="btn-primary btn-sm"
           onClick={add}
-          disabled={!canAdd || nodes.length < 2}
+          disabled={!canAdd || nodes.length < 2 || !canEditDemands}
         >
           <Plus size={14} /> Add demand
         </button>
@@ -116,7 +124,12 @@ const TrafficConfigurationPage: React.FC<TrafficConfigurationPageProps> = ({
                   <span className="demand-node">{nodeLabel(d.target)}</span>
                 </div>
                 <span className="demand-amount">{d.amount}</span>
-                <button className="icon-btn danger" onClick={() => onDeleteDemand(d.id)} title="Delete demand">
+                <button
+                  className="icon-btn danger"
+                  onClick={() => onDeleteDemand(d.id)}
+                  title={canEditDemands ? "Delete demand" : "Locked by teacher"}
+                  disabled={!canEditDemands}
+                >
                   <Trash2 size={12} />
                 </button>
               </li>

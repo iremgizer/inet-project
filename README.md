@@ -417,9 +417,9 @@ These are intentional scope decisions for a university course prototype, not bug
 | Authentication | Credentials are hardcoded in `demoAuth.ts`. No real login, JWT, or session management. |
 | Assignment persistence | Without MongoDB, assignments created in Teacher Workspace are lost on page reload. Demo assignments always reload from localStorage. |
 | Student assignment access | Without MongoDB, challenge-type assignments open from local memory. Assignment-type (non-challenge) works require MongoDB to load their topology. |
-| Locked fields | `lockedFields` and `challengeConfig.editableFields` are displayed in the task panel but not enforced on the canvas — students can still drag nodes or change weights. |
+| Locked fields | `lockedFields` are enforced in the UI: locked nodes/links cannot be dragged or deleted; locked weights/capacities are read-only; locked algorithm selection is disabled. Handler-level guards also block keyboard shortcuts. |
 | Attempt integrity | `maxAttempts` is enforced in-memory. A student can bypass it by reloading the page. |
-| Grading | All grading is client-side. Expected answers are visible in the assignment JSON file. |
+| Grading | Grading calls `POST /grade` on the backend first; falls back to client-side if the backend is unavailable. Expected answers remain visible in the assignment JSON export — not suitable for high-stakes assessments. |
 | Segment Routing | Stub only — returns empty results. Planned for a future sprint. |
 | Concurrency | The FastAPI backend is single-worker with no connection pooling. Not suitable for classroom-scale simultaneous users. |
 | DV convergence | Distance Vector runs to full convergence synchronously. Async Bellman-Ford with failure simulation is not implemented. |

@@ -22,6 +22,7 @@ interface NodeDetailPanelProps {
   onStartConnect?: (id: string) => void;
   onAddDemandFrom?: (id: string) => void;
   onCenterNode?: (id: string) => void;
+  canEditNodes?: boolean;
 }
 
 const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
@@ -33,6 +34,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
   onStartConnect,
   onAddDemandFrom,
   onCenterNode,
+  canEditNodes = true,
 }) => {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -57,8 +59,9 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
         <button
           className="icon-btn danger"
           onClick={() => onDelete(node.id)}
-          title="Delete node"
+          title={canEditNodes ? "Delete node" : "Locked by teacher"}
           aria-label="Delete node"
+          disabled={!canEditNodes}
         >
           <Trash2 size={13} />
         </button>
@@ -66,6 +69,11 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
 
       {/* Label edit */}
       <div className="detail-section">
+        {!canEditNodes && (
+          <div className="locked-notice">
+            <span className="locked-notice-icon">🔒</span> Locked by teacher
+          </div>
+        )}
         <label className="field">
           <span>Label</span>
           <input
@@ -73,6 +81,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
             value={node.label}
             onChange={(e) => onUpdate(node.id, { label: e.target.value })}
             aria-label="Node label"
+            disabled={!canEditNodes}
           />
         </label>
       </div>

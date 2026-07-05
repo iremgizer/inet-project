@@ -1,5 +1,6 @@
-import { SimulationRequest, SimulationResult, NetworkInput, SavedSimulationRun, SavedSimulationSummary } from "../types/network";
+import { SimulationRequest, SimulationResult, NetworkInput, SavedSimulationRun, SavedSimulationSummary, AlgorithmConfig } from "../types/network";
 import { Assignment, AssignmentSummary, StudentSubmission } from "../types/assignment";
+import { ChallengeGradingResult } from "../types/challenge";
 
 const BASE_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
@@ -107,6 +108,26 @@ export async function saveChallengeAttempt(attempt: Record<string, unknown>): Pr
 export async function listChallengeAttempts(assignmentId: string): Promise<Record<string, unknown>[]> {
   const r = await fetch(`${BASE_URL}/challenge-attempts?assignmentId=${encodeURIComponent(assignmentId)}`);
   if (!r.ok) throw new Error(await readError(r, "Failed to list challenge attempts"));
+  return r.json();
+}
+
+export interface GradeRequest {
+  assignmentId?: string;
+  assignment?: Record<string, unknown>;
+  submittedNetwork: NetworkInput;
+  submittedAlgorithmConfig: AlgorithmConfig;
+  submittedAnswers: Record<string, unknown>;
+  hintsUsed: number;
+  studentId?: string;
+}
+
+export async function gradeAttempt(request: GradeRequest): Promise<ChallengeGradingResult> {
+  const r = await fetch(`${BASE_URL}/grade`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!r.ok) throw new Error(await readError(r, "Grading failed"));
   return r.json();
 }
 
