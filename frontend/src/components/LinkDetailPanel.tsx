@@ -40,15 +40,18 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
 
   return (
     <div className="detail-panel">
-      {/* Header */}
-      <div className="detail-header">
-        <div className="detail-header-left">
-          <span className="detail-type-tag">Link</span>
-          <div className="detail-endpoint">
-            <span className="detail-endpoint-node">{nodeLabel(link.source)}</span>
-            <span className="detail-endpoint-arrow">→</span>
-            <span className="detail-endpoint-node">{nodeLabel(link.target)}</span>
-          </div>
+      {/* ── Header ── */}
+      <div className="li-header">
+        <div className="li-header-endpoints">
+          <span className="li-endpoint-node">{nodeLabel(link.source)}</span>
+          <span className="li-endpoint-arrow">&#8594;</span>
+          <span className="li-endpoint-node">{nodeLabel(link.target)}</span>
+        </div>
+        <div className="li-header-meta">
+          <span className="detail-id">{link.id}</span>
+          {lr && <span className={`link-status-badge link-status-badge--${uc}`}>
+            {lr.isCongested ? "Congested" : utilizationLabel(lr.utilization)}
+          </span>}
         </div>
         <button
           className="icon-btn danger"
@@ -61,19 +64,12 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
         </button>
       </div>
 
-      {/* Simulation status badge */}
-      {lr && (
-        <div className={`link-status-badge link-status-badge--${uc}`}>
-          {lr.isCongested ? "⚠ Congested" : utilizationLabel(lr.utilization)}
-        </div>
-      )}
-
-      {/* Parameters */}
-      <div className="detail-section">
+      {/* ── Parameters ── */}
+      <div className="li-section">
         <div className="detail-section-title">Parameters</div>
         {(!canEditWeights || !canEditCapacities) && (
           <div className="locked-notice">
-            <span className="locked-notice-icon">🔒</span>
+            <span className="locked-notice-icon">&#128274;</span>
             {!canEditWeights && !canEditCapacities
               ? "Weights and capacities locked by teacher"
               : !canEditWeights
@@ -123,9 +119,20 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
         </div>
       </div>
 
-      {/* Simulation result */}
-      {lr && (
-        <div className="detail-section">
+      {/* ── Simulation result ── */}
+      {!lr ? (
+        <div className="li-section">
+          <div className="li-presim-note">
+            <div className="li-presim-title">Before simulation:</div>
+            <ul>
+              <li>Weight affects which paths the routing algorithm uses</li>
+              <li>Capacity determines when this link becomes congested</li>
+            </ul>
+            <div className="li-presim-hint">Run a simulation to see load, utilization, and path membership.</div>
+          </div>
+        </div>
+      ) : (
+        <div className="li-section">
           <div className="detail-section-title">
             Simulation result
             <TermHint
@@ -165,30 +172,22 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
         </div>
       )}
 
-      {/* Demands using this link */}
+      {/* ── Demands using this link ── */}
       {usages.length > 0 && (
-        <div className="detail-section">
-          <div className="detail-section-title">
+        <div className="li-section">
+          <div className="li-section-title">
             Traffic using this link ({usages.length})
           </div>
           <div className="usage-list">
             {usages.map((u, i) => (
               <div key={i} className="usage-item">
                 <div className="usage-route">
-                  {nodeLabel(u.source)} → {nodeLabel(u.target)}
+                  {nodeLabel(u.source)} &rarr; {nodeLabel(u.target)}
                 </div>
                 <div className="usage-share">{u.trafficShare.toFixed(2)}</div>
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {!lr && (
-        <div className="detail-section">
-          <p className="muted" style={{ fontSize: "0.78rem" }}>
-            Run a simulation to see load and utilization.
-          </p>
         </div>
       )}
     </div>

@@ -34,6 +34,7 @@ interface TeacherDashboardProps {
   onRefreshAssignments: () => void;
   onOpenChallenge?: (workId: string) => void;
   onResetDemoData?: () => void;
+  onSeedDemoToMongoDB?: () => void;
 }
 
 interface PendingAssign {
@@ -79,6 +80,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onRefreshAssignments,
   onOpenChallenge,
   onResetDemoData,
+  onSeedDemoToMongoDB,
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [showDemoTools, setShowDemoTools] = useState(false);
@@ -373,6 +375,15 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   >
                     <RotateCcw size={11} /> Reset demo data
                   </button>
+                  {onSeedDemoToMongoDB && (
+                    <button
+                      className="btn-secondary btn-sm"
+                      onClick={onSeedDemoToMongoDB}
+                      title="Seed the 3 demo challenges into MongoDB so students can load them without a JSON file"
+                    >
+                      Seed demo to MongoDB
+                    </button>
+                  )}
                   <button
                     className="btn-secondary btn-sm"
                     onClick={() => { localStorage.clear(); window.location.reload(); }}

@@ -10,6 +10,17 @@ export interface RandomGraphConfig {
   connected: boolean;
 }
 
+export interface GenerateOptions {
+  weight?: number;
+  capacity?: number;
+  nodeCount?: number;
+  rows?: number;
+  cols?: number;
+  spines?: number;
+  leaves?: number;
+  hostsPerLeaf?: number;
+}
+
 // ── Preview metadata ──────────────────────────────────────────────────────────
 
 const PREVIEW: Partial<Record<TopologyType, Record<TopologySize, { nodes: number; links: number }>>> = {
@@ -30,33 +41,47 @@ export function getTopologyPreview(type: TopologyType, size: TopologySize): { no
 
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
-export function generateTopology(type: TopologyType, size: TopologySize): NetworkInput {
+export function generateTopology(type: TopologyType, size: TopologySize, opts?: GenerateOptions): NetworkInput {
+  const w = opts?.weight ?? 1;
+  const cap = opts?.capacity ?? 10;
+
   if (type === "custom" || type === "random") {
     return { nodes: [], links: [], demands: [], topologyType: type, isDirected: false };
   }
 
   if (type === "fat-tree") {
-    if (size === "small")  return closFatTree(2, 4, 2, "fat-tree");
-    if (size === "medium") return closFatTree(4, 4, 2, "fat-tree");
-    return closFatTree(4, 8, 2, "fat-tree");
+    const spines = opts?.spines;
+    const leaves = opts?.leaves;
+    const hpl = opts?.hostsPerLeaf ?? 2;
+    if (spines !== undefined && leaves !== undefined) return closFatTree(spines, leaves, hpl, "fat-tree", w, cap);
+    if (size === "small")  return closFatTree(2, 4, hpl, "fat-tree", w, cap);
+    if (size === "medium") return closFatTree(4, 4, hpl, "fat-tree", w, cap);
+    return closFatTree(4, 8, hpl, "fat-tree", w, cap);
   }
 
   if (type === "grid") {
-    if (size === "small")  return gridTopology(3, 3, "grid");
-    if (size === "medium") return gridTopology(4, 4, "grid");
-    return gridTopology(5, 5, "grid");
+    const rows = opts?.rows;
+    const cols = opts?.cols;
+    if (rows !== undefined && cols !== undefined) return gridTopology(rows, cols, "grid", w, cap);
+    if (size === "small")  return gridTopology(3, 3, "grid", w, cap);
+    if (size === "medium") return gridTopology(4, 4, "grid", w, cap);
+    return gridTopology(5, 5, "grid", w, cap);
   }
 
   if (type === "path") {
-    if (size === "small")  return pathTopology(4,  "path");
-    if (size === "medium") return pathTopology(8,  "path");
-    return pathTopology(16, "path");
+    const nc = opts?.nodeCount;
+    if (nc !== undefined) return pathTopology(nc, "path", w, cap);
+    if (size === "small")  return pathTopology(4,  "path", w, cap);
+    if (size === "medium") return pathTopology(8,  "path", w, cap);
+    return pathTopology(16, "path", w, cap);
   }
 
   if (type === "cycle") {
-    if (size === "small")  return cycleTopology(5, "cycle");
-    if (size === "medium") return cycleTopology(7, "cycle");
-    return cycleTopology(9, "cycle");
+    const nc = opts?.nodeCount;
+    if (nc !== undefined) return cycleTopology(nc, "cycle", w, cap);
+    if (size === "small")  return cycleTopology(5, "cycle", w, cap);
+    if (size === "medium") return cycleTopology(7, "cycle", w, cap);
+    return cycleTopology(9, "cycle", w, cap);
   }
 
   // Legacy generators: triangle, ring, mesh, line
@@ -66,11 +91,12 @@ export function generateTopology(type: TopologyType, size: TopologySize): Networ
     mesh:     { small: 8,  medium: 16, large: 25 },
     line:     { small: 4,  medium: 10, large: 20 },
   };
-  const count = nodeCounts[type]?.[size] ?? 4;
-  if (type === "ring")     return ringTopology(count, type);
-  if (type === "mesh")     return meshTopology(count, type);
-  if (type === "triangle") return triangleLikeTopology(count, type);
-  return lineTopology(count, type);
+  const nc = opts?.nodeCount;
+  const count = nc ?? (nodeCounts[type]?.[size] ?? 4);
+  if (type === "ring")     return ringTopology(count, type, w, cap);
+  if (type === "mesh")     return meshTopology(count, type, w, cap);
+  if (type === "triangle") return triangleLikeTopology(count, type, w, cap);
+  return lineTopology(count, type, w, cap);
 }
 
 // ── Auto-layout ───────────────────────────────────────────────────────────────
@@ -89,7 +115,7 @@ export function applyAutoLayout(network: NetworkInput): NetworkInput {
 
 // ── Clos Fat-Tree ─────────────────────────────────────────────────────────────
 
-function closFatTree(spineCount: number, leafCount: number, hostsPerLeaf: number, topologyType: TopologyType): NetworkInput {
+function closFatTree(spineCount: number, leafCount: number, hostsPerLeaf: number, topologyType: TopologyType, weight = 1, capacity = 10): NetworkInput {
   const hostCount = leafCount * hostsPerLeaf;
   const canvasWidth = 700;
   const marginX = 60;
@@ -122,11 +148,11 @@ function closFatTree(spineCount: number, leafCount: number, hostsPerLeaf: number
   let lid = 1;
 
   hosts.forEach((host, i) => {
-    links.push({ id: `hl${lid++}`, source: host.id, target: leaves[Math.floor(i / hostsPerLeaf)].id, weight: 1, capacity: 10 });
+    links.push({ id: `hl${lid++}`, source: host.id, target: leaves[Math.floor(i / hostsPerLeaf)].id, weight, capacity });
   });
   leaves.forEach((leaf) => {
     spines.forEach((spine) => {
-      links.push({ id: `ls${lid++}`, source: leaf.id, target: spine.id, weight: 1, capacity: 10 });
+      links.push({ id: `ls${lid++}`, source: leaf.id, target: spine.id, weight, capacity });
     });
   });
 
@@ -139,7 +165,7 @@ function closFatTree(spineCount: number, leafCount: number, hostsPerLeaf: number
 
 // ── Grid ──────────────────────────────────────────────────────────────────────
 
-function gridTopology(rows: number, cols: number, topologyType: TopologyType): NetworkInput {
+function gridTopology(rows: number, cols: number, topologyType: TopologyType, weight = 1, capacity = 10): NetworkInput {
   const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const spacingX = 560 / Math.max(1, cols - 1);
   const spacingY = 400 / Math.max(1, rows - 1);
@@ -161,12 +187,12 @@ function gridTopology(rows: number, cols: number, topologyType: TopologyType): N
   let lid = 1;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols - 1; c++) {
-      links.push({ id: `l${lid++}`, source: nodes[r * cols + c].id, target: nodes[r * cols + c + 1].id, weight: 1, capacity: 10 });
+      links.push({ id: `l${lid++}`, source: nodes[r * cols + c].id, target: nodes[r * cols + c + 1].id, weight, capacity });
     }
   }
   for (let r = 0; r < rows - 1; r++) {
     for (let c = 0; c < cols; c++) {
-      links.push({ id: `l${lid++}`, source: nodes[r * cols + c].id, target: nodes[(r + 1) * cols + c].id, weight: 1, capacity: 10 });
+      links.push({ id: `l${lid++}`, source: nodes[r * cols + c].id, target: nodes[(r + 1) * cols + c].id, weight, capacity });
     }
   }
 
@@ -179,7 +205,7 @@ function gridTopology(rows: number, cols: number, topologyType: TopologyType): N
 
 // ── Path Graph ────────────────────────────────────────────────────────────────
 
-function pathTopology(count: number, topologyType: TopologyType): NetworkInput {
+function pathTopology(count: number, topologyType: TopologyType, weight = 10, capacity = 10): NetworkInput {
   const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const marginX = count > 8 ? 40 : 80;
   const spacing = (640 - 2 * marginX) / Math.max(1, count - 1);
@@ -195,8 +221,8 @@ function pathTopology(count: number, topologyType: TopologyType): NetworkInput {
     id: `l${i + 1}`,
     source: node.id,
     target: nodes[i + 1].id,
-    weight: 10,
-    capacity: 10,
+    weight,
+    capacity,
   }));
 
   return {
@@ -208,7 +234,7 @@ function pathTopology(count: number, topologyType: TopologyType): NetworkInput {
 
 // ── Cycle ─────────────────────────────────────────────────────────────────────
 
-function cycleTopology(count: number, topologyType: TopologyType): NetworkInput {
+function cycleTopology(count: number, topologyType: TopologyType, weight = 1, capacity = 10): NetworkInput {
   const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   const radius = Math.min(220, Math.max(100, count * 24));
 
@@ -226,8 +252,8 @@ function cycleTopology(count: number, topologyType: TopologyType): NetworkInput 
     id: `l${i + 1}`,
     source: nodes[i].id,
     target: nodes[(i + 1) % count].id,
-    weight: 1,
-    capacity: 10,
+    weight,
+    capacity,
   }));
 
   return {
@@ -311,48 +337,48 @@ function lnk(id: string, source: string, target: string, weight = 1, capacity = 
   return { id, source, target, weight, capacity };
 }
 
-function ringTopology(count: number, topologyType: TopologyType): NetworkInput {
+function ringTopology(count: number, topologyType: TopologyType, weight = 1, capacity = 10): NetworkInput {
   const nodes = makeNodes(count);
-  const links = nodes.map((node, i) => lnk(`l${i + 1}`, node.id, nodes[(i + 1) % count].id));
+  const links = nodes.map((node, i) => lnk(`l${i + 1}`, node.id, nodes[(i + 1) % count].id, weight, capacity));
   return withDemand(nodes, links, topologyType);
 }
 
-function triangleLikeTopology(count: number, topologyType: TopologyType): NetworkInput {
-  const base = ringTopology(count, topologyType);
+function triangleLikeTopology(count: number, topologyType: TopologyType, weight = 1, capacity = 10): NetworkInput {
+  const base = ringTopology(count, topologyType, weight, capacity);
   const chords: LinkInput[] = [];
   for (let i = 0; i < count; i += 2) {
     const target = (i + 2) % count;
-    if (target !== i) chords.push(lnk(`c${i + 1}`, base.nodes[i].id, base.nodes[target].id, 2, 10));
+    if (target !== i) chords.push(lnk(`c${i + 1}`, base.nodes[i].id, base.nodes[target].id, weight * 2, capacity));
   }
   return withDemand(base.nodes, [...base.links, ...chords], topologyType);
 }
 
-function meshTopology(count: number, topologyType: TopologyType): NetworkInput {
+function meshTopology(count: number, topologyType: TopologyType, weight = 1, capacity = 10): NetworkInput {
   const nodes = makeNodes(count);
   const links: LinkInput[] = [];
   let id = 1;
   for (let i = 0; i < count; i++) {
-    links.push(lnk(`l${id++}`, nodes[i].id, nodes[(i + 1) % count].id));
+    links.push(lnk(`l${id++}`, nodes[i].id, nodes[(i + 1) % count].id, weight, capacity));
   }
   const stride = Math.max(2, Math.floor(Math.sqrt(count)));
   for (let i = 0; i < count; i++) {
     const target = (i + stride) % count;
-    if (i < target) links.push(lnk(`l${id++}`, nodes[i].id, nodes[target].id, 2, 12));
+    if (i < target) links.push(lnk(`l${id++}`, nodes[i].id, nodes[target].id, weight * 2, capacity));
   }
   for (let i = 0; i < count - stride; i += stride) {
-    links.push(lnk(`l${id++}`, nodes[i].id, nodes[i + stride].id, 1, 12));
+    links.push(lnk(`l${id++}`, nodes[i].id, nodes[i + stride].id, weight, capacity));
   }
   return withDemand(nodes, links, topologyType);
 }
 
-function lineTopology(count: number, topologyType: TopologyType): NetworkInput {
+function lineTopology(count: number, topologyType: TopologyType, weight = 1, capacity = 10): NetworkInput {
   const nodes = Array.from({ length: count }, (_, i) => ({
     id: `n${i + 1}`,
     label: `N${i + 1}`,
     x: 80 + i * (560 / Math.max(1, count - 1)),
     y: 260,
   }));
-  const links = nodes.slice(0, -1).map((node, i) => lnk(`l${i + 1}`, node.id, nodes[i + 1].id));
+  const links = nodes.slice(0, -1).map((node, i) => lnk(`l${i + 1}`, node.id, nodes[i + 1].id, weight, capacity));
   return withDemand(nodes, links, topologyType);
 }
 

@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from app.models import Assignment, GradeRequest, SimulationRequest, StudentSubmission, ChallengeAttemptRecord
 from app.services.assignment_service import AssignmentStorageService
 from app.services.simulation_service import SimulationService
@@ -101,6 +101,18 @@ def delete_assignment(assignment_id: str):
     if not deleted:
         raise HTTPException(status_code=404, detail="Assignment not found or MongoDB is unavailable")
     return {"deleted": True}
+
+@app.post("/seed-demo")
+def seed_demo(assignments: List[Assignment]) -> Dict[str, Any]:
+    """Seed demo assignment documents into MongoDB."""
+    if not assignment_storage.available:
+        return {"seeded": 0, "message": "MongoDB not available"}
+    count = 0
+    for a in assignments:
+        doc = a.model_dump()
+        assignment_storage.save_assignment(doc)
+        count += 1
+    return {"seeded": count, "message": f"Seeded {count} demo assignments."}
 
 @app.get("/assignments/{assignment_id}/submissions")
 def list_submissions(assignment_id: str):

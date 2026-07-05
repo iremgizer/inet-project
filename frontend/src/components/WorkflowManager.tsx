@@ -4,8 +4,7 @@ import ReactFlowCanvas from "./ReactFlowCanvas";
 import MetricsPanel from "./MetricsPanel";
 import RoutingTablePanel from "./RoutingTablePanel";
 import TraceTimeline from "./TraceTimeline";
-import NodeDetailPanel from "./NodeDetailPanel";
-import LinkDetailPanel from "./LinkDetailPanel";
+import InspectorDrawer from "./InspectorDrawer";
 import SavedRunsDrawer from "./SavedRunsDrawer";
 import CanvasToolbar from "./CanvasToolbar";
 import LandingPage from "../pages/LandingPage";
@@ -27,7 +26,7 @@ import { loadAssignedWorks, saveAssignedWorks, loadCurrentStudentId, saveCurrent
 import { exportAssignmentPdf } from "../utils/pdfExport";
 import { simulateNetwork, listSavedRuns, getSavedRun, deleteSavedRun, listAssignments, saveAssignment, getAssignment, gradeAttempt } from "../api/simulationApi";
 import { triangleTemplate } from "../utils/topologyTemplates";
-import { applyAutoLayout, generateRandomTopology, generateTopology, RandomGraphConfig, TopologySize } from "../utils/generatedTopologies";
+import { applyAutoLayout } from "../utils/generatedTopologies";
 import {
   downloadTopologyJson,
   downloadExampleTopologyJson,
@@ -124,12 +123,6 @@ const WorkflowManager: React.FC = () => {
   const [savedRuns, setSavedRuns] = useState<SavedSimulationSummary[]>([]);
   const [savedRunsOpen, setSavedRunsOpen] = useState(false);
 
-  // ── Topology picker ───────────────────────────────────────────────────────
-  const [topologySize, setTopologySize] = useState<TopologySize>("small");
-  const [randomConfig, setRandomConfig] = useState<RandomGraphConfig>({
-    nodeCount: 8, linkCount: 12, weight: 1, capacity: 10, connected: true,
-  });
-
   // ── Canvas ───────────────────────────────────────────────────────────────
   const [fitViewTrigger, setFitViewTrigger] = useState(0);
 
@@ -163,7 +156,6 @@ const WorkflowManager: React.FC = () => {
 
   // ── Panel collapse ────────────────────────────────────────────────────────
   const [leftCollapsed, setLeftCollapsed] = useState(false);
-  const [rightCollapsed, setRightCollapsed] = useState(false);
 
   // ── Home page import ref ──────────────────────────────────────────────────
   const homeImportRef = useRef<HTMLInputElement>(null);
@@ -205,6 +197,15 @@ const WorkflowManager: React.FC = () => {
 
   const lockedFieldsRef = useRef<LockedFields>(effectiveLockedFields);
   useEffect(() => { lockedFieldsRef.current = effectiveLockedFields; }, [effectiveLockedFields]);
+
+  // ── Escape to deselect ────────────────────────────────────────────────────
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setSelectedType(null); setSelectedId(null); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // ── Playback interval ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -314,23 +315,12 @@ const WorkflowManager: React.FC = () => {
     setSimulationResult(null);
   }, [toast]);
 
-  const handleLoadTopology = useCallback(() => {
-    try {
-      const generated = network.topologyType === "random"
-        ? generateRandomTopology(randomConfig)
-        : generateTopology(network.topologyType, topologySize);
-      setNetwork(generated);
-      const label = network.topologyType === "random"
-        ? `random (${generated.nodes.length}N · ${generated.links.length}L)`
-        : `${network.topologyType} (${topologySize})`;
-      toast(`Loaded ${label}.`, "success");
-      setSimulationResult(null);
-      setSelectedType(null);
-      setSelectedId(null);
-    } catch (err) {
-      toast((err as Error).message, "error");
-    }
-  }, [network.topologyType, topologySize, randomConfig, toast]);
+  const handleGenerateTopology = useCallback((net: NetworkInput) => {
+    setNetwork(net);
+    setSimulationResult(null);
+    setSelectedType(null);
+    setSelectedId(null);
+  }, []);
 
   const handleResetNetwork = useCallback(() => {
     setNetwork(triangleTemplate);
@@ -396,19 +386,6 @@ const WorkflowManager: React.FC = () => {
     setSimulationResult(null);
     setCurrentStep(1);
   }, []);
-
-  const handleSelectAndLoadTopology = useCallback((type: TopologyType) => {
-    try {
-      const generated = generateTopology(type, topologySize);
-      setNetwork(generated);
-      toast(`Loaded ${type} (${topologySize}).`, "success");
-      setSimulationResult(null);
-      setSelectedType(null);
-      setSelectedId(null);
-    } catch (err) {
-      toast((err as Error).message, "error");
-    }
-  }, [topologySize, toast]);
 
   const handleAutoLayout = useCallback(() => {
     setNetwork((prev) => applyAutoLayout(prev));
@@ -887,14 +864,8 @@ const WorkflowManager: React.FC = () => {
       return (
         <NetworkBuilderPage
           network={network}
-          topologySize={topologySize}
           topologyStats={topologyStats}
-          randomConfig={randomConfig}
-          onTopologyChange={(t) => setNetwork((p) => ({ ...p, topologyType: t as TopologyType }))}
-          onTopologySizeChange={setTopologySize}
-          onLoadTopology={handleLoadTopology}
-          onSelectAndLoad={handleSelectAndLoadTopology}
-          onRandomConfigChange={setRandomConfig}
+          onGenerateTopology={handleGenerateTopology}
           onBack={() => setCurrentStep(0)}
           onNext={() => setCurrentStep(2)}
         />
@@ -978,6 +949,22 @@ const WorkflowManager: React.FC = () => {
     saveAssignedWorks(user); // keep user-assigned works intact
     setSavedAssignments(loadDemoAssignmentSummaries());
     toast("Demo data reset to defaults.", "success");
+  }, [toast]); // eslint-disable-line
+
+  const handleSeedDemoToMongoDB = useCallback(async () => {
+    try {
+      const health = await fetch("http://localhost:8000/health").then((r) => r.json());
+      if (!health.mongoAvailable) { toast("MongoDB is not running — cannot seed.", "error"); return; }
+      await fetch("http://localhost:8000/seed-demo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(EXAMPLE_CHALLENGES),
+      });
+      await refreshSavedAssignments(); // eslint-disable-line
+      toast("Demo assignments seeded to MongoDB.", "success");
+    } catch {
+      toast("Seed failed. Is the backend running?", "error");
+    }
   }, [toast]); // eslint-disable-line
 
   const handleStartReplay = useCallback(() => {
@@ -1087,44 +1074,15 @@ const WorkflowManager: React.FC = () => {
   );
 
   const rightPanel = (() => {
-    // Solution replay trace takes priority over node/link selection panels
     if (replayMode === "trace" && isTraceMode) return traceTimelineEl;
-
-    if (selectedNode)
-      return (
-        <NodeDetailPanel
-          node={selectedNode}
-          network={network}
-          result={simulationResult}
-          onUpdate={handleUpdateNode}
-          onDelete={handleDeleteNode}
-          onStartConnect={currentStep === 1 ? handleStartConnect : undefined}
-          onAddDemandFrom={handleAddDemandFrom}
-          onCenterNode={handleCenterNode}
-          canEditNodes={effectiveLockedFields.canEditNodes}
-        />
-      );
-    if (selectedLink)
-      return (
-        <LinkDetailPanel
-          link={selectedLink}
-          network={network}
-          result={simulationResult}
-          onUpdate={handleUpdateLink}
-          onDelete={handleDeleteLink}
-          canEditLinks={effectiveLockedFields.canEditLinks}
-          canEditWeights={effectiveLockedFields.canEditWeights}
-          canEditCapacities={effectiveLockedFields.canEditCapacities}
-        />
-      );
-
     if (currentStep === 4) {
       if (isTraceMode) return traceTimelineEl;
       return <MetricsPanel result={simulationResult} />;
     }
-
-    return <TopologyStatsPanel stats={topologyStats} />;
+    return null;
   })();
+
+  const showRight = appMode !== "teacher" && currentStep === 4;
 
   return (
     <div className="app-shell">
@@ -1257,6 +1215,7 @@ const WorkflowManager: React.FC = () => {
               onRefreshAssignments={refreshSavedAssignments}
               onOpenChallenge={handleOpenChallengeById}
               onResetDemoData={handleResetDemoData}
+              onSeedDemoToMongoDB={handleSeedDemoToMongoDB}
             />
           ) : (
             <StudentDashboard
@@ -1292,7 +1251,7 @@ const WorkflowManager: React.FC = () => {
       ) : (
       <div
         className="workspace"
-        style={{ gridTemplateColumns: wsGridCols(appMode, leftCollapsed, rightCollapsed) }}
+        style={{ gridTemplateColumns: wsGridCols(appMode, leftCollapsed, showRight) }}
       >
         <aside className={`ws-left${leftCollapsed ? " ws-left--collapsed" : ""}`}>
           {!leftCollapsed && leftPanel}
@@ -1364,6 +1323,24 @@ const WorkflowManager: React.FC = () => {
             onAddNodeShortcut={currentStep === 1 ? handleAddNode : undefined}
           />
 
+          {/* ── Floating inspector drawer ── */}
+          <InspectorDrawer
+            selectedNode={selectedNode}
+            selectedLink={selectedLink}
+            network={network}
+            simulationResult={simulationResult}
+            lockedFields={effectiveLockedFields}
+            onClose={() => { setSelectedType(null); setSelectedId(null); }}
+            onUpdateNode={handleUpdateNode}
+            onDeleteNode={handleDeleteNode}
+            onUpdateLink={handleUpdateLink}
+            onDeleteLink={handleDeleteLink}
+            onStartConnect={currentStep === 1 ? handleStartConnect : undefined}
+            onAddDemandFrom={handleAddDemandFrom}
+            onCenterNode={handleCenterNode}
+            onSelectLink={(id) => { setSelectedType("link"); setSelectedId(id); }}
+          />
+
           {/* Keyboard shortcut hint */}
           {currentStep === 1 && (
             <div className="canvas-shortcuts-hint">
@@ -1372,16 +1349,9 @@ const WorkflowManager: React.FC = () => {
           )}
         </section>
 
-        {appMode !== "teacher" && (
-          <aside className={`ws-right${rightCollapsed ? " ws-right--collapsed" : ""}`}>
-            {!rightCollapsed && rightPanel}
-            <button
-              className="ws-panel-toggle ws-panel-toggle--right"
-              onClick={() => setRightCollapsed((c) => !c)}
-              title={rightCollapsed ? "Expand right panel" : "Collapse right panel"}
-            >
-              {rightCollapsed ? <ChevronLeft size={13} /> : <ChevronRight size={13} />}
-            </button>
+        {showRight && (
+          <aside className="ws-right">
+            {rightPanel}
           </aside>
         )}
       </div>
@@ -1411,11 +1381,10 @@ const WorkflowManager: React.FC = () => {
 
 // ── Panel layout helper ───────────────────────────────────────────────────────
 
-function wsGridCols(mode: AppMode, lc: boolean, rc: boolean): string {
+function wsGridCols(mode: AppMode, lc: boolean, showRight: boolean): string {
   const lw = lc ? "48px" : mode === "teacher" ? "minmax(560px, 50%)" : "300px";
-  if (mode === "teacher") return `${lw} 1fr`;
-  const rw = rc ? "48px" : "280px";
-  return `${lw} 1fr ${rw}`;
+  if (mode === "teacher" || !showRight) return `${lw} 1fr`;
+  return `${lw} 1fr 280px`;
 }
 
 // ── Topology stats ────────────────────────────────────────────────────────────
