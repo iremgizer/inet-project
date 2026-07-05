@@ -8978,3 +8978,134 @@ tbody tr:hover {
   font-size: 0.72rem; font-weight: 600; color: var(--text-secondary, #666);
   text-transform: uppercase; letter-spacing: .04em;
 }
+
+/* ── Compact edge labels (visualization sprint) ───────────────────────────── */
+
+.rf-edge-compact-label {
+  display: flex;
+  align-items: center;
+  background: rgba(255,255,255,0.88);
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: .63rem;
+  line-height: 1.4;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+.rf-edge-compact-weight {
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.rf-edge-compact-sep {
+  color: var(--text-3);
+  margin: 0 1px;
+}
+
+.rf-edge-compact-util {
+  font-weight: 600;
+}
+
+.rf-edge-compact-util.rf-edge-util-pct--normal {
+  color: var(--text-2);
+}
+
+.rf-edge-compact-util.rf-edge-util-pct--high {
+  color: #ea580c;
+}
+
+.rf-edge-compact-util.rf-edge-util-pct--congested {
+  color: #dc2626;
+}
+
+.rf-edge-compact-load {
+  color: var(--text-3);
+  font-size: .6rem;
+  margin-left: 2px;
+}
+
+/* ── Graph legend ─────────────────────────────────────────────────────────── */
+
+.graph-legend {
+  background: rgba(255,255,255,0.92);
+  border: 1px solid rgba(0,0,0,0.1);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  padding: 6px 8px;
+  min-width: 160px;
+  max-width: 220px;
+  font-size: .68rem;
+  color: var(--text-1);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.graph-legend-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0 0 4px;
+  cursor: pointer;
+  font-size: .68rem;
+  font-weight: 600;
+  color: var(--text-1);
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  gap: 6px;
+}
+
+.graph-legend-toggle:hover { opacity: .7; }
+
+.graph-legend-section {
+  margin-top: 6px;
+}
+
+.graph-legend-section + .graph-legend-section {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(0,0,0,0.08);
+}
+
+.graph-legend-section-title {
+  font-size: .6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-3);
+  margin-bottom: 4px;
+}
+
+.graph-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 0;
+  color: var(--text-2);
+}
+
+.graph-legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.graph-legend-line-wrap {
+  width: 24px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.graph-legend-line {
+  width: 100%;
+  border-radius: 2px;
+}

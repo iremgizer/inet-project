@@ -179,6 +179,7 @@ const WorkflowManager: React.FC = () => {
   const traceEvents = simulationResult?.traceEvents ?? [];
   const currentTraceEvent = isTraceMode ? (traceEvents[activeStepIndex] ?? null) : null;
   const linkResults = simulationResult?.linkResults ?? [];
+  const pathResults = simulationResult?.pathResults ?? [];
 
   // ── Locked fields — all-open in lab/teacher, assignment-driven in student/challenge ──
   const ALL_OPEN: LockedFields = {
@@ -1302,6 +1303,7 @@ const WorkflowManager: React.FC = () => {
             network={network}
             currentTraceEvent={currentTraceEvent}
             linkResults={linkResults}
+            pathResults={pathResults}
             isSimulated={!!simulationResult}
             isTraceMode={isTraceMode}
             readonly={currentStep === 0}

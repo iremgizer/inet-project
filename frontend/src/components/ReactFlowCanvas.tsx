@@ -10,6 +10,7 @@ import {
   Controls,
   Background,
   MiniMap,
+  Panel,
   useNodesState,
   useEdgesState,
   addEdge,
@@ -29,13 +30,16 @@ import "@xyflow/react/dist/style.css";
 
 import NetworkNode from "./NetworkNode";
 import NetworkEdge, { NetworkEdgeData } from "./NetworkEdge";
+import GraphLegend from "./GraphLegend";
 import {
   LinkInput,
   LinkResult,
   NetworkInput,
   NodeInput,
+  PathResult,
   SimulationTraceEvent,
 } from "../types/network";
+import { buildDemandColorMap } from "../utils/graphVisuals";
 
 // ── Simulation overlay context ────────────────────────────────────────────────
 
@@ -45,6 +49,10 @@ export interface SimulationOverlayContextType {
   linkResults: Map<string, LinkResult>;
   currentLinkLoads: Record<string, number>;
   pathColor: string | null;
+  pathResults: PathResult[];
+  demandColorMap: Map<string, string>;
+  activeDemandId: string | null;
+  isTraceMode: boolean;
   isSimulated: boolean;
   hoveredNodeId: string | null;
   setHoveredNodeId: (id: string | null) => void;
@@ -63,6 +71,10 @@ export const SimulationOverlayContext =
     linkResults: new Map(),
     currentLinkLoads: {},
     pathColor: null,
+    pathResults: [],
+    demandColorMap: new Map(),
+    activeDemandId: null,
+    isTraceMode: false,
     isSimulated: false,
     hoveredNodeId: null,
     setHoveredNodeId: () => {},
@@ -120,6 +132,7 @@ interface ReactFlowCanvasProps {
   network: NetworkInput;
   currentTraceEvent: SimulationTraceEvent | null;
   linkResults: LinkResult[];
+  pathResults: PathResult[];
   isSimulated: boolean;
   isTraceMode: boolean;
   readonly?: boolean;
@@ -147,6 +160,7 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
   network,
   currentTraceEvent,
   linkResults,
+  pathResults,
   isSimulated,
   isTraceMode,
   readonly = false,
@@ -248,13 +262,23 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
     for (const hl of gradingHighlightLinks ?? []) gradingLinkStatus.set(hl.linkId, hl.status);
     const gradingNodeIds = new Set<string>(gradingHighlightNodes ?? []);
 
+    const demandColorMap = buildDemandColorMap(pathResults);
+
     if (isTraceMode && currentTraceEvent) {
+      const activeDemandId = currentTraceEvent.activeDemandId ?? null;
+      const tracePath = activeDemandId
+        ? (demandColorMap.get(activeDemandId) ?? currentTraceEvent.pathColor ?? null)
+        : (currentTraceEvent.pathColor ?? null);
       return {
         highlightedNodeIds: new Set(currentTraceEvent.highlightedNodes),
         highlightedLinkIds: new Set(currentTraceEvent.highlightedLinks),
         linkResults: linkResultMap,
         currentLinkLoads: currentTraceEvent.currentLinkLoads ?? {},
-        pathColor: currentTraceEvent.pathColor ?? null,
+        pathColor: tracePath,
+        pathResults,
+        demandColorMap,
+        activeDemandId,
+        isTraceMode: true,
         isSimulated,
         hoveredNodeId,
         setHoveredNodeId: stableSetHoveredNodeId,
@@ -270,6 +294,10 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
       linkResults: linkResultMap,
       currentLinkLoads: {},
       pathColor: null,
+      pathResults,
+      demandColorMap,
+      activeDemandId: null,
+      isTraceMode: false,
       isSimulated,
       hoveredNodeId,
       setHoveredNodeId: stableSetHoveredNodeId,
@@ -278,7 +306,7 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
       gradingLinkStatus,
       gradingNodeIds,
     };
-  }, [currentTraceEvent, linkResults, isSimulated, isTraceMode, hoveredNodeId, stableSetHoveredNodeId, connectSourceId, network, gradingHighlightLinks, gradingHighlightNodes]);
+  }, [currentTraceEvent, linkResults, pathResults, isSimulated, isTraceMode, hoveredNodeId, stableSetHoveredNodeId, connectSourceId, network, gradingHighlightLinks, gradingHighlightNodes]);
 
   // ── RF callbacks ──────────────────────────────────────────────────────────
 
@@ -401,6 +429,9 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
           pannable
           zoomable
         />
+        <Panel position="bottom-left">
+          <GraphLegend />
+        </Panel>
       </ReactFlow>
     </SimulationOverlayContext.Provider>
   );
