@@ -367,6 +367,8 @@ Replay Trace       — step through the algorithm's decisions one event at a tim
 
 Use this script for the live demo. Allow approximately 15 minutes. MongoDB is **optional** — all demo data is pre-loaded in localStorage.
 
+> **Fast demo shortcut:** On the landing page, click **Start Building a Network** to enter the Lab immediately — no login required. Skip directly to Part 2 if you only have 5 minutes.
+
 ### Part 1 — Teacher view (5 min)
 
 1. Open the app at `http://localhost:5173`

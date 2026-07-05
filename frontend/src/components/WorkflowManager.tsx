@@ -1168,6 +1168,16 @@ const WorkflowManager: React.FC = () => {
               </button>
             </>
           )}
+          {!userRole && currentStep > 0 && (
+            <>
+              <span className="topbar-role-badge topbar-role-badge--guest">
+                <Network size={11} /> Guest
+              </span>
+              <button className="topbar-logout-btn" onClick={handleLogout} title="Back to home">
+                <LogOut size={13} /> Exit
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -1175,7 +1185,7 @@ const WorkflowManager: React.FC = () => {
       {appMode === "lab" && currentStep === 0 ? (
         <main className="home-fullpage">
           {!userRole ? (
-            <LandingPage onLogin={handleLogin} />
+            <LandingPage onLogin={handleLogin} onGuestLab={handleGoToLab} />
           ) : userRole === "teacher" ? (
             <TeacherDashboard
               savedAssignments={savedAssignments}

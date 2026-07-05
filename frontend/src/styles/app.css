@@ -8782,3 +8782,26 @@ tbody tr:hover {
 .demo-tools-legend      { border-top:1px solid var(--border-color,#e0e0e8); padding-top:8px; display:flex; flex-direction:column; gap:4px }
 .demo-tools-legend-row  { font-size:11px; color:var(--text-muted,#888); line-height:1.5 }
 .demo-tools-legend-row strong { color:var(--text-secondary,#555) }
+
+/* ── Guest / Quick-start (Landing page) ──────────────────────────────────────── */
+.landing-guest-section   { width:100%; margin-top:6px }
+.landing-guest-divider   { display:flex; align-items:center; gap:8px; margin-bottom:10px; color:var(--text-muted,#999); font-size:11px }
+.landing-guest-divider::before,
+.landing-guest-divider::after { content:""; flex:1; height:1px; background:var(--border-color,#e0e0e8) }
+
+.landing-guest-btn {
+  width:100%; display:flex; align-items:center; gap:12px;
+  background:var(--surface-secondary,#f5f6f8);
+  border:1px solid var(--border-color,#e0e0e8);
+  border-radius:10px; padding:12px 14px;
+  cursor:pointer; text-align:left;
+  transition:border-color .15s, box-shadow .15s;
+}
+.landing-guest-btn:hover { border-color:var(--accent,#4f6ef7); box-shadow:0 0 0 2px rgba(79,110,247,.1) }
+.landing-guest-icon  { color:var(--accent,#4f6ef7); flex-shrink:0 }
+.landing-guest-body  { flex:1; min-width:0 }
+.landing-guest-title { font-size:13px; font-weight:600; color:var(--text-primary,#1a1a2e) }
+.landing-guest-sub   { font-size:11px; color:var(--text-muted,#888); margin-top:2px }
+
+/* ── Guest topbar badge ───────────────────────────────────────────────────────── */
+.topbar-role-badge--guest { background:var(--surface-secondary,#f0f0f5); color:var(--text-muted,#666) }

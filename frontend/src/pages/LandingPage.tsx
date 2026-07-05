@@ -1,10 +1,11 @@
 import React, { useState } from "react";
-import { BookOpen, GraduationCap, ArrowLeft, LogIn, AlertCircle, ChevronRight } from "lucide-react";
+import { BookOpen, GraduationCap, ArrowLeft, LogIn, AlertCircle, ChevronRight, Network } from "lucide-react";
 import { UserRole, demoAuthenticate } from "../utils/demoAuth";
 import { DEMO_STUDENTS } from "../utils/demoUsers";
 
 interface LandingPageProps {
   onLogin: (role: UserRole, studentId?: string) => void;
+  onGuestLab?: () => void;
 }
 
 type LandingStep = "select-role" | "login" | "select-student";
@@ -24,7 +25,7 @@ const ROLE_META = {
   },
 } as const;
 
-const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
+const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onGuestLab }) => {
   const [step, setStep] = useState<LandingStep>("select-role");
   const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
   const [username, setUsername] = useState("");
@@ -69,25 +70,39 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
         </div>
 
         {step === "select-role" && (
-          <div className="landing-roles">
-            {(["teacher", "student"] as UserRole[]).map((role) => {
-              const { label, Icon, description } = ROLE_META[role];
-              return (
-                <button
-                  key={role}
-                  className="landing-role-card"
-                  onClick={() => handleSelectRole(role)}
-                >
-                  <Icon size={26} className="landing-role-icon" />
-                  <div className="landing-role-body">
-                    <div className="landing-role-title">{label}</div>
-                    <div className="landing-role-desc">{description}</div>
-                  </div>
-                  <ChevronRight size={16} style={{ color: "var(--text-3)", flexShrink: 0 }} />
-                </button>
-              );
-            })}
-          </div>
+          <>
+            <div className="landing-roles">
+              {(["teacher", "student"] as UserRole[]).map((role) => {
+                const { label, Icon, description } = ROLE_META[role];
+                return (
+                  <button
+                    key={role}
+                    className="landing-role-card"
+                    onClick={() => handleSelectRole(role)}
+                  >
+                    <Icon size={26} className="landing-role-icon" />
+                    <div className="landing-role-body">
+                      <div className="landing-role-title">{label}</div>
+                      <div className="landing-role-desc">{description}</div>
+                    </div>
+                    <ChevronRight size={16} style={{ color: "var(--text-3)", flexShrink: 0 }} />
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="landing-guest-section">
+              <div className="landing-guest-divider"><span>or</span></div>
+              <button className="landing-guest-btn" onClick={onGuestLab}>
+                <Network size={17} className="landing-guest-icon" />
+                <div className="landing-guest-body">
+                  <div className="landing-guest-title">Start Building a Network</div>
+                  <div className="landing-guest-sub">No account needed — explore the simulator instantly.</div>
+                </div>
+                <ChevronRight size={15} style={{ color: "var(--text-3)", flexShrink: 0 }} />
+              </button>
+            </div>
+          </>
         )}
 
         {step === "login" && selectedRole && (
