@@ -24,7 +24,7 @@ export interface GenerateOptions {
 // ── Preview metadata ──────────────────────────────────────────────────────────
 
 const PREVIEW: Partial<Record<TopologyType, Record<TopologySize, { nodes: number; links: number }>>> = {
-  triangle:  { small: {nodes:3,  links:3},  medium: {nodes:6,  links:9},  large: {nodes:12, links:18} },
+  triangle:  { small: {nodes:3,  links:3},  medium: {nodes:3,  links:3},  large: {nodes:3,  links:3}  },
   ring:      { small: {nodes:6,  links:6},  medium: {nodes:12, links:12}, large: {nodes:24, links:24} },
   mesh:      { small: {nodes:8,  links:12}, medium: {nodes:16, links:30}, large: {nodes:25, links:60} },
   "fat-tree":{ small: {nodes:14, links:16}, medium: {nodes:16, links:24}, large: {nodes:28, links:48} },
@@ -84,18 +84,19 @@ export function generateTopology(type: TopologyType, size: TopologySize, opts?: 
     return cycleTopology(9, "cycle", w, cap);
   }
 
-  // Legacy generators: triangle, ring, mesh, line
+  // Triangle is always the canonical 3-node topology — size selector has no effect.
+  if (type === "triangle") return canonicalTriangle(w, cap);
+
+  // Legacy generators: ring, mesh, line
   const nodeCounts: Record<string, Record<TopologySize, number>> = {
-    triangle: { small: 3,  medium: 6,  large: 12 },
-    ring:     { small: 6,  medium: 12, large: 24 },
-    mesh:     { small: 8,  medium: 16, large: 25 },
-    line:     { small: 4,  medium: 10, large: 20 },
+    ring:  { small: 6,  medium: 12, large: 24 },
+    mesh:  { small: 8,  medium: 16, large: 25 },
+    line:  { small: 4,  medium: 10, large: 20 },
   };
   const nc = opts?.nodeCount;
   const count = nc ?? (nodeCounts[type]?.[size] ?? 4);
-  if (type === "ring")     return ringTopology(count, type, w, cap);
-  if (type === "mesh")     return meshTopology(count, type, w, cap);
-  if (type === "triangle") return triangleLikeTopology(count, type, w, cap);
+  if (type === "ring") return ringTopology(count, type, w, cap);
+  if (type === "mesh") return meshTopology(count, type, w, cap);
   return lineTopology(count, type, w, cap);
 }
 
@@ -315,6 +316,30 @@ export function generateRandomTopology(config: RandomGraphConfig): NetworkInput 
     nodes, links,
     demands: [{ id: "d1", source: nodes[0].id, target: nodes[nodeCount - 1].id, amount: 1 }],
     topologyType: "random", isDirected: false,
+  };
+}
+
+// ── Canonical triangle ────────────────────────────────────────────────────────
+// Always exactly 3 nodes, 3 links, in a triangular layout.
+// u (top-center), v (bottom-left), t (bottom-right).
+// The diagonal link u–t has weight*2 so ECMP splits traffic evenly between
+// the direct path u→t and the indirect path u→v→t.
+
+function canonicalTriangle(weight = 1, capacity = 10): NetworkInput {
+  const nodes: NodeInput[] = [
+    { id: "u", label: "u", x: 300, y: 100 },
+    { id: "v", label: "v", x: 130, y: 360 },
+    { id: "t", label: "t", x: 470, y: 360 },
+  ];
+  const links: LinkInput[] = [
+    { id: "u-v", source: "u", target: "v", weight, capacity },
+    { id: "v-t", source: "v", target: "t", weight, capacity },
+    { id: "u-t", source: "u", target: "t", weight: weight * 2, capacity },
+  ];
+  return {
+    nodes, links,
+    demands: [{ id: "d1", source: "u", target: "t", amount: 1.5 }],
+    topologyType: "triangle", isDirected: false,
   };
 }
 

@@ -120,6 +120,15 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
 
   const [edgePath, labelX, labelY] = getStraightPath({ sourceX, sourceY, targetX, targetY });
 
+  // Perpendicular offset so the label doesn't sit on the edge line itself.
+  // Shift label to the "left" of the edge direction vector.
+  const dx = targetX - sourceX;
+  const dy = targetY - sourceY;
+  const edgeLen = Math.sqrt(dx * dx + dy * dy) || 1;
+  const PERP = 11;
+  const perpX = (-dy / edgeLen) * PERP;
+  const perpY = (dx / edgeLen) * PERP;
+
   // ── Label content ────────────────────────────────────────────────────────────
   // Before sim: "w=1" (small, gray)
   // After sim:  "w=1 · 28%" — util text colored by severity
@@ -150,7 +159,7 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
       );
     } else {
       labelContent = (
-        <div className="rf-edge-weight-label">
+        <div className="rf-edge-weight-label rf-edge-weight-label--pill">
           w={d.weight}{selected ? <span className="rf-edge-cap"> · c={d.capacity}</span> : null}
         </div>
       );
@@ -189,7 +198,7 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
           <div
             style={{
               position: "absolute",
-              transform: `translate(-50%,-50%) translate(${labelX}px,${labelY}px)`,
+              transform: `translate(-50%,-50%) translate(${labelX + perpX}px,${labelY + perpY}px)`,
               pointerEvents: "none",
             }}
           >

@@ -25,7 +25,6 @@ interface TopoCard {
   value: TopologyType;
   label: string;
   tagline: string;
-  best: string;
   categories: Category[];
 }
 
@@ -33,57 +32,49 @@ const TOPO_CARDS: TopoCard[] = [
   {
     value: "triangle",
     label: "Triangle",
-    tagline: "Two equal-cost paths between endpoints. Classic ECMP demonstration.",
-    best: "ECMP · Load splitting",
+    tagline: "3 nodes · 3 links. Two equal-cost paths between u and t.",
     categories: ["ECMP"],
   },
   {
     value: "ring",
     label: "Ring",
-    tagline: "Nodes form a loop — two disjoint paths exist between any pair.",
-    best: "ECMP · Path diversity",
+    tagline: "Nodes in a loop — two disjoint paths between any pair.",
     categories: ["ECMP", "Distance Vector"],
   },
   {
     value: "mesh",
     label: "Mesh",
-    tagline: "Dense interconnect — stress test congestion and routing policies.",
-    best: "Congestion · Full mesh",
+    tagline: "Dense interconnect with many crossing paths.",
     categories: ["ECMP"],
   },
   {
     value: "fat-tree",
     label: "Clos Fat-Tree",
-    tagline: "Multi-tier data-center topology. Spines, leaves, and hosts with full bisection bandwidth.",
-    best: "Data-center · ECMP",
+    tagline: "Multi-tier data-center topology.",
     categories: ["ECMP"],
   },
   {
     value: "grid",
     label: "Grid",
-    tagline: "Nodes arranged in a 2D lattice. Shows multiple equal-cost routes in all directions.",
-    best: "Multiple paths",
+    tagline: "2D lattice with multiple equal-cost routes.",
     categories: ["Distance Vector", "Exercises"],
   },
   {
     value: "path",
     label: "Path Graph",
-    tagline: "Linear chain A–B–C–D with weight=10. Perfect for DV convergence demos.",
-    best: "Distance Vector · Bellman-Ford",
+    tagline: "Linear chain with configurable length.",
     categories: ["Distance Vector"],
   },
   {
     value: "cycle",
     label: "Cycle",
-    tagline: "Closed loop with an odd number of nodes. Explore route diversity and Segment Routing.",
-    best: "Segment Routing · Exercises",
+    tagline: "Closed loop with configurable node count.",
     categories: ["Exercises"],
   },
   {
     value: "random",
     label: "Random Graph",
-    tagline: "Generate a random connected graph. Control node count, link count, and weights.",
-    best: "Exploration · Exercises",
+    tagline: "Random connected graph with configurable density.",
     categories: ["Exercises"],
   },
 ];
@@ -251,7 +242,9 @@ const NetworkBuilderPage: React.FC<NetworkBuilderPageProps> = ({
     nodeCount: 8, linkCount: 12, weight: 1, capacity: 10, connected: true,
   });
 
-  // Whether we use custom count inputs instead of S/M/L for a given type
+  // Triangle always generates a canonical 3-node topology — no size selector needed.
+  const isFixedSize = selectedType === "triangle";
+  // These types use explicit numeric count inputs instead of S/M/L.
   const supportsCustomCount = ["path", "cycle", "ring", "mesh", "grid", "fat-tree"].includes(selectedType);
   const preview = getTopologyPreview(selectedType, size);
 
@@ -301,11 +294,6 @@ const NetworkBuilderPage: React.FC<NetworkBuilderPageProps> = ({
       </div>
       <h2 className="page-title">Build your network</h2>
 
-      <div className="builder-hints">
-        <div className="builder-hint"><span className="hint-dot" />Drag a node handle to another node to create a link</div>
-        <div className="builder-hint"><span className="hint-dot" />Click any node or link to inspect and edit it</div>
-      </div>
-
       <div className="page-divider" />
 
       {/* ── Category filter ── */}
@@ -338,7 +326,6 @@ const NetworkBuilderPage: React.FC<NetworkBuilderPageProps> = ({
               </div>
               <div className="topo-card-body">
                 <span className="topo-card-name">{card.label}</span>
-                <span className="topo-card-best">{card.best}</span>
               </div>
             </button>
           );
@@ -348,9 +335,26 @@ const NetworkBuilderPage: React.FC<NetworkBuilderPageProps> = ({
       {/* ── Config section for selected type ── */}
       {selectedCard && (
         <div className="topo-load-row">
-          <p className="topo-card-tagline">{selectedCard.tagline}</p>
-
-          {selectedType === "random" ? (
+          {isFixedSize ? (
+            /* ── Fixed-size topology (triangle) — no size controls ── */
+            <div className="topo-defaults-row">
+              <span className="topo-defaults-label">Default weight &amp; capacity</span>
+              <label className="topo-count-field">
+                <span>Weight</span>
+                <input
+                  type="number" min={0} step={0.1} value={defaultWeight}
+                  onChange={(e) => setDefaultWeight(Math.max(0, +e.target.value))}
+                />
+              </label>
+              <label className="topo-count-field">
+                <span>Capacity</span>
+                <input
+                  type="number" min={0.1} step={0.1} value={defaultCapacity}
+                  onChange={(e) => setDefaultCapacity(Math.max(0.1, +e.target.value))}
+                />
+              </label>
+            </div>
+          ) : selectedType === "random" ? (
             /* ── Random graph config ── */
             <div className="random-config-form">
               <div className="random-config-row">
