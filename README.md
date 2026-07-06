@@ -9,12 +9,14 @@ An interactive educational platform for visualizing and simulating network routi
 - **Interactive network topology builder** — drag-and-drop canvas with React Flow; add, delete, and connect nodes and links
 - **ECMP simulation** — equal-cost multipath routing with traffic splitting across shortest paths
 - **Distance Vector simulation** — Bellman-Ford shortest-path routing with cost tables and next-hop inspection
-- **Step-by-step trace replay** — animated playback with forward, back, play/pause, and speed controls
+- **Step-by-step trace replay** — animated playback with forward, back, play/pause, and speed controls; contextual per-step panel shows algorithm state, cost calculations, and link load deltas for each event
+- **Interactive routing table** — searchable, filterable DV table with "relevant only" mode that highlights the active row in sync with the trace replay
+- **Demand path colours** — each traffic demand gets a distinct colour on the canvas; congestion severity shown separately via line thickness and glow halo; collapsible legend panel
 - **Lecture examples** — four pre-built scenarios that auto-run on load (ECMP Triangle, DV Path P4, DV Grid, Clos Fat-Tree ECMP)
 - **Topology templates** — triangle, ring, mesh, Clos Fat-Tree, grid, path, cycle, and random graphs
 - **Custom topology JSON import/export** — load any topology from a validated JSON file; export the current network
 - **Congestion visualization** — link utilization colour-coding; congested links highlighted on the canvas
-- **Node and link inspection** — click any node or link to view routing results, update weights and capacities inline
+- **Node and link inspection** — floating inspector drawer; click any node or link to view routing results, update weights and capacities inline
 - **Teacher mode** — create classroom assignments with a guided form; lock fields, set task prompts, export JSON
 - **Student mode** — import an assignment file, solve the task, get auto-graded feedback, export a submission
 - **Challenge mode** — structured problem-solving with progressive hints, attempt tracking, and scored feedback

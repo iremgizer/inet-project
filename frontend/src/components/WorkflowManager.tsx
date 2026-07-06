@@ -118,6 +118,7 @@ const WorkflowManager: React.FC = () => {
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeedMs, setPlaybackSpeedMs] = useState(900);
+  const [showRoutingTable, setShowRoutingTable] = useState(false);
 
   // ── Saved runs ────────────────────────────────────────────────────────────
   const [savedRuns, setSavedRuns] = useState<SavedSimulationSummary[]>([]);
@@ -180,6 +181,11 @@ const WorkflowManager: React.FC = () => {
   const currentTraceEvent = isTraceMode ? (traceEvents[activeStepIndex] ?? null) : null;
   const linkResults = simulationResult?.linkResults ?? [];
   const pathResults = simulationResult?.pathResults ?? [];
+
+  const activeTableRowKeys = React.useMemo(() => {
+    if (!currentTraceEvent?.activeTableRowIds) return [];
+    return currentTraceEvent.activeTableRowIds;
+  }, [currentTraceEvent]);
 
   // ── Locked fields — all-open in lab/teacher, assignment-driven in student/challenge ──
   const ALL_OPEN: LockedFields = {
@@ -908,8 +914,8 @@ const WorkflowManager: React.FC = () => {
         currentTraceEvent={currentTraceEvent}
         activeStepIndex={activeStepIndex}
         totalSteps={traceEvents.length}
-        onEnableTrace={() => { setIsTraceMode(true); setActiveStepIndex(0); }}
-        onDisableTrace={() => { setIsTraceMode(false); setIsPlaying(false); }}
+        onEnableTrace={() => { setIsTraceMode(true); setActiveStepIndex(0); setShowRoutingTable(false); }}
+        onDisableTrace={() => { setIsTraceMode(false); setIsPlaying(false); setShowRoutingTable(false); }}
         onBack={() => setCurrentStep(3)}
         lectureInsight={lectureInsight}
       />
@@ -973,6 +979,7 @@ const WorkflowManager: React.FC = () => {
     setActiveStepIndex(0);
     setIsPlaying(false);
     setReplayMode("trace");
+    setShowRoutingTable(false);
   }, []);
 
   const handleStartCompare = useCallback(() => {
@@ -1069,8 +1076,16 @@ const WorkflowManager: React.FC = () => {
         onPause={() => setIsPlaying(false)}
         onReset={() => { setActiveStepIndex(0); setIsPlaying(false); }}
         onSpeedChange={setPlaybackSpeedMs}
+        network={network}
+        simulationResult={simulationResult}
+        onShowFullTable={() => setShowRoutingTable(true)}
       />
-      <RoutingTablePanel entries={simulationResult?.distanceVectorTable} />
+      <RoutingTablePanel
+        entries={simulationResult?.distanceVectorTable}
+        network={network}
+        activeRowKeys={activeTableRowKeys}
+        initiallyOpen={showRoutingTable}
+      />
     </>
   );
 

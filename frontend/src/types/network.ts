@@ -102,6 +102,9 @@ export interface SimulationTraceEvent {
   currentLinkLoads?: Record<string, number> | null;
   tablesSnapshot?: unknown;
   metadata?: Record<string, unknown> | null;
+  activeNodeId?: string | null;
+  activeDestinationId?: string | null;
+  activeTableRowIds?: string[] | null;  // format: "nodeId::destinationId"
 }
 
 export interface SimulationResult {

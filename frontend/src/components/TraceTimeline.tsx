@@ -1,12 +1,15 @@
 import React from "react";
 import { SkipBack, SkipForward, Play, Pause, RotateCcw, ChevronDown, ChevronUp } from "lucide-react";
-import { SimulationTraceEvent } from "../types/network";
+import { SimulationTraceEvent, NetworkInput, SimulationResult } from "../types/network";
+import TraceStepPanel from "./TraceStepPanel";
 
 interface TraceTimelineProps {
   events: SimulationTraceEvent[];
   activeIndex: number;
   isPlaying: boolean;
   speedMs: number;
+  network?: NetworkInput;
+  simulationResult?: SimulationResult | null;
   onStep: (index: number) => void;
   onBack: () => void;
   onForward: () => void;
@@ -14,6 +17,7 @@ interface TraceTimelineProps {
   onPause: () => void;
   onReset: () => void;
   onSpeedChange: (ms: number) => void;
+  onShowFullTable?: () => void;
 }
 
 const TraceTimeline: React.FC<TraceTimelineProps> = ({
@@ -21,6 +25,8 @@ const TraceTimeline: React.FC<TraceTimelineProps> = ({
   activeIndex,
   isPlaying,
   speedMs,
+  network,
+  simulationResult,
   onStep,
   onBack,
   onForward,
@@ -28,6 +34,7 @@ const TraceTimeline: React.FC<TraceTimelineProps> = ({
   onPause,
   onReset,
   onSpeedChange,
+  onShowFullTable,
 }) => {
   const [showSpeed, setShowSpeed] = React.useState(false);
   const total = events.length;
@@ -136,7 +143,16 @@ const TraceTimeline: React.FC<TraceTimelineProps> = ({
       )}
 
       {/* Current step card */}
-      {currentEvent && (
+      {currentEvent && network && (
+        <TraceStepPanel
+          event={currentEvent}
+          network={network}
+          result={simulationResult ?? null}
+          dvTable={simulationResult?.distanceVectorTable}
+          onShowFullTable={onShowFullTable}
+        />
+      )}
+      {currentEvent && !network && (
         <div className="tl-step-card">
           <div className="tl-step-title">{currentEvent.title}</div>
           <p className="tl-step-desc">{currentEvent.description}</p>

@@ -91,6 +91,9 @@ class DistanceVectorAlgorithm:
                 highlightedLinks=path_link_ids,
                 activeDemandId=demand.id,
                 costCalculation=DistanceVectorAlgorithm._path_cost_calculation(path, link_map),
+                activeNodeId=demand.source,
+                activeDestinationId=demand.target,
+                activeTableRowIds=[f"{demand.source}::{demand.target}"],
             ))
             step += 1
             path_results.append(PathResult(
@@ -116,6 +119,9 @@ class DistanceVectorAlgorithm:
                 activeDemandId=demand.id,
                 linkLoadDelta=delta,
                 currentLinkLoads={key: round(value, 6) for key, value in link_loads.items()},
+                activeNodeId=demand.source,
+                activeDestinationId=demand.target,
+                activeTableRowIds=[f"{demand.source}::{demand.target}"],
             ))
             step += 1
 

@@ -118,6 +118,9 @@ class SimulationTraceEvent(BaseModel):
     currentLinkLoads: Optional[Dict[str, float]] = None
     tablesSnapshot: Optional[Any] = None
     metadata: Optional[Dict[str, Any]] = None
+    activeNodeId: Optional[str] = None
+    activeDestinationId: Optional[str] = None
+    activeTableRowIds: Optional[List[str]] = None
 
 class SimulationResult(BaseModel):
     simulationRunId: str = Field(default_factory=lambda: str(uuid4()))
@@ -295,17 +298,3 @@ class GradingResult(BaseModel):
     passed: bool
     feedback: str
     details: Dict[str, Any] = Field(default_factory=dict)
-
-class GradeRequest(BaseModel):
-    """Request body for POST /grade.
-
-    Either assignmentId (to load from MongoDB) or assignment (embedded doc)
-    must be provided. If both are absent, grading returns an error result.
-    """
-    assignmentId: Optional[str] = None
-    assignment: Optional[Dict[str, Any]] = None
-    submittedNetwork: NetworkInput
-    submittedAlgorithmConfig: AlgorithmConfig
-    submittedAnswers: Dict[str, Any] = Field(default_factory=dict)
-    hintsUsed: int = 0
-    studentId: Optional[str] = None
