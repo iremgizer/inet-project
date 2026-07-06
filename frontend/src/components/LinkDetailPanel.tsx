@@ -60,13 +60,13 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
           aria-label="Delete link"
           disabled={!canEditLinks}
         >
-          <Trash2 size={13} />
+          <Trash2 size={15} />
         </button>
       </div>
 
       {/* ── Parameters ── */}
       <div className="li-section">
-        <div className="detail-section-title">Parameters</div>
+        <div className="detail-section-title" style={{ fontSize: ".8rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text-3)", marginBottom: 14 }}>Parameters</div>
         {(!canEditWeights || !canEditCapacities) && (
           <div className="locked-notice">
             <span className="locked-notice-icon">&#128274;</span>

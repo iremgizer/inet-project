@@ -46,7 +46,6 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
 }) => {
   const [labelDraft, setLabelDraft] = useState(node.label);
 
-  // Sync draft when node changes
   React.useEffect(() => { setLabelDraft(node.label); }, [node.id, node.label]);
 
   const connLinks = getNodeConnectedLinks(node.id, network);
@@ -67,13 +66,13 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
           <div className="ni-header-chips">
             <span className="ni-degree-chip">{degree} link{degree !== 1 ? "s" : ""}</span>
             {simRoles && simRoles.asSourceFor.length > 0 && (
-              <span className="ni-role-chip ni-role-chip--src"><ArrowRight size={9} /> Source</span>
+              <span className="ni-role-chip ni-role-chip--src"><ArrowRight size={10} /> Source</span>
             )}
             {simRoles && simRoles.asDestinationFor.length > 0 && (
-              <span className="ni-role-chip ni-role-chip--dst"><ArrowLeft size={9} /> Destination</span>
+              <span className="ni-role-chip ni-role-chip--dst"><ArrowLeft size={10} /> Destination</span>
             )}
             {simRoles && simRoles.asIntermediateFor.length > 0 && (
-              <span className="ni-role-chip ni-role-chip--mid"><Shuffle size={9} /> Relay</span>
+              <span className="ni-role-chip ni-role-chip--mid"><Shuffle size={10} /> Relay</span>
             )}
             {congestedLinks.length > 0 && (
               <span className="ni-role-chip ni-role-chip--warn">&#9888; {congestedLinks.length} congested</span>
@@ -82,7 +81,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
         </div>
       </div>
 
-      {/* ── Label edit ── */}
+      {/* ── Label ── */}
       <div className="ni-section">
         {!canEditNodes && (
           <div className="locked-notice">
@@ -113,7 +112,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
           />
         </div>
         {connLinks.length === 0 ? (
-          <p className="ni-muted">No links &mdash; draw a connection from this node.</p>
+          <p className="ni-muted">No links — draw a connection from this node.</p>
         ) : (
           <>
             {connLinks.map((link) => {
@@ -131,14 +130,20 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
                   tabIndex={onSelectLink ? 0 : undefined}
                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onSelectLink?.(link.id); }}
                 >
+                  {/* Link card header */}
                   <div className="ni-link-row-neighbor">
                     <span className="ni-link-arrow">{isSource ? "→" : "←"}</span>
                     <span className="ni-neighbor-label">{neighborLabel}</span>
                     <span className="ni-link-id">{link.id}</span>
                   </div>
-                  <div className="ni-link-row-inputs" onClick={(e) => e.stopPropagation()}>
+
+                  {/* Weight / Capacity fields — vertical, 2-col grid */}
+                  <div
+                    className="ni-link-row-inputs"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <label className="ni-inline-field">
-                      <span>w</span>
+                      <span>Weight</span>
                       <input
                         type="number"
                         className="ni-num-input"
@@ -151,7 +156,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
                       />
                     </label>
                     <label className="ni-inline-field">
-                      <span>cap</span>
+                      <span>Capacity</span>
                       <input
                         type="number"
                         className="ni-num-input"
@@ -163,18 +168,9 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
                         title="Capacity"
                       />
                     </label>
-                    {onDeleteLink && (
-                      <button
-                        className="ni-link-delete"
-                        onClick={(e) => { e.stopPropagation(); onDeleteLink(link.id); }}
-                        disabled={!canEditNodes}
-                        title="Delete link"
-                        aria-label="Delete link"
-                      >
-                        &times;
-                      </button>
-                    )}
                   </div>
+
+                  {/* Utilization bar (post-sim) */}
                   {lr && uc && (
                     <div className="ni-link-util" onClick={(e) => e.stopPropagation()}>
                       <div className="ni-util-mini-track">
@@ -186,14 +182,45 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
                       <span className={`ni-util-pct ni-util-pct--${uc}`}>
                         {(lr.utilization * 100).toFixed(0)}%
                       </span>
-                      {lr.isCongested && <span className="badge badge--danger" style={{ fontSize: "0.7rem", padding: "1px 4px" }}>!</span>}
+                      {lr.isCongested && (
+                        <span className="badge badge--danger" style={{ fontSize: "0.75rem", padding: "2px 6px" }}>!</span>
+                      )}
+                      {onDeleteLink && (
+                        <button
+                          className="ni-link-delete"
+                          onClick={(e) => { e.stopPropagation(); onDeleteLink(link.id); }}
+                          disabled={!canEditNodes}
+                          title="Delete link"
+                          aria-label="Delete link"
+                        >
+                          &times;
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Delete button when no util bar */}
+                  {!lr && onDeleteLink && (
+                    <div
+                      style={{ padding: "4px 16px 10px", display: "flex", justifyContent: "flex-end" }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        className="ni-link-delete"
+                        onClick={(e) => { e.stopPropagation(); onDeleteLink(link.id); }}
+                        disabled={!canEditNodes}
+                        title="Delete link"
+                        aria-label="Delete link"
+                      >
+                        &times;
+                      </button>
                     </div>
                   )}
                 </div>
               );
             })}
             {!result && (
-              <p className="ni-muted ni-muted--small">Run a simulation to see load and utilization on each link.</p>
+              <p className="ni-muted ni-muted--small">Run a simulation to see load and utilization.</p>
             )}
           </>
         )}
@@ -202,7 +229,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
       {/* ── Traffic Demands ── */}
       {demandRoles.length > 0 && (
         <div className="ni-section">
-          <div className="ni-section-title">Traffic Demands</div>
+          <div className="ni-section-title">Traffic</div>
           <div className="demand-roles">
             {demandRoles.map(({ demand, role, otherLabel }) => (
               <div key={demand.id} className="demand-role-item">
@@ -227,7 +254,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
             onClick={() => onStartConnect(node.id)}
             title="Click another node to create a link"
           >
-            <Link2 size={13} /> Connect from here
+            <Link2 size={15} /> Connect from here
           </button>
         )}
         {onAddDemandFrom && (
@@ -236,7 +263,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
             onClick={() => onAddDemandFrom(node.id)}
             title="Go to Traffic stage with this node as source"
           >
-            <PlusCircle size={13} /> Add traffic from here
+            <PlusCircle size={15} /> Add traffic from here
           </button>
         )}
         {onCenterNode && (
@@ -245,7 +272,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
             onClick={() => onCenterNode(node.id)}
             title="Center canvas on this node"
           >
-            <Maximize2 size={13} /> Center on canvas
+            <Maximize2 size={15} /> Center on canvas
           </button>
         )}
         <button
@@ -254,7 +281,7 @@ const NodeDetailPanel: React.FC<NodeDetailPanelProps> = ({
           disabled={!canEditNodes}
           title={canEditNodes ? "Delete node" : "Locked by teacher"}
         >
-          <Trash2 size={13} /> Delete node
+          <Trash2 size={15} /> Delete node
         </button>
       </div>
     </div>

@@ -9109,3 +9109,631 @@ tbody tr:hover {
   width: 100%;
   border-radius: 2px;
 }
+
+
+/* ══════════════════════════════════════════════════════════════
+   DESIGN LANGUAGE POLISH
+   Larger typography · more whitespace · modern inputs & cards
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Base typography ──────────────────────────────────────────── */
+
+html, body, #root {
+  font-size: 15px;
+}
+
+:root {
+  --topbar-h: 62px;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+}
+
+/* ── Topbar ───────────────────────────────────────────────────── */
+
+.topbar-brand-name {
+  font-size: 1.1rem;
+}
+
+.topbar-step-label {
+  font-size: .82rem;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────── */
+
+.btn-primary {
+  padding: .68rem 1.4rem;
+  font-size: .92rem;
+  border-radius: var(--radius-sm);
+  gap: 7px;
+}
+
+.btn-secondary {
+  padding: .68rem 1.4rem;
+  font-size: .92rem;
+  border-radius: var(--radius-sm);
+  gap: 7px;
+}
+
+.btn-ghost {
+  padding: .68rem 1.4rem;
+  font-size: .92rem;
+  border-radius: var(--radius-sm);
+}
+
+.btn-sm {
+  padding: .48rem .95rem;
+  font-size: .84rem;
+  border-radius: var(--radius-sm);
+}
+
+.btn-xs {
+  padding: .36rem .75rem;
+  font-size: .8rem;
+  border-radius: var(--radius-sm);
+  gap: 4px;
+}
+
+.btn-lg {
+  padding: .75rem 1.5rem;
+  font-size: 1rem;
+}
+
+.icon-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Inputs & forms ───────────────────────────────────────────── */
+
+.text-input,
+.number-input {
+  padding: .58rem .9rem;
+  font-size: .92rem;
+  border-radius: var(--radius-sm);
+  min-height: 40px;
+  border: 1.5px solid var(--border-strong);
+}
+
+.text-input:focus,
+.number-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px #0071e326;
+}
+
+.select-input {
+  padding: .58rem .9rem;
+  font-size: .9rem;
+  border-radius: var(--radius-sm);
+  min-height: 40px;
+  border: 1.5px solid var(--border-strong);
+}
+
+.field > span,
+.field-label-row {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--text-2);
+  gap: 5px;
+}
+
+.field > small {
+  font-size: .8rem;
+}
+
+.field {
+  gap: 6px;
+}
+
+.number-input--sm {
+  min-height: 36px;
+  font-size: .88rem;
+}
+
+/* ── Panel base ───────────────────────────────────────────────── */
+
+.panel {
+  padding: 1rem 1.1rem;
+}
+
+/* ── Home page ────────────────────────────────────────────────── */
+
+.home-page {
+  max-width: 840px;
+  gap: 40px;
+}
+
+.home-title {
+  font-size: 28px;
+}
+
+.home-sub {
+  font-size: 15px;
+  color: var(--text-2);
+}
+
+.home-logo-mark {
+  font-size: 40px;
+  margin-bottom: 16px;
+}
+
+.home-cards {
+  gap: 14px;
+}
+
+.home-card {
+  padding: 22px 18px;
+  min-height: 88px;
+  gap: 16px;
+  border-radius: 14px;
+  border-width: 1.5px;
+  box-shadow: var(--shadow-xs);
+  transition: border-color .15s, background .15s, box-shadow .2s, transform .15s;
+}
+
+.home-card:hover {
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.home-card-title {
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
+.home-card-desc {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* ── Dashboard ────────────────────────────────────────────────── */
+
+.dash-heading {
+  font-size: 26px;
+}
+
+.dash-sub {
+  font-size: 15px;
+}
+
+.dash-lecture-title {
+  font-size: 14px;
+}
+
+.dash-lecture-tagline {
+  font-size: 12px;
+}
+
+.dash-lecture-header {
+  padding: 14px 18px;
+}
+
+.dash-lecture-details {
+  padding: 14px 18px;
+}
+
+/* ── Inspector drawer ─────────────────────────────────────────── */
+
+.inspector-drawer {
+  width: 480px;
+  box-shadow: -6px 0 28px rgba(0,0,0,.14);
+}
+
+.inspector-close-btn {
+  width: 30px;
+  height: 30px;
+  top: 14px;
+  right: 14px;
+}
+
+/* ── Node inspector (ni-*) complete redesign ─────────────────── */
+
+.ni-header {
+  padding: 24px 52px 18px 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ni-label {
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+
+.ni-id {
+  font-size: 0.78rem;
+}
+
+.ni-header-chips {
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.ni-degree-chip {
+  font-size: 0.8rem;
+  padding: 4px 11px;
+  border-radius: 20px;
+}
+
+.ni-role-chip {
+  font-size: 0.8rem;
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+
+.ni-section {
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ni-section-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-3);
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ni-muted {
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.ni-muted--small {
+  font-size: 0.82rem;
+}
+
+/* Each link row becomes a card */
+.ni-link-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  margin-bottom: 10px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  overflow: hidden;
+  transition: border-color .15s;
+}
+
+.ni-link-row:last-child {
+  margin-bottom: 0;
+}
+
+.ni-link-row--clickable {
+  cursor: pointer;
+}
+
+.ni-link-row--clickable:hover {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+.ni-link-row-neighbor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.ni-link-arrow {
+  font-weight: 700;
+  color: var(--accent);
+  font-size: 1rem;
+}
+
+.ni-neighbor-label {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.ni-link-id {
+  font-size: 0.72rem;
+  color: var(--text-3);
+  font-family: "SF Mono", Menlo, monospace;
+  margin-left: auto;
+}
+
+/* Vertical weight/capacity fields inside link card */
+.ni-link-row-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 12px 16px;
+  align-items: end;
+}
+
+.ni-inline-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 0.84rem;
+  color: var(--text-2);
+}
+
+.ni-inline-field span {
+  font-weight: 600;
+  font-size: 0.82rem;
+}
+
+.ni-num-input {
+  width: 100%;
+  padding: .52rem .75rem;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: .9rem;
+  font: inherit;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+  min-height: 38px;
+}
+
+.ni-num-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px #0071e326;
+}
+
+.ni-num-input:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  background: var(--surface-3);
+}
+
+.ni-link-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--text-3);
+  background: none;
+  border: none;
+  cursor: pointer;
+  align-self: flex-end;
+  margin-bottom: 2px;
+  transition: color .15s, background .15s;
+}
+
+.ni-link-delete:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-light);
+}
+
+.ni-link-util {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.ni-util-mini-track {
+  flex: 1;
+  height: 5px;
+  background: var(--surface-3);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.ni-util-mini-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width .3s;
+}
+
+.ni-util-mini-fill--safe    { background: #34c759; }
+.ni-util-mini-fill--warning { background: #ff9f0a; }
+.ni-util-mini-fill--danger  { background: #ff3b30; }
+
+.ni-util-pct {
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ni-util-pct--safe    { color: #34c759; }
+.ni-util-pct--warning { color: #ff9f0a; }
+.ni-util-pct--danger  { color: #ff3b30; }
+
+/* Quick actions */
+.ni-actions {
+  padding: 16px 22px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ni-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+
+.ni-action-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--text-3);
+}
+
+.ni-action-btn--danger {
+  color: var(--danger);
+  border-color: #ff3b3033;
+}
+
+.ni-action-btn--danger:hover:not(:disabled) {
+  background: var(--danger-light);
+  border-color: var(--danger);
+}
+
+.ni-action-btn:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
+/* ── Link inspector (li-*) redesign ──────────────────────────── */
+
+.li-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 22px 52px 16px 22px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.li-header-endpoints {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.li-endpoint-node {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -.02em;
+}
+
+.li-endpoint-arrow {
+  font-size: 1.25rem;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.li-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.li-section {
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.li-section:last-child {
+  border-bottom: none;
+}
+
+.li-presim-note {
+  background: var(--surface-2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  font-size: 0.88rem;
+  color: var(--text-2);
+  line-height: 1.55;
+}
+
+.li-presim-title {
+  font-weight: 700;
+  color: var(--text);
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+}
+
+.li-presim-hint {
+  margin-top: 8px;
+  font-size: 0.82rem;
+  color: var(--text-3);
+}
+
+/* Link parameters — vertical fields */
+.param-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+/* ── Step nav ─────────────────────────────────────────────────── */
+
+.step-nav {
+  gap: 6px;
+  padding: 0 1rem;
+}
+
+.step-btn {
+  font-size: .85rem;
+  padding: .42rem .9rem;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Sidebar panel titles ─────────────────────────────────────── */
+
+.panel-title,
+.sidebar-title,
+.detail-section-title {
+  font-size: .82rem;
+}
+
+/* ── Demand / traffic list rows ──────────────────────────────── */
+
+.demand-row {
+  border-radius: var(--radius-sm);
+}
+
+/* ── Metrics / result panel ──────────────────────────────────── */
+
+.result-hero-status {
+  font-size: 1rem;
+}
+
+/* ── Smooth transitions everywhere ───────────────────────────── */
+
+.home-card,
+.btn-primary,
+.btn-secondary,
+.btn-ghost,
+.btn-sm,
+.btn-xs,
+.ni-action-btn,
+.ni-link-row,
+.inspector-drawer {
+  transition-duration: .18s;
+}
+
+/* ── Accessibility: minimum tap targets ──────────────────────── */
+
+.btn-primary,
+.btn-secondary,
+.btn-ghost,
+.btn-sm {
+  min-height: 40px;
+}
+
+.btn-xs {
+  min-height: 32px;
+}
+
+/* ── Locked notice ────────────────────────────────────────────── */
+
+.locked-notice {
+  font-size: .85rem;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 10px;
+}
