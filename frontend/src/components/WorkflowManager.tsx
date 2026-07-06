@@ -119,6 +119,7 @@ const WorkflowManager: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeedMs, setPlaybackSpeedMs] = useState(900);
   const [showRoutingTable, setShowRoutingTable] = useState(false);
+  const [rightWide, setRightWide] = useState(false);
 
   // ── Saved runs ────────────────────────────────────────────────────────────
   const [savedRuns, setSavedRuns] = useState<SavedSimulationSummary[]>([]);
@@ -1084,7 +1085,9 @@ const WorkflowManager: React.FC = () => {
         entries={simulationResult?.distanceVectorTable}
         network={network}
         activeRowKeys={activeTableRowKeys}
-        initiallyOpen={showRoutingTable}
+        showModal={showRoutingTable}
+        onOpenModal={() => setShowRoutingTable(true)}
+        onCloseModal={() => setShowRoutingTable(false)}
       />
     </>
   );
@@ -1267,7 +1270,7 @@ const WorkflowManager: React.FC = () => {
       ) : (
       <div
         className="workspace"
-        style={{ gridTemplateColumns: wsGridCols(appMode, leftCollapsed, showRight) }}
+        style={{ gridTemplateColumns: wsGridCols(appMode, leftCollapsed, showRight, rightWide) }}
       >
         <aside className={`ws-left${leftCollapsed ? " ws-left--collapsed" : ""}`}>
           {!leftCollapsed && leftPanel}
@@ -1367,7 +1370,14 @@ const WorkflowManager: React.FC = () => {
         </section>
 
         {showRight && (
-          <aside className="ws-right">
+          <aside className={`ws-right${rightWide ? " ws-right--wide" : ""}`}>
+            <button
+              className="ws-right-width-toggle"
+              onClick={() => setRightWide((w) => !w)}
+              title={rightWide ? "Compact panel" : "Expand panel"}
+            >
+              {rightWide ? "⟨" : "⟩"}
+            </button>
             {rightPanel}
           </aside>
         )}
@@ -1398,10 +1408,10 @@ const WorkflowManager: React.FC = () => {
 
 // ── Panel layout helper ───────────────────────────────────────────────────────
 
-function wsGridCols(mode: AppMode, lc: boolean, showRight: boolean): string {
+function wsGridCols(mode: AppMode, lc: boolean, showRight: boolean, wide = false): string {
   const lw = lc ? "48px" : mode === "teacher" ? "minmax(560px, 50%)" : "300px";
   if (mode === "teacher" || !showRight) return `${lw} 1fr`;
-  return `${lw} 1fr 280px`;
+  return `${lw} 1fr ${wide ? "420px" : "280px"}`;
 }
 
 // ── Topology stats ────────────────────────────────────────────────────────────
