@@ -298,3 +298,17 @@ class GradingResult(BaseModel):
     passed: bool
     feedback: str
     details: Dict[str, Any] = Field(default_factory=dict)
+
+class GradeRequest(BaseModel):
+    """Request body for POST /grade.
+
+    Either assignmentId (to load from MongoDB) or assignment (embedded doc)
+    must be provided. If both are absent, grading returns an error result.
+    """
+    assignmentId: Optional[str] = None
+    assignment: Optional[Dict[str, Any]] = None
+    submittedNetwork: NetworkInput
+    submittedAlgorithmConfig: AlgorithmConfig
+    submittedAnswers: Dict[str, Any] = Field(default_factory=dict)
+    hintsUsed: int = 0
+    studentId: Optional[str] = None
