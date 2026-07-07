@@ -1,3 +1,11 @@
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env from the backend directory (works whether uvicorn is started from
+# /backend or the repo root).
+_env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(_env_path, override=True)
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Any, Dict, List, Optional
