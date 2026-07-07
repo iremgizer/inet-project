@@ -117,7 +117,7 @@ const WorkflowManager: React.FC = () => {
   const [isTraceMode, setIsTraceMode] = useState(false);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackSpeedMs, setPlaybackSpeedMs] = useState(900);
+  const [playbackSpeedMs, setPlaybackSpeedMs] = useState(30000);
   const [showRoutingTable, setShowRoutingTable] = useState(false);
   const [rightWide, setRightWide] = useState(false);
 

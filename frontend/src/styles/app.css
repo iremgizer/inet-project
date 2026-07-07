@@ -10280,6 +10280,44 @@ html, body, #root {
   padding:.85rem
 }
 
+/* ── Auto-play label + speed presets ────────────────────────────────────── */
+
+.tl-autoplay-label {
+  font-size:.72rem;
+  color:var(--text-3);
+  margin-left:.35rem;
+  white-space:nowrap
+}
+
+.tl-speed-presets {
+  display:flex;
+  gap:5px
+}
+
+.tl-speed-btn {
+  padding:3px 10px;
+  font-size:.75rem;
+  font-weight:600;
+  border:1px solid var(--border-strong);
+  border-radius:20px;
+  background:var(--surface-2);
+  color:var(--text-2);
+  cursor:pointer;
+  transition:background var(--fast), color var(--fast), border-color var(--fast)
+}
+
+.tl-speed-btn:hover {
+  background:var(--accent-light);
+  color:var(--accent);
+  border-color:var(--accent-border)
+}
+
+.tl-speed-btn--active {
+  background:var(--accent-light);
+  color:var(--accent);
+  border-color:var(--accent-border)
+}
+
 /* ── Right panel width toggle ────────────────────────────────────────────── */
 
 .ws-right-width-toggle {

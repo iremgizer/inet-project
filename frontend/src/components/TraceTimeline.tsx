@@ -94,34 +94,36 @@ const TraceTimeline: React.FC<TraceTimelineProps> = ({
           {total > 0 ? activeIndex + 1 : 0} / {total}
         </span>
 
+        <span className="tl-autoplay-label">
+          {isPlaying ? `Auto: ${speedMs / 1000}s/step` : `${speedMs / 1000}s/step`}
+        </span>
         <button
           className="icon-btn"
           onClick={() => setShowSpeed((p) => !p)}
-          title="Playback speed"
-          aria-label="Playback speed"
+          title="Change auto-play speed"
+          aria-label="Change playback speed"
           style={{ marginLeft: "auto" }}
         >
           {showSpeed ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
         </button>
       </div>
 
-      {/* Speed row */}
+      {/* Speed presets */}
       {showSpeed && (
         <div className="tl-speed">
-          <span className="muted" style={{ fontSize: "0.75rem" }}>Speed</span>
-          <input
-            type="range"
-            min="300"
-            max="2000"
-            step="100"
-            value={speedMs}
-            onChange={(e) => onSpeedChange(Number(e.target.value))}
-            className="speed-slider"
-            aria-label="Playback speed"
-          />
-          <span className="muted" style={{ fontSize: "0.75rem" }}>
-            {(speedMs / 1000).toFixed(1)}s
-          </span>
+          <span className="muted" style={{ fontSize: "0.75rem" }}>Auto-play speed</span>
+          <div className="tl-speed-presets">
+            {[5000, 10000, 30000, 60000].map((ms) => (
+              <button
+                key={ms}
+                className={`tl-speed-btn${speedMs === ms ? " tl-speed-btn--active" : ""}`}
+                onClick={() => onSpeedChange(ms)}
+                aria-pressed={speedMs === ms}
+              >
+                {ms / 1000}s
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
