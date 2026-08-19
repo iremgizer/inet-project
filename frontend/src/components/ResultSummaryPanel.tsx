@@ -29,7 +29,48 @@ function buildNarrative(result: SimulationResult): string {
     return `Distance Vector ran Bellman-Ford on each node to build routing tables, then forwarded ${totalDemands} demand${totalDemands > 1 ? "s" : ""} via minimum-cost next hops.`;
   }
 
+  if (algo === "SEGMENT_ROUTING") {
+    const withWaypoints = result.traceEvents.filter(
+      (e) => e.stepType === "LOAD_SEGMENT_LIST" && (e.segmentList?.length ?? 0) > 1
+    ).length;
+    if (withWaypoints > 0) {
+      return `Segment Routing steered ${withWaypoints} of ${totalDemands} demand${totalDemands > 1 ? "s" : ""} through explicit waypoints — the rest routed via plain shortest path.`;
+    }
+    return `Segment Routing routed ${totalDemands} demand${totalDemands > 1 ? "s" : ""} via plain shortest path — no waypoints configured.`;
+  }
+
   return `${algo} routed ${totalDemands} demand${totalDemands > 1 ? "s" : ""} through the network.`;
+}
+
+// ── Segment Routing compact section ───────────────────────────────────────────
+
+interface SRDemandSummary {
+  demandId: string;
+  sourceLabel: string;
+  targetLabel: string;
+  waypointLabels: string[];
+  resolvedPathLabels: string[];
+}
+
+// ResultSummaryPanel only receives `result` (no `network`), consistent with
+// the existing "Show paths" list below, which also renders raw node ids
+// rather than resolved labels.
+function buildSRDemandSummaries(result: SimulationResult): SRDemandSummary[] {
+  const loadEvents = result.traceEvents.filter((e) => e.stepType === "LOAD_SEGMENT_LIST" && e.activeDemandId);
+  return result.pathResults
+    .filter((pr) => pr.paths.length > 0)
+    .map((pr) => {
+      const loadEvent = loadEvents.find((e) => e.activeDemandId === pr.demandId);
+      const stops = loadEvent?.segmentList ?? [];
+      const waypoints = stops.slice(0, -1); // last stop is always the destination
+      return {
+        demandId: pr.demandId,
+        sourceLabel: pr.source,
+        targetLabel: pr.target,
+        waypointLabels: waypoints,
+        resolvedPathLabels: pr.paths[0].nodes,
+      };
+    });
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -46,6 +87,8 @@ const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowT
     : "result-util--ok";
 
   const totalPaths = result.pathResults.reduce((acc, pr) => acc + pr.paths.length, 0);
+  const isSegmentRouting = result.algorithm === "SEGMENT_ROUTING";
+  const srDemandSummaries = isSegmentRouting ? buildSRDemandSummaries(result) : [];
 
   return (
     <div className="result-summary">
@@ -111,6 +154,28 @@ const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowT
                 </span>
               </div>
             ))}
+        </div>
+      )}
+
+      {/* Segment Routing compact section */}
+      {isSegmentRouting && srDemandSummaries.length > 0 && (
+        <div className="result-sr-section">
+          <div className="result-sr-title">Segment Routing</div>
+          {srDemandSummaries.map((s) => (
+            <div key={s.demandId} className="result-sr-demand">
+              <div className="result-sr-demand-route">
+                Demand {s.sourceLabel} → {s.targetLabel}
+              </div>
+              <div className="result-sr-demand-line">
+                <span className="result-sr-demand-label">Segments:</span>{" "}
+                {s.waypointLabels.length > 0 ? s.waypointLabels.join(" → ") : "(none — shortest path)"}
+              </div>
+              <div className="result-sr-demand-line">
+                <span className="result-sr-demand-label">Resolved path:</span>{" "}
+                {s.resolvedPathLabels.join(" → ")}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

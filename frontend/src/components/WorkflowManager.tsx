@@ -3,6 +3,7 @@ import { Network, Waypoints, GitBranch, BarChart3, CheckCircle2, BookOpen, Clock
 import ReactFlowCanvas from "./ReactFlowCanvas";
 import MetricsPanel from "./MetricsPanel";
 import RoutingTablePanel from "./RoutingTablePanel";
+import SegmentListPanel from "./SegmentListPanel";
 import TraceTimeline from "./TraceTimeline";
 import InspectorDrawer from "./InspectorDrawer";
 import SavedRunsDrawer from "./SavedRunsDrawer";
@@ -44,6 +45,7 @@ import {
 } from "../utils/assignmentJson";
 import { gradeChallenge } from "../utils/challengeGrading";
 import { resolveHints } from "../utils/challengeHints";
+import { deriveSegmentRoutingDisplayState } from "../utils/segmentRoutingTrace";
 import { EXAMPLE_CHALLENGES } from "../utils/exampleChallenges";
 import {
   ensureDemoClassroomData, resetDemoClassroomData,
@@ -71,6 +73,7 @@ import {
   NetworkInput,
   NodeInput,
   SavedSimulationSummary,
+  SegmentRoutingPolicy,
   SimulationResult,
   TopologyType,
   TrafficDemandInput,
@@ -133,6 +136,11 @@ const WorkflowManager: React.FC = () => {
   const [centerNodeRequest, setCenterNodeRequest] = useState<{ id: string; nonce: number } | null>(null);
   const [prefillDemandSource, setPrefillDemandSource] = useState<string | null>(null);
 
+  // ── Segment Routing waypoint-selection mode ──────────────────────────────
+  // Mutually exclusive with connect mode (see handleStartConnect /
+  // handleStartWaypointSelect below) and with normal node/link selection.
+  const [waypointSelectDemandId, setWaypointSelectDemandId] = useState<string | null>(null);
+
   // ── Lecture mode ──────────────────────────────────────────────────────────
   const [lectureInsight, setLectureInsight] = useState<string | null>(null);
 
@@ -187,6 +195,14 @@ const WorkflowManager: React.FC = () => {
     if (!currentTraceEvent?.activeTableRowIds) return [];
     return currentTraceEvent.activeTableRowIds;
   }, [currentTraceEvent]);
+
+  // Segment Routing replay state — frontend-only derivation from the trace
+  // events PR 1 already emits (stepType/segmentList/activeSegmentIndex).
+  // null for every other algorithm and outside trace mode.
+  const srDisplayState = React.useMemo(() => {
+    if (!isTraceMode || simulationResult?.algorithm !== "SEGMENT_ROUTING") return null;
+    return deriveSegmentRoutingDisplayState(traceEvents, activeStepIndex, network);
+  }, [isTraceMode, simulationResult, traceEvents, activeStepIndex, network]);
 
   // ── Locked fields — all-open in lab/teacher, assignment-driven in student/challenge ──
   const ALL_OPEN: LockedFields = {
@@ -320,6 +336,11 @@ const WorkflowManager: React.FC = () => {
   const handleDeleteDemand = useCallback((id: string) => {
     if (!lockedFieldsRef.current.canEditDemands) { toast("Traffic demands are locked by the teacher.", "info"); return; }
     setNetwork((prev) => ({ ...prev, demands: prev.demands.filter((d) => d.id !== id) }));
+    setAlgorithmConfig((prev) =>
+      prev.segmentRoutingPolicies?.some((p) => p.demandId === id)
+        ? { ...prev, segmentRoutingPolicies: prev.segmentRoutingPolicies.filter((p) => p.demandId !== id) }
+        : prev
+    );
     setSimulationResult(null);
   }, [toast]);
 
@@ -450,6 +471,7 @@ const WorkflowManager: React.FC = () => {
   // ── Connect mode ──────────────────────────────────────────────────────────
 
   const handleStartConnect = useCallback((id: string) => {
+    setWaypointSelectDemandId(null); // connect mode and waypoint-select mode are mutually exclusive
     setConnectSourceId(id);
     setSelectedType(null);
     setSelectedId(null);
@@ -464,6 +486,84 @@ const WorkflowManager: React.FC = () => {
     handleAddLink(connectSourceId, targetId);
     setConnectSourceId(null);
   }, [connectSourceId, handleAddLink]);
+
+  // ── Segment Routing waypoint selection ───────────────────────────────────
+
+  const handleStartWaypointSelect = useCallback((demandId: string) => {
+    setConnectSourceId(null); // waypoint-select mode and connect mode are mutually exclusive
+    setSelectedType(null);
+    setSelectedId(null);
+    setWaypointSelectDemandId(demandId);
+  }, []);
+
+  const handleStopWaypointSelect = useCallback(() => {
+    setWaypointSelectDemandId(null);
+  }, []);
+
+  const handleAddWaypoint = useCallback((demandId: string, nodeId: string) => {
+    setAlgorithmConfig((prev) => {
+      const policies = prev.segmentRoutingPolicies ?? [];
+      const existing = policies.find((p) => p.demandId === demandId);
+      const segments = existing?.segments ?? [];
+      const updatedSegments = [...segments, nodeId];
+      const updatedPolicies: SegmentRoutingPolicy[] = existing
+        ? policies.map((p) => (p.demandId === demandId ? { ...p, segments: updatedSegments } : p))
+        : [...policies, { demandId, segments: updatedSegments }];
+      return { ...prev, segmentRoutingPolicies: updatedPolicies };
+    });
+    setSimulationResult(null);
+  }, []);
+
+  // Same validation for both the graph-click flow and the dropdown fallback
+  // in SegmentRoutingEditor — a node clicked on the canvas goes through this
+  // before reaching handleAddWaypoint; the dropdown already excludes invalid
+  // options structurally, so this mainly guards the graph-click path.
+  const handleSelectWaypointNodeFromCanvas = useCallback((nodeId: string) => {
+    if (!waypointSelectDemandId) return;
+    const demand = network.demands.find((d) => d.id === waypointSelectDemandId);
+    if (!demand) { setWaypointSelectDemandId(null); return; }
+    if (nodeId === demand.source) {
+      toast("Source doesn't need to be added as a waypoint.", "info");
+      return;
+    }
+    if (nodeId === demand.target) {
+      toast("Destination is already the final stop — no need to add it.", "info");
+      return;
+    }
+    const existing = (algorithmConfig.segmentRoutingPolicies ?? []).find((p) => p.demandId === waypointSelectDemandId);
+    const lastWaypoint = existing?.segments[existing.segments.length - 1];
+    if (nodeId === lastWaypoint) {
+      toast("That node is already the last waypoint.", "info");
+      return;
+    }
+    handleAddWaypoint(waypointSelectDemandId, nodeId);
+    // Stay in selection mode so the student can click several waypoints in a row.
+  }, [waypointSelectDemandId, network.demands, algorithmConfig.segmentRoutingPolicies, handleAddWaypoint, toast]);
+
+  const handleRemoveWaypoint = useCallback((demandId: string, index: number) => {
+    setAlgorithmConfig((prev) => ({
+      ...prev,
+      segmentRoutingPolicies: (prev.segmentRoutingPolicies ?? []).map((p) =>
+        p.demandId === demandId ? { ...p, segments: p.segments.filter((_, i) => i !== index) } : p
+      ),
+    }));
+    setSimulationResult(null);
+  }, []);
+
+  const handleMoveWaypoint = useCallback((demandId: string, index: number, direction: "up" | "down") => {
+    setAlgorithmConfig((prev) => ({
+      ...prev,
+      segmentRoutingPolicies: (prev.segmentRoutingPolicies ?? []).map((p) => {
+        if (p.demandId !== demandId) return p;
+        const swapWith = direction === "up" ? index - 1 : index + 1;
+        if (swapWith < 0 || swapWith >= p.segments.length) return p;
+        const segments = [...p.segments];
+        [segments[index], segments[swapWith]] = [segments[swapWith], segments[index]];
+        return { ...p, segments };
+      }),
+    }));
+    setSimulationResult(null);
+  }, []);
 
   const handleCenterNode = useCallback((id: string) => {
     setCenterNodeRequest((prev) => ({ id, nonce: (prev?.nonce ?? 0) + 1 }));
@@ -903,9 +1003,17 @@ const WorkflowManager: React.FC = () => {
           onThresholdChange={(v) =>
             setAlgorithmConfig((p) => ({ ...p, congestionThreshold: v }))
           }
-          onBack={() => setCurrentStep(2)}
+          onBack={() => { handleStopWaypointSelect(); setCurrentStep(2); }}
           onStartSimulation={handleSimulate}
           canChooseAlgorithm={effectiveLockedFields.canChooseAlgorithm}
+          demands={network.demands}
+          nodes={network.nodes}
+          waypointSelectDemandId={waypointSelectDemandId}
+          onStartWaypointSelect={handleStartWaypointSelect}
+          onStopWaypointSelect={handleStopWaypointSelect}
+          onAddWaypoint={handleAddWaypoint}
+          onRemoveWaypoint={handleRemoveWaypoint}
+          onMoveWaypoint={handleMoveWaypoint}
         />
       );
     return (
@@ -1065,6 +1173,7 @@ const WorkflowManager: React.FC = () => {
 
   const traceTimelineEl = (
     <>
+      {srDisplayState && <SegmentListPanel srState={srDisplayState} network={network} />}
       <TraceTimeline
         events={traceEvents}
         activeIndex={activeStepIndex}
@@ -1317,6 +1426,17 @@ const WorkflowManager: React.FC = () => {
             </div>
           )}
 
+          {waypointSelectDemandId && (() => {
+            const d = network.demands.find((dm) => dm.id === waypointSelectDemandId);
+            const label = (id: string) => network.nodes.find((n) => n.id === id)?.label ?? id;
+            return (
+              <div className="connect-mode-banner connect-mode-banner--sr">
+                {d ? `Select waypoint for ${label(d.source)} → ${label(d.target)}` : "Select waypoint"} ·{" "}
+                <kbd>Esc</kbd> to stop
+              </div>
+            );
+          })()}
+
           <ReactFlowCanvas
             network={network}
             currentTraceEvent={currentTraceEvent}
@@ -1332,6 +1452,8 @@ const WorkflowManager: React.FC = () => {
             centerNodeRequest={centerNodeRequest}
             gradingHighlightLinks={challengeGradingResult?.highlightedLinks}
             gradingHighlightNodes={challengeGradingResult?.highlightedNodes}
+            waypointSelectDemandId={waypointSelectDemandId}
+            srDisplayState={srDisplayState}
             onMoveNode={handleMoveNode}
             onAddLink={handleAddLink}
             onDeleteNode={handleDeleteNode}
@@ -1340,6 +1462,8 @@ const WorkflowManager: React.FC = () => {
             onSelectLink={handleSelectLink}
             onCompleteConnect={handleCompleteConnect}
             onCancelConnect={handleCancelConnect}
+            onSelectWaypointNode={handleSelectWaypointNodeFromCanvas}
+            onCancelWaypointSelect={handleStopWaypointSelect}
             onAddNodeShortcut={currentStep === 1 ? handleAddNode : undefined}
           />
 

@@ -22,10 +22,35 @@ type StepType =
   | "ecmp_util" | "ecmp_congestion" | "ecmp_final"
   | "dv_init" | "dv_table" | "dv_route" | "dv_traffic"
   | "dv_util" | "dv_congestion" | "dv_final"
+  | "sr_start_demand" | "sr_load_segment_list" | "sr_select_active_segment"
+  | "sr_compute_segment_path" | "sr_advance_to_next_segment"
+  | "sr_final_route_resolved" | "sr_add_traffic_to_link" | "sr_complete_demand"
   | "generic";
 
 function classifyStep(event: SimulationTraceEvent): StepType {
   const t = event.title.toLowerCase();
+  // Segment Routing carries a machine-readable `stepType` from the backend
+  // (PR 1) — dispatch on that instead of title text, which the other two
+  // algorithms below still rely on for historical reasons this PR leaves
+  // untouched. Utilization/congestion/final-summary steps are structurally
+  // identical to ECMP's, so they intentionally reuse those render blocks
+  // rather than duplicating them.
+  if (event.algorithm === "SEGMENT_ROUTING") {
+    switch (event.stepType) {
+      case "START_DEMAND": return "sr_start_demand";
+      case "LOAD_SEGMENT_LIST": return "sr_load_segment_list";
+      case "SELECT_ACTIVE_SEGMENT": return "sr_select_active_segment";
+      case "COMPUTE_SEGMENT_PATH": return "sr_compute_segment_path";
+      case "ADVANCE_TO_NEXT_SEGMENT": return "sr_advance_to_next_segment";
+      case "FINAL_ROUTE_RESOLVED": return "sr_final_route_resolved";
+      case "ADD_TRAFFIC_TO_LINK": return "sr_add_traffic_to_link";
+      case "COMPLETE_DEMAND": return "sr_complete_demand";
+      case "COMPUTE_LINK_UTILIZATION": return "ecmp_util";
+      case "DETECT_CONGESTION": return "ecmp_congestion";
+      case "FINAL_SUMMARY": return "ecmp_final";
+      default: return "generic";
+    }
+  }
   if (event.algorithm === "ECMP" || event.algorithm?.startsWith("ECMP")) {
     if (t.includes("initialize demand")) return "ecmp_init";
     if (t.includes("compute candidate") || t.includes("equal-cost")) return "ecmp_paths";
@@ -51,11 +76,11 @@ function classifyStep(event: SimulationTraceEvent): StepType {
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 interface AlgBadgeProps { algorithm: string }
-const AlgBadge: React.FC<AlgBadgeProps> = ({ algorithm }) => (
-  <span className={`tsp-alg-badge tsp-alg-badge--${algorithm === "ECMP" ? "ecmp" : "dv"}`}>
-    {algorithm === "ECMP" ? "ECMP" : "DV"}
-  </span>
-);
+const AlgBadge: React.FC<AlgBadgeProps> = ({ algorithm }) => {
+  const variant = algorithm === "ECMP" ? "ecmp" : algorithm === "SEGMENT_ROUTING" ? "sr" : "dv";
+  const label = algorithm === "ECMP" ? "ECMP" : algorithm === "SEGMENT_ROUTING" ? "SR" : "DV";
+  return <span className={`tsp-alg-badge tsp-alg-badge--${variant}`}>{label}</span>;
+};
 
 interface FormulaCardProps { text: string }
 const FormulaCard: React.FC<FormulaCardProps> = ({ text }) => (
@@ -343,6 +368,148 @@ const TraceStepPanel: React.FC<TraceStepPanelProps> = ({
 
   // ── ecmp_final ─────────────────────────────────────────────────────────────
   if (stepType === "ecmp_final") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
+
+  // ── sr_start_demand ────────────────────────────────────────────────────────
+  if (stepType === "sr_start_demand") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.activeDemandId && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Active demand</div>
+            <DemandRow demandId={event.activeDemandId} network={network} />
+          </div>
+        )}
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
+
+  // ── sr_load_segment_list ───────────────────────────────────────────────────
+  if (stepType === "sr_load_segment_list") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.segmentList && event.segmentList.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Segment list</div>
+            <PathNodes nodeIds={event.segmentList} network={network} />
+          </div>
+        )}
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
+
+  // ── sr_select_active_segment ───────────────────────────────────────────────
+  if (stepType === "sr_select_active_segment") {
+    const leg = [event.activeNodeId, event.activeDestinationId].filter((n): n is string => !!n);
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {leg.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Next segment</div>
+            <PathNodes nodeIds={leg} network={network} />
+          </div>
+        )}
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
+
+  // ── sr_compute_segment_path ────────────────────────────────────────────────
+  if (stepType === "sr_compute_segment_path") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.highlightedNodes.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Segment path</div>
+            <PathNodes nodeIds={event.highlightedNodes} network={network} />
+          </div>
+        )}
+        {event.costCalculation && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Segment cost</div>
+            <FormulaCard text={event.costCalculation} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── sr_advance_to_next_segment ─────────────────────────────────────────────
+  if (stepType === "sr_advance_to_next_segment") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
+
+  // ── sr_final_route_resolved ────────────────────────────────────────────────
+  if (stepType === "sr_final_route_resolved") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.highlightedNodes.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Final route</div>
+            <PathNodes nodeIds={event.highlightedNodes} network={network} />
+          </div>
+        )}
+        {event.costCalculation && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Route cost</div>
+            <FormulaCard text={event.costCalculation} />
+          </div>
+        )}
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
+
+  // ── sr_add_traffic_to_link ─────────────────────────────────────────────────
+  if (stepType === "sr_add_traffic_to_link") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.highlightedNodes.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Route</div>
+            <PathNodes nodeIds={event.highlightedNodes} network={network} />
+          </div>
+        )}
+        {event.linkLoadDelta && event.currentLinkLoads && (
+          <LinkDeltaTable
+            linkLoadDelta={event.linkLoadDelta}
+            currentLinkLoads={event.currentLinkLoads}
+            network={network}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // ── sr_complete_demand ─────────────────────────────────────────────────────
+  if (stepType === "sr_complete_demand") {
     return (
       <div className="trace-step-panel">
         {renderHeader()}

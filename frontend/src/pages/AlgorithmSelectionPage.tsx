@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { ChevronDown, ChevronUp, Zap, GitBranch } from "lucide-react";
-import { AlgorithmConfig, AlgorithmName } from "../types/network";
+import { AlgorithmConfig, AlgorithmName, NodeInput, SegmentRoutingPolicy, TrafficDemandInput } from "../types/network";
 import TermHint from "../components/TermHint";
+import SegmentRoutingEditor from "../components/SegmentRoutingEditor";
 
 interface AlgorithmSelectionPageProps {
   algorithmConfig: AlgorithmConfig;
@@ -11,6 +12,16 @@ interface AlgorithmSelectionPageProps {
   onBack: () => void;
   onStartSimulation: () => void;
   canChooseAlgorithm?: boolean;
+  // Segment Routing configuration — only rendered/used when
+  // selectedAlgorithm === "SEGMENT_ROUTING".
+  demands: TrafficDemandInput[];
+  nodes: NodeInput[];
+  waypointSelectDemandId: string | null;
+  onStartWaypointSelect: (demandId: string) => void;
+  onStopWaypointSelect: () => void;
+  onAddWaypoint: (demandId: string, nodeId: string) => void;
+  onRemoveWaypoint: (demandId: string, index: number) => void;
+  onMoveWaypoint: (demandId: string, index: number, direction: "up" | "down") => void;
 }
 
 const algorithms = [
@@ -35,11 +46,11 @@ const algorithms = [
   {
     id: "SEGMENT_ROUTING" as AlgorithmName,
     name: "Segment Routing",
-    fullName: "Segment Routing",
-    level: "Coming soon",
-    tagline: "Route traffic through explicit waypoints.",
-    detail: "Planned extension — allows specifying exact paths through the network.",
-    formula: "–",
+    fullName: "Segment Routing (waypoint-based)",
+    level: "Intermediate",
+    tagline: "Steer traffic through an ordered list of waypoints.",
+    detail: "Each demand can carry an ordered list of waypoint nodes. Between the source and the first waypoint, between each waypoint, and from the last waypoint to the destination, traffic still follows the normal shortest path — a waypoint only decides which nodes are visited, not how the graph is crossed between them. No waypoints means plain shortest-path routing.",
+    formula: "route = shortest(source→seg₁) + shortest(seg₁→seg₂) + … + shortest(segₙ→destination)",
   },
 ];
 
@@ -51,10 +62,18 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
   onBack,
   onStartSimulation,
   canChooseAlgorithm = true,
+  demands,
+  nodes,
+  waypointSelectDemandId,
+  onStartWaypointSelect,
+  onStopWaypointSelect,
+  onAddWaypoint,
+  onRemoveWaypoint,
+  onMoveWaypoint,
 }) => {
   const [showTheory, setShowTheory] = useState(false);
   const selected = algorithms.find((a) => a.id === algorithmConfig.selectedAlgorithm) ?? algorithms[0];
-  const isPlaceholder = selected.id === "SEGMENT_ROUTING";
+  const isSegmentRouting = selected.id === "SEGMENT_ROUTING";
 
   return (
     <div className="page">
@@ -114,12 +133,22 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
         <div className="theory-box">
           <p>{selected.detail}</p>
           <pre className="formula-block">{selected.formula}</pre>
-          {isPlaceholder && (
-            <div className="notice notice--warning">
-              Segment Routing is a placeholder. Select ECMP or Distance Vector to simulate.
-            </div>
-          )}
         </div>
+      )}
+
+      {/* Segment Routing waypoint configuration */}
+      {isSegmentRouting && (
+        <SegmentRoutingEditor
+          demands={demands}
+          nodes={nodes}
+          policies={algorithmConfig.segmentRoutingPolicies ?? []}
+          waypointSelectDemandId={waypointSelectDemandId}
+          onStartWaypointSelect={onStartWaypointSelect}
+          onStopWaypointSelect={onStopWaypointSelect}
+          onAddWaypoint={onAddWaypoint}
+          onRemoveWaypoint={onRemoveWaypoint}
+          onMoveWaypoint={onMoveWaypoint}
+        />
       )}
 
       {/* Congestion threshold */}
@@ -149,7 +178,7 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
         <button
           className="btn-primary btn-run"
           onClick={onStartSimulation}
-          disabled={isRunning || isPlaceholder}
+          disabled={isRunning}
         >
           {isRunning ? (
             <><span className="spinner" /> Running…</>

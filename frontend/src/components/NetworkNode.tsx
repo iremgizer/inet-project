@@ -12,12 +12,14 @@ const NetworkNode: React.FC<NodeProps> = ({ id, data, selected }) => {
     linkResults,
     isSimulated,
     gradingNodeIds,
+    srActiveWaypointId,
   } = useContext(SimulationOverlayContext);
 
   const isHighlighted    = highlightedNodeIds.has(id);
   const isGradingNode    = gradingNodeIds.has(id);
   const isHovered        = hoveredNodeId === id;
   const isConnectSource  = connectSourceId === id;
+  const isActiveWaypoint = srActiveWaypointId === id;
   const label            = (data as { label: string }).label;
 
   // Compute tooltip info from context
@@ -38,6 +40,7 @@ const NetworkNode: React.FC<NodeProps> = ({ id, data, selected }) => {
         isConnectSource   ? "rf-node--connect-source" : "",
         hasCongestion     ? "rf-node--congested"      : "",
         isGradingNode     ? "rf-node--grading"        : "",
+        isActiveWaypoint  ? "rf-node--waypoint-active" : "",
       ]
         .filter(Boolean)
         .join(" ")}

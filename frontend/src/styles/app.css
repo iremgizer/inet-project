@@ -20,6 +20,8 @@
   --success-light: #f0fdf4;
   --purple: #7c3aed;
   --purple-light: #f5f3ff;
+  --sr: #0d7d7a;
+  --sr-light: #e3f3f1;
   --topbar-bg: #0d1117;
   --topbar-h: 54px;
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, .06);
@@ -10506,4 +10508,426 @@ html, body, #root {
 
 .rtp-modal-body .routing-row {
   grid-template-columns:1fr 1fr 120px 120px
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Segment Routing — PR 2 (frontend + replay visualization)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Waypoint editor (AlgorithmSelectionPage) ── */
+
+.sr-editor {
+  display:flex;
+  flex-direction:column;
+  gap:.7rem;
+  margin:1rem 0
+}
+
+.sr-editor-empty {
+  font-size:.85rem;
+  color:var(--text-2);
+  background:var(--surface-2);
+  border:1px dashed var(--border-strong);
+  border-radius:var(--radius);
+  padding:.9rem;
+  margin:1rem 0
+}
+
+.sr-editor-heading {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:.78rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--text-3)
+}
+
+.sr-demand-card {
+  background:var(--surface-2);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:.75rem .85rem;
+  display:flex;
+  flex-direction:column;
+  gap:.55rem;
+  transition:border-color var(--fast), box-shadow var(--fast)
+}
+
+.sr-demand-card--selecting {
+  border-color:var(--sr);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--sr) 18%, transparent)
+}
+
+.sr-demand-header {
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:.5rem
+}
+
+.sr-demand-route {
+  font-size:.92rem;
+  font-weight:700;
+  color:var(--text)
+}
+
+.sr-demand-arrow {
+  color:var(--text-3);
+  font-weight:500;
+  margin:0 2px
+}
+
+.sr-demand-amount {
+  font-size:.78rem;
+  font-weight:600;
+  color:var(--text-2)
+}
+
+.sr-chip-chain {
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:4px
+}
+
+.sr-chip-connector {
+  color:var(--text-3);
+  font-size:.85rem
+}
+
+.sr-chip {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:.82rem;
+  font-weight:600;
+  padding:4px 8px;
+  border-radius:999px;
+  line-height:1.2
+}
+
+.sr-chip--endpoint {
+  background:var(--surface-3);
+  color:var(--text-2);
+  border:1px solid var(--border)
+}
+
+.sr-chip--waypoint {
+  background:var(--sr-light);
+  color:var(--sr);
+  border:1px solid color-mix(in srgb, var(--sr) 30%, transparent)
+}
+
+.sr-chip-controls {
+  display:inline-flex;
+  align-items:center;
+  gap:1px;
+  margin-left:2px
+}
+
+.sr-chip-btn {
+  display:grid;
+  place-items:center;
+  width:16px;
+  height:16px;
+  border:none;
+  background:transparent;
+  color:var(--sr);
+  opacity:.75;
+  border-radius:4px;
+  cursor:pointer;
+  transition:opacity var(--fast), background var(--fast)
+}
+
+.sr-chip-btn:hover:not(:disabled) {
+  opacity:1;
+  background:#ffffff80
+}
+
+.sr-chip-btn:disabled {
+  opacity:.25;
+  cursor:default
+}
+
+.sr-chip-btn--danger:hover:not(:disabled) {
+  color:var(--danger)
+}
+
+.sr-empty-hint {
+  font-size:.78rem;
+  color:var(--text-3);
+  font-style:italic;
+  margin:0
+}
+
+.sr-demand-actions {
+  display:flex;
+  align-items:center;
+  gap:.5rem;
+  flex-wrap:wrap
+}
+
+.sr-add-waypoint-btn {
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  font-size:.8rem;
+  font-weight:600;
+  padding:5px 10px;
+  border-radius:var(--radius-sm);
+  border:1px solid var(--sr);
+  background:var(--surface);
+  color:var(--sr);
+  cursor:pointer;
+  transition:background var(--fast), color var(--fast)
+}
+
+.sr-add-waypoint-btn:hover {
+  background:var(--sr-light)
+}
+
+.sr-add-waypoint-btn--active {
+  background:var(--sr);
+  color:#fff
+}
+
+.sr-select-fallback {
+  font-size:.8rem;
+  padding:5px 8px;
+  border-radius:var(--radius-sm);
+  border:1px solid var(--border);
+  background:var(--surface);
+  color:var(--text-2)
+}
+
+.sr-selecting-hint {
+  font-size:.76rem;
+  color:var(--sr);
+  margin:0
+}
+
+/* ── Waypoint-selection canvas banner ── */
+
+.connect-mode-banner--sr {
+  background:var(--sr)
+}
+
+/* ── Active-waypoint node ring (NetworkNode) ── */
+
+@keyframes sr-waypoint-pulse {
+  0%, 100% { box-shadow:0 0 0 3px color-mix(in srgb, var(--sr) 55%, transparent), 0 0 0 6px color-mix(in srgb, var(--sr) 18%, transparent) }
+  50%      { box-shadow:0 0 0 5px color-mix(in srgb, var(--sr) 70%, transparent), 0 0 0 10px color-mix(in srgb, var(--sr) 10%, transparent) }
+}
+
+.rf-node--waypoint-active {
+  border-color:var(--sr) !important;
+  background:var(--sr-light);
+  animation:sr-waypoint-pulse 1.4s ease-in-out infinite
+}
+
+/* ── Packet token (React Flow ViewportPortal overlay) ── */
+
+.rf-packet-token-wrap {
+  position:absolute;
+  top:0;
+  left:0;
+  pointer-events:none;
+  transition:transform 320ms cubic-bezier(.25, .46, .45, .94);
+  z-index:15
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rf-packet-token-wrap { transition:none }
+}
+
+.rf-packet-token {
+  position:absolute;
+  top:-30px;
+  left:-11px;
+  display:grid;
+  place-items:center;
+  min-width:22px;
+  height:22px;
+  padding:0 6px;
+  border-radius:999px;
+  background:var(--sr);
+  color:#fff;
+  font-size:.66rem;
+  font-weight:700;
+  letter-spacing:.02em;
+  box-shadow:0 2px 8px color-mix(in srgb, var(--sr) 45%, transparent), 0 0 0 2px #fff
+}
+
+.rf-packet-token-label {
+  pointer-events:none;
+  white-space:nowrap
+}
+
+/* ── Segment list panel (right rail, during SR trace replay) ── */
+
+.sr-segment-panel {
+  display:flex;
+  flex-direction:column;
+  gap:.55rem
+}
+
+.sr-segment-panel-header {
+  display:flex;
+  align-items:center;
+  gap:6px
+}
+
+.sr-segment-panel-title {
+  font-size:.78rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--sr)
+}
+
+.sr-segment-panel-demand {
+  font-size:.88rem;
+  font-weight:700;
+  color:var(--text)
+}
+
+.sr-segment-track {
+  display:flex;
+  flex-direction:column;
+  gap:2px
+}
+
+.sr-segment-stop {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:4px 2px;
+  font-size:.85rem;
+  color:var(--text-3);
+  transition:color var(--fast)
+}
+
+.sr-segment-dot {
+  display:grid;
+  place-items:center;
+  flex-shrink:0;
+  width:16px;
+  height:16px;
+  border-radius:50%;
+  border:2px solid var(--border-strong);
+  color:#fff;
+  background:var(--surface)
+}
+
+.sr-segment-dot--done {
+  background:var(--success);
+  border-color:var(--success)
+}
+
+.sr-segment-dot--active {
+  border-color:var(--sr);
+  background:var(--sr);
+  box-shadow:0 0 0 3px var(--sr-light)
+}
+
+.sr-segment-dot--next {
+  border-color:var(--sr)
+}
+
+.sr-segment-stop--completed,
+.sr-segment-stop--source {
+  color:var(--text-2)
+}
+
+.sr-segment-stop--active {
+  color:var(--sr);
+  font-weight:700
+}
+
+.sr-segment-stop--next {
+  color:var(--text)
+}
+
+.sr-segment-stop-label {
+  display:inline-flex;
+  align-items:center;
+  gap:5px
+}
+
+.sr-segment-sid-label {
+  font-size:.62rem;
+  font-weight:700;
+  letter-spacing:.05em;
+  color:var(--text-3);
+  border:1px solid var(--border);
+  border-radius:4px;
+  padding:0 4px
+}
+
+.sr-segment-status-badge {
+  margin-left:auto;
+  font-size:.62rem;
+  font-weight:700;
+  letter-spacing:.05em;
+  text-transform:uppercase;
+  color:#fff;
+  background:var(--sr);
+  border-radius:4px;
+  padding:1px 6px
+}
+
+.sr-segment-status-badge--next {
+  background:var(--surface-3);
+  color:var(--text-2)
+}
+
+/* ── Trace step panel — SR badge variant ── */
+
+.tsp-alg-badge--sr {
+  background:var(--sr-light);
+  color:var(--sr)
+}
+
+/* ── Result summary — Segment Routing compact section ── */
+
+.result-sr-section {
+  display:flex;
+  flex-direction:column;
+  gap:.6rem;
+  background:var(--sr-light);
+  border:1px solid color-mix(in srgb, var(--sr) 25%, transparent);
+  border-radius:var(--radius);
+  padding:.8rem .9rem
+}
+
+.result-sr-title {
+  font-size:.78rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--sr)
+}
+
+.result-sr-demand {
+  display:flex;
+  flex-direction:column;
+  gap:2px
+}
+
+.result-sr-demand-route {
+  font-size:.88rem;
+  font-weight:700;
+  color:var(--text)
+}
+
+.result-sr-demand-line {
+  font-size:.82rem;
+  color:var(--text-2)
+}
+
+.result-sr-demand-label {
+  font-weight:600;
+  color:var(--text-3)
 }

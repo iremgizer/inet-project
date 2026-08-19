@@ -31,6 +31,7 @@ import "@xyflow/react/dist/style.css";
 import NetworkNode from "./NetworkNode";
 import NetworkEdge, { NetworkEdgeData } from "./NetworkEdge";
 import GraphLegend from "./GraphLegend";
+import PacketToken from "./PacketToken";
 import {
   LinkInput,
   LinkResult,
@@ -40,6 +41,7 @@ import {
   SimulationTraceEvent,
 } from "../types/network";
 import { buildDemandColorMap } from "../utils/graphVisuals";
+import { SRDisplayState } from "../utils/segmentRoutingTrace";
 
 // ── Simulation overlay context ────────────────────────────────────────────────
 
@@ -60,6 +62,9 @@ export interface SimulationOverlayContextType {
   network: NetworkInput;
   gradingLinkStatus: Map<string, "correct" | "wrong" | "missed">;
   gradingNodeIds: Set<string>;
+  // Segment Routing: which node id is the "active SID" right now (drives the
+  // waypoint-active ring on NetworkNode). null outside SR trace playback.
+  srActiveWaypointId: string | null;
 }
 
 const EMPTY_NETWORK: NetworkInput = { nodes: [], links: [], demands: [], topologyType: "custom", isDirected: false };
@@ -82,6 +87,7 @@ export const SimulationOverlayContext =
     network: EMPTY_NETWORK,
     gradingLinkStatus: new Map(),
     gradingNodeIds: new Set(),
+    srActiveWaypointId: null,
   });
 
 // ── Converters ────────────────────────────────────────────────────────────────
@@ -143,6 +149,8 @@ interface ReactFlowCanvasProps {
   centerNodeRequest?: { id: string; nonce: number } | null;
   gradingHighlightLinks?: { linkId: string; status: "correct" | "wrong" | "missed" }[];
   gradingHighlightNodes?: string[];
+  waypointSelectDemandId?: string | null;
+  srDisplayState?: SRDisplayState | null;
   onMoveNode: (id: string, x: number, y: number) => void;
   onAddLink: (source: string, target: string) => void;
   onDeleteNode: (id: string) => void;
@@ -151,6 +159,8 @@ interface ReactFlowCanvasProps {
   onSelectLink: (id: string | null) => void;
   onCompleteConnect?: (targetId: string) => void;
   onCancelConnect?: () => void;
+  onSelectWaypointNode?: (nodeId: string) => void;
+  onCancelWaypointSelect?: () => void;
   onAddNodeShortcut?: () => void;
 }
 
@@ -171,6 +181,8 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
   centerNodeRequest,
   gradingHighlightLinks,
   gradingHighlightNodes,
+  waypointSelectDemandId = null,
+  srDisplayState = null,
   onMoveNode,
   onAddLink,
   onDeleteNode,
@@ -179,6 +191,8 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
   onSelectLink,
   onCompleteConnect,
   onCancelConnect,
+  onSelectWaypointNode,
+  onCancelWaypointSelect,
   onAddNodeShortcut,
 }) => {
   const { fitView } = useReactFlow();
@@ -232,7 +246,9 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
         fitView({ padding: 0.15, duration: 300 });
       }
       if (e.key === "Escape") {
-        if (connectSourceId) {
+        if (waypointSelectDemandId) {
+          onCancelWaypointSelect?.();
+        } else if (connectSourceId) {
           onCancelConnect?.();
         } else {
           onSelectNode(null);
@@ -246,7 +262,7 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [fitView, onSelectNode, onSelectLink, onAddNodeShortcut, connectSourceId, onCancelConnect]);
+  }, [fitView, onSelectNode, onSelectLink, onAddNodeShortcut, connectSourceId, onCancelConnect, waypointSelectDemandId, onCancelWaypointSelect]);
 
   // ── Simulation overlay context value ─────────────────────────────────────
 
@@ -263,6 +279,11 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
     const gradingNodeIds = new Set<string>(gradingHighlightNodes ?? []);
 
     const demandColorMap = buildDemandColorMap(pathResults);
+
+    const srActiveWaypointId =
+      srDisplayState && srDisplayState.activeSegmentIndex !== null
+        ? srDisplayState.segmentList[srDisplayState.activeSegmentIndex] ?? null
+        : null;
 
     if (isTraceMode && currentTraceEvent) {
       const activeDemandId = currentTraceEvent.activeDemandId ?? null;
@@ -286,6 +307,7 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
         network,
         gradingLinkStatus,
         gradingNodeIds,
+        srActiveWaypointId,
       };
     }
     return {
@@ -305,8 +327,9 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
       network,
       gradingLinkStatus,
       gradingNodeIds,
+      srActiveWaypointId,
     };
-  }, [currentTraceEvent, linkResults, pathResults, isSimulated, isTraceMode, hoveredNodeId, stableSetHoveredNodeId, connectSourceId, network, gradingHighlightLinks, gradingHighlightNodes]);
+  }, [currentTraceEvent, linkResults, pathResults, isSimulated, isTraceMode, hoveredNodeId, stableSetHoveredNodeId, connectSourceId, network, gradingHighlightLinks, gradingHighlightNodes, srDisplayState]);
 
   // ── RF callbacks ──────────────────────────────────────────────────────────
 
@@ -357,6 +380,10 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
 
   const handleNodeClick = useCallback(
     (_event: unknown, node: Node) => {
+      if (waypointSelectDemandId) {
+        onSelectWaypointNode?.(node.id);
+        return;
+      }
       if (connectSourceId) {
         if (node.id !== connectSourceId) {
           onCompleteConnect?.(node.id);
@@ -365,28 +392,40 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
       }
       onSelectNode(node.id);
     },
-    [connectSourceId, onCompleteConnect, onSelectNode]
+    [waypointSelectDemandId, onSelectWaypointNode, connectSourceId, onCompleteConnect, onSelectNode]
   );
 
   const handleEdgeClick = useCallback(
     (_event: unknown, edge: Edge) => {
+      if (waypointSelectDemandId) {
+        onCancelWaypointSelect?.();
+        return;
+      }
       if (connectSourceId) {
         onCancelConnect?.();
         return;
       }
       onSelectLink(edge.id);
     },
-    [connectSourceId, onCancelConnect, onSelectLink]
+    [waypointSelectDemandId, onCancelWaypointSelect, connectSourceId, onCancelConnect, onSelectLink]
   );
 
   const handlePaneClick = useCallback(() => {
+    if (waypointSelectDemandId) {
+      onCancelWaypointSelect?.();
+      return;
+    }
     if (connectSourceId) {
       onCancelConnect?.();
       return;
     }
     onSelectNode(null);
     onSelectLink(null);
-  }, [connectSourceId, onCancelConnect, onSelectNode, onSelectLink]);
+  }, [waypointSelectDemandId, onCancelWaypointSelect, connectSourceId, onCancelConnect, onSelectNode, onSelectLink]);
+
+  const tokenNode = srDisplayState?.tokenNodeId
+    ? network.nodes.find((n) => n.id === srDisplayState.tokenNodeId)
+    : undefined;
 
   return (
     <SimulationOverlayContext.Provider value={overlay}>
@@ -432,6 +471,7 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
         <Panel position="bottom-left">
           <GraphLegend />
         </Panel>
+        {tokenNode && <PacketToken node={tokenNode} label={srDisplayState?.demandId ?? ""} />}
       </ReactFlow>
     </SimulationOverlayContext.Provider>
   );
