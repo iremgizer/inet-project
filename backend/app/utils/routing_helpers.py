@@ -103,6 +103,21 @@ def path_cost_calculation(path: List[str], link_map: LinkMap) -> str:
     return f"{' -> '.join(path)}: cost = {' + '.join(parts)} = {weight_text} = {total:g}"
 
 
+def path_uses_link(path: List[str], link_map: LinkMap, link_id: str) -> bool:
+    """True if `path` (a node sequence) crosses the given link id. Used by
+    scheduled mid-simulation failures (PR 6) to find which already-routed
+    demands need to be recomputed when a link goes down partway through a
+    run — a committed `PathShare.nodes` sequence is checked against the
+    *original* (pre-failure) `link_map`, which never changes, rather than
+    the graph, which does.
+    """
+    for u, v in zip(path, path[1:]):
+        link = link_map.get((u, v))
+        if link and link.id == link_id:
+            return True
+    return False
+
+
 def build_node_roles(network: NetworkInput, path_results: List[PathResult]) -> List[NodeRoleResult]:
     roles: Dict[str, NodeRoleResult] = {
         node.id: NodeRoleResult(nodeId=node.id, asSourceFor=[], asDestinationFor=[], asIntermediateFor=[])

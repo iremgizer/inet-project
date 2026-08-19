@@ -4,6 +4,7 @@ import NodeDetailPanel from "./NodeDetailPanel";
 import LinkDetailPanel from "./LinkDetailPanel";
 import { LinkInput, NetworkInput, NodeInput, SimulationResult } from "../types/network";
 import { LockedFields } from "../types/assignment";
+import { LinkComparisonEntry } from "../utils/comparison";
 
 interface InspectorDrawerProps {
   selectedNode: NodeInput | null;
@@ -17,6 +18,8 @@ interface InspectorDrawerProps {
   onUpdateLink: (id: string, update: Partial<LinkInput>) => void;
   onDeleteLink: (id: string) => void;
   onToggleLinkOperationalStatus?: (id: string) => void;
+  // Before/After comparison (PR 6, Part 2) — see LinkDetailPanel.
+  comparisonByLink?: Map<string, LinkComparisonEntry> | null;
   onStartConnect?: (id: string) => void;
   onAddDemandFrom?: (id: string) => void;
   onCenterNode?: (id: string) => void;
@@ -35,6 +38,7 @@ const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
   onUpdateLink,
   onDeleteLink,
   onToggleLinkOperationalStatus,
+  comparisonByLink = null,
   onStartConnect,
   onAddDemandFrom,
   onCenterNode,
@@ -71,6 +75,7 @@ const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
           onUpdate={onUpdateLink}
           onDelete={onDeleteLink}
           onToggleOperationalStatus={onToggleLinkOperationalStatus}
+          comparisonEntry={comparisonByLink?.get(selectedLink.id) ?? null}
           canEditLinks={lockedFields.canEditLinks}
           canEditWeights={lockedFields.canEditWeights}
           canEditCapacities={lockedFields.canEditCapacities}

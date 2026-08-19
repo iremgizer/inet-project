@@ -44,6 +44,7 @@ import {
 } from "../types/network";
 import { buildDemandColorMap } from "../utils/graphVisuals";
 import { SRDisplayState } from "../utils/segmentRoutingTrace";
+import { ComparisonMode, LinkComparisonEntry } from "../utils/comparison";
 
 // ── Simulation overlay context ────────────────────────────────────────────────
 
@@ -70,6 +71,20 @@ export interface SimulationOverlayContextType {
   // Traffic Engineering policies — visualized pre-simulation as small link/
   // node badges, kept visually separate from path identity/congestion/grading.
   tePolicies: TrafficEngineeringPolicy[];
+  // Mid-simulation failure replay (PR 6) — which links are DOWN as of the
+  // current trace step (see utils/failureReplay.ts), overriding the
+  // persistent NetworkInput.links[].operationalStatus while a trace is being
+  // replayed so stepping backward past a scheduled failure correctly shows
+  // the link UP again. null outside trace mode, where the persistent field
+  // is authoritative (PR 5 behavior, unchanged).
+  replayDownLinkIds: Set<string> | null;
+  // Before/After/Difference comparison (PR 6, Part 2) — "difference" is the
+  // only mode NetworkEdge needs to know about explicitly: "before"/"after"
+  // just change which SimulationResult's linkResults/pathResults are fed
+  // into this same context (see WorkflowManager's `displayedResult`), no
+  // separate rendering path. null/empty outside difference mode.
+  comparisonMode: ComparisonMode;
+  comparisonByLink: Map<string, LinkComparisonEntry> | null;
 }
 
 const EMPTY_NETWORK: NetworkInput = { nodes: [], links: [], demands: [], topologyType: "custom", isDirected: false };
@@ -94,6 +109,9 @@ export const SimulationOverlayContext =
     gradingNodeIds: new Set(),
     srActiveWaypointId: null,
     tePolicies: [],
+    replayDownLinkIds: null,
+    comparisonMode: "after",
+    comparisonByLink: null,
   });
 
 // ── Converters ────────────────────────────────────────────────────────────────
@@ -163,6 +181,11 @@ interface ReactFlowCanvasProps {
   srDisplayState?: SRDisplayState | null;
   tePolicySelectMode?: "node" | "link" | null;
   tePolicies?: TrafficEngineeringPolicy[];
+  // Mid-simulation failure replay (PR 6) — see SimulationOverlayContextType.
+  replayDownLinkIds?: Set<string> | null;
+  // Before/After/Difference comparison (PR 6, Part 2) — see SimulationOverlayContextType.
+  comparisonMode?: ComparisonMode;
+  comparisonByLink?: Map<string, LinkComparisonEntry> | null;
   // Quick graph-first policy popup — opens once a link is clicked during the
   // "Select on Graph" quick-add flow (see TEPolicyEditor / WorkflowManager).
   // Additional to, not a replacement for, the dropdown-based draft flow above.
@@ -205,6 +228,9 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
   srDisplayState = null,
   tePolicySelectMode = null,
   tePolicies = [],
+  replayDownLinkIds = null,
+  comparisonMode = "after",
+  comparisonByLink = null,
   teQuickPopupLinkId = null,
   onChooseTEQuickPolicy,
   onCancelTEQuickPopup,
@@ -340,6 +366,9 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
         gradingNodeIds,
         srActiveWaypointId,
         tePolicies,
+        replayDownLinkIds,
+        comparisonMode,
+        comparisonByLink,
       };
     }
     return {
@@ -361,8 +390,11 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
       gradingNodeIds,
       srActiveWaypointId,
       tePolicies,
+      replayDownLinkIds: null,
+      comparisonMode,
+      comparisonByLink,
     };
-  }, [currentTraceEvent, linkResults, pathResults, isSimulated, isTraceMode, hoveredNodeId, stableSetHoveredNodeId, connectSourceId, network, gradingHighlightLinks, gradingHighlightNodes, srDisplayState, tePolicies]);
+  }, [currentTraceEvent, linkResults, pathResults, isSimulated, isTraceMode, hoveredNodeId, stableSetHoveredNodeId, connectSourceId, network, gradingHighlightLinks, gradingHighlightNodes, srDisplayState, tePolicies, replayDownLinkIds, comparisonMode, comparisonByLink]);
 
   // ── RF callbacks ──────────────────────────────────────────────────────────
 

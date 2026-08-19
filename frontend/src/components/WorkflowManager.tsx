@@ -48,6 +48,8 @@ import {
 import { gradeChallenge } from "../utils/challengeGrading";
 import { resolveHints } from "../utils/challengeHints";
 import { deriveSegmentRoutingDisplayState } from "../utils/segmentRoutingTrace";
+import { deriveDownLinkIdsAtStep } from "../utils/failureReplay";
+import { buildComparison, ComparisonMode, LinkComparisonEntry } from "../utils/comparison";
 import { buildCustomDistributionsFromResult } from "../utils/trafficDistribution";
 import { EXAMPLE_CHALLENGES } from "../utils/exampleChallenges";
 import {
@@ -120,6 +122,16 @@ const WorkflowManager: React.FC = () => {
   // ── Simulation ────────────────────────────────────────────────────────────
   const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+
+  // ── Before/After comparison (PR 6, Part 2) ─────────────────────────────────
+  // `baselineResult` is set automatically on the FIRST successful run and
+  // never overwritten automatically afterward — only an explicit "Set
+  // current as baseline" click (or a structural edit that invalidates it,
+  // see the handlers below) changes it. `simulationResult` above doubles as
+  // "current" throughout; comparison is available whenever both are set and
+  // distinct (see ComparisonPanel).
+  const [baselineResult, setBaselineResult] = useState<SimulationResult | null>(null);
+  const [comparisonMode, setComparisonMode] = useState<ComparisonMode>("after");
 
   // ── Trace playback ────────────────────────────────────────────────────────
   const [isTraceMode, setIsTraceMode] = useState(false);
@@ -216,10 +228,31 @@ const WorkflowManager: React.FC = () => {
   const [currentStudentId, setCurrentStudentId] = useState<string | null>(() => loadCurrentStudentId());
 
   // ── Derived ───────────────────────────────────────────────────────────────
-  const traceEvents = simulationResult?.traceEvents ?? [];
+  // Comparison mode (PR 6, Part 2) decides which result the canvas/trace
+  // reads from: "before" shows the baseline, "after" and "difference" both
+  // show current (difference just recolors current's links by comparison
+  // status — see ComparisonPanel/NetworkEdge — it doesn't need a second
+  // dataset). Reuses the existing single replay system: "before" replays
+  // the baseline's own trace, exactly like "after" replays current's.
+  const displayedResult = comparisonMode === "before" && baselineResult ? baselineResult : simulationResult;
+  const traceEvents = displayedResult?.traceEvents ?? [];
   const currentTraceEvent = isTraceMode ? (traceEvents[activeStepIndex] ?? null) : null;
-  const linkResults = simulationResult?.linkResults ?? [];
-  const pathResults = simulationResult?.pathResults ?? [];
+  const linkResults = displayedResult?.linkResults ?? [];
+  const pathResults = displayedResult?.pathResults ?? [];
+
+  const comparison = React.useMemo(() => {
+    if (!baselineResult || !simulationResult || baselineResult === simulationResult) return null;
+    return buildComparison(baselineResult, simulationResult);
+  }, [baselineResult, simulationResult]);
+
+  // Always computed when a comparison exists — NetworkEdge itself gates use
+  // on comparisonMode === "difference"; LinkDetailPanel below reads it in
+  // any mode (comparison details are useful in the inspector regardless of
+  // which mode the canvas is currently painted in).
+  const comparisonByLink = React.useMemo(() => {
+    if (!comparison) return null;
+    return new Map(comparison.linkDeltas.map((d) => [d.linkId, d]));
+  }, [comparison]);
 
   const activeTableRowKeys = React.useMemo(() => {
     if (!currentTraceEvent?.activeTableRowIds) return [];
@@ -230,9 +263,18 @@ const WorkflowManager: React.FC = () => {
   // events PR 1 already emits (stepType/segmentList/activeSegmentIndex).
   // null for every other algorithm and outside trace mode.
   const srDisplayState = React.useMemo(() => {
-    if (!isTraceMode || simulationResult?.algorithm !== "SEGMENT_ROUTING") return null;
+    if (!isTraceMode || displayedResult?.algorithm !== "SEGMENT_ROUTING") return null;
     return deriveSegmentRoutingDisplayState(traceEvents, activeStepIndex, network);
-  }, [isTraceMode, simulationResult, traceEvents, activeStepIndex, network]);
+  }, [isTraceMode, displayedResult, traceEvents, activeStepIndex, network]);
+
+  // Mid-simulation failure replay (PR 6) — which links are DOWN as of the
+  // current replay step, overriding the persistent network.links[].
+  // operationalStatus while replaying so stepping backward past a scheduled
+  // failure correctly shows the link UP again. null outside trace mode.
+  const replayDownLinkIds = React.useMemo(() => {
+    if (!isTraceMode) return null;
+    return deriveDownLinkIdsAtStep(traceEvents, activeStepIndex);
+  }, [isTraceMode, traceEvents, activeStepIndex]);
 
   // ── Locked fields — all-open in lab/teacher, assignment-driven in student/challenge ──
   const ALL_OPEN: LockedFields = {
@@ -302,6 +344,7 @@ const WorkflowManager: React.FC = () => {
     setSelectedType(null);
     setSelectedId(null);
     setSimulationResult(null);
+    setBaselineResult(null); // structural edit (PR 6 comparison invalidation) — node delete
   }, [toast]);
 
   const handleDeleteLink = useCallback((id: string) => {
@@ -310,6 +353,7 @@ const WorkflowManager: React.FC = () => {
     setSelectedType(null);
     setSelectedId(null);
     setSimulationResult(null);
+    setBaselineResult(null); // structural edit (PR 6 comparison invalidation) — permanent link delete
   }, [toast]);
 
   const handleAddLink = useCallback((source: string, target: string) => {
@@ -325,6 +369,7 @@ const WorkflowManager: React.FC = () => {
       links: [...prev.links, { id: makeId("link"), source, target, weight: 1, capacity: 10 }],
     }));
     setSimulationResult(null);
+    setBaselineResult(null); // structural edit (PR 6 comparison invalidation) — permanent link add
   }, [network.links, network.isDirected, toast]);
 
   const handleUpdateNode = useCallback((id: string, update: Partial<NodeInput>) => {
@@ -361,6 +406,7 @@ const WorkflowManager: React.FC = () => {
       demands: [...prev.demands, { ...partial, id: makeId("demand") }],
     }));
     setSimulationResult(null);
+    setBaselineResult(null); // structural edit (PR 6 comparison invalidation) — demand add
   }, [toast]);
 
   const handleDeleteDemand = useCallback((id: string) => {
@@ -382,17 +428,19 @@ const WorkflowManager: React.FC = () => {
         : prev.tePolicies,
     }));
     setSimulationResult(null);
+    setBaselineResult(null); // structural edit (PR 6 comparison invalidation) — demand delete
   }, [toast]);
 
   const handleGenerateTopology = useCallback((net: NetworkInput) => {
     setNetwork(net);
     setSimulationResult(null);
+    setBaselineResult(null); // structural edit (PR 6 comparison invalidation) — topology regeneration
     setSelectedType(null);
     setSelectedId(null);
     // A new topology invalidates any node/link ids referenced by per-demand
     // config from the old one — clear rather than risk a stale waypoint,
     // path-share, or policy reference the backend would (correctly) reject.
-    setAlgorithmConfig((prev) => ({ ...prev, segmentRoutingPolicies: [], trafficDistributions: [], tePolicies: [] }));
+    setAlgorithmConfig((prev) => ({ ...prev, segmentRoutingPolicies: [], trafficDistributions: [], tePolicies: [], failureSchedule: [] }));
     setDistributionMode("EQUAL");
     setTeDraft(null);
     setTeIsSelecting(false);
@@ -409,6 +457,8 @@ const WorkflowManager: React.FC = () => {
     setTeQuickSelectActive(false);
     setTeQuickPopupLinkId(null);
     setSimulationResult(null);
+    setBaselineResult(null);
+    setComparisonMode("after");
     setSelectedType(null);
     setSelectedId(null);
     setActiveStepIndex(0);
@@ -422,6 +472,8 @@ const WorkflowManager: React.FC = () => {
     setCurrentStep(0);
     setNetwork({ nodes: [], links: [], demands: [], topologyType: "custom", isDirected: false });
     setSimulationResult(null);
+    setBaselineResult(null);
+    setComparisonMode("after");
     setLectureInsight(null);
     setSelectedType(null);
     setSelectedId(null);
@@ -778,6 +830,35 @@ const WorkflowManager: React.FC = () => {
     setSimulationResult(null);
   }, [clearStaleDistributions]);
 
+  // ── Scheduled mid-simulation failures (PR 6, Part 1) ──────────────────────
+  // Same invalidation pattern as TE policies above: a scheduled failure can
+  // change which paths a demand ends up on partway through the run, so any
+  // stale custom ECMP distribution (computed for the pre-schedule path set)
+  // is cleared rather than risking a mismatch the backend would otherwise
+  // reject. Unlike the Link Inspector's Fail/Restore control (PR 5, applies
+  // immediately to the persistent topology), this only takes effect on the
+  // *next* simulation run — it schedules an event inside that run's trace.
+  const handleAddFailureEvent = useCallback((linkId: string, triggerValue: number) => {
+    setAlgorithmConfig((prev) => ({
+      ...prev,
+      failureSchedule: [
+        ...(prev.failureSchedule ?? []),
+        { eventId: makeId("failure"), linkId, triggerType: "TRACE_STEP", triggerValue },
+      ],
+    }));
+    clearStaleDistributions();
+    setSimulationResult(null);
+  }, [clearStaleDistributions]);
+
+  const handleRemoveFailureEvent = useCallback((eventId: string) => {
+    setAlgorithmConfig((prev) => ({
+      ...prev,
+      failureSchedule: (prev.failureSchedule ?? []).filter((f) => f.eventId !== eventId),
+    }));
+    clearStaleDistributions();
+    setSimulationResult(null);
+  }, [clearStaleDistributions]);
+
   // ── Link failure (PR 5) ─────────────────────────────────────────────────
   // Failure/restore is global topology state, gated on the same
   // canEditLinks lock as delete/add link (no new LockedFields field — a
@@ -847,6 +928,12 @@ const WorkflowManager: React.FC = () => {
     try {
       const result = await simulateNetwork({ network, algorithmConfig });
       setSimulationResult(result);
+      // First successful run ever becomes the baseline automatically; every
+      // run after that only updates "current" — comparison needs something
+      // stable to compare against, and silently moving the baseline on
+      // every run would make that impossible. See ComparisonPanel's
+      // "Set as baseline" for the explicit override.
+      setBaselineResult((prev) => prev ?? result);
       setActiveStepIndex(0);
       setCurrentStep(4);
       refreshSavedRuns();
@@ -863,6 +950,30 @@ const WorkflowManager: React.FC = () => {
       setIsRunning(false);
     }
   }, [network, algorithmConfig, toast]);
+
+  // Switching TO difference mode while a trace is being replayed would mean
+  // replaying a trace that's simultaneously being recolored by comparison
+  // status — confusing, and not something the spec asks for ("replay may
+  // be disabled or automatically switch to After"). Exiting trace mode is
+  // the safest of those two options: the student sees the static heatmap
+  // immediately instead of a disabled-looking replay control.
+  const handleComparisonModeChange = useCallback((mode: ComparisonMode) => {
+    setComparisonMode(mode);
+    if (mode === "difference" && isTraceMode) {
+      setIsTraceMode(false);
+      setIsPlaying(false);
+    }
+  }, [isTraceMode]);
+
+  // Explicit override (PR 6) — "Set current as baseline" in ComparisonPanel.
+  // The only other way baselineResult changes is automatically, on the
+  // first successful run (see handleSimulate above) or a structural edit
+  // that invalidates it (see the delete/regenerate handlers above).
+  const handleSetBaseline = useCallback(() => {
+    if (!simulationResult) return;
+    setBaselineResult(simulationResult);
+    toast("Current result set as baseline.", "info");
+  }, [simulationResult, toast]);
 
   // ── Saved runs ────────────────────────────────────────────────────────────
 
@@ -1082,6 +1193,10 @@ const WorkflowManager: React.FC = () => {
       setNetwork(run.network);
       setAlgorithmConfig(run.algorithmConfig);
       setSimulationResult(run.simulationResult);
+      // A freshly loaded run has no comparison history of its own yet — it
+      // becomes its own baseline (PR 6), same as the first run of a session.
+      setBaselineResult(run.simulationResult);
+      setComparisonMode("after");
       setActiveStepIndex(0);
       setIsPlaying(false);
       setIsTraceMode(false);
@@ -1258,9 +1373,13 @@ const WorkflowManager: React.FC = () => {
         <AlgorithmSelectionPage
           algorithmConfig={algorithmConfig}
           isRunning={isRunning}
-          onAlgorithmChange={(a: AlgorithmName) =>
-            setAlgorithmConfig((p) => ({ ...p, selectedAlgorithm: a }))
-          }
+          onAlgorithmChange={(a: AlgorithmName) => {
+            setAlgorithmConfig((p) => ({ ...p, selectedAlgorithm: a }));
+            // Comparing results from two different algorithms isn't a
+            // meaningful before/after (PR 6) — not the same "scenario"
+            // changing, a different routing model entirely.
+            setBaselineResult(null);
+          }}
           onThresholdChange={(v) =>
             setAlgorithmConfig((p) => ({ ...p, congestionThreshold: v }))
           }
@@ -1292,6 +1411,9 @@ const WorkflowManager: React.FC = () => {
           onRemoveTEPolicy={handleRemoveTEPolicy}
           teQuickSelectActive={teQuickSelectActive}
           onStartTEQuickLinkSelect={handleStartTEQuickLinkSelect}
+          failureSchedule={algorithmConfig.failureSchedule ?? []}
+          onAddFailureEvent={handleAddFailureEvent}
+          onRemoveFailureEvent={handleRemoveFailureEvent}
         />
       );
     return (
@@ -1301,10 +1423,24 @@ const WorkflowManager: React.FC = () => {
         currentTraceEvent={currentTraceEvent}
         activeStepIndex={activeStepIndex}
         totalSteps={traceEvents.length}
-        onEnableTrace={() => { setIsTraceMode(true); setActiveStepIndex(0); setShowRoutingTable(false); }}
+        onEnableTrace={() => {
+          // Difference mode is a static heatmap, not a replay (spec: "do
+          // not build a third replay system") — entering trace mode from
+          // it falls back to replaying the current ("after") result, the
+          // same safe default as a fresh run.
+          if (comparisonMode === "difference") setComparisonMode("after");
+          setIsTraceMode(true);
+          setActiveStepIndex(0);
+          setShowRoutingTable(false);
+        }}
         onDisableTrace={() => { setIsTraceMode(false); setIsPlaying(false); setShowRoutingTable(false); }}
         onBack={() => setCurrentStep(3)}
         lectureInsight={lectureInsight}
+        baselineResult={baselineResult}
+        comparison={comparison}
+        comparisonMode={comparisonMode}
+        onComparisonModeChange={handleComparisonModeChange}
+        onSetBaseline={handleSetBaseline}
       />
     );
   })();
@@ -1733,7 +1869,7 @@ const WorkflowManager: React.FC = () => {
             currentTraceEvent={currentTraceEvent}
             linkResults={linkResults}
             pathResults={pathResults}
-            isSimulated={!!simulationResult}
+            isSimulated={!!displayedResult}
             isTraceMode={isTraceMode}
             readonly={currentStep === 0}
             canEditNodes={effectiveLockedFields.canEditNodes}
@@ -1745,6 +1881,9 @@ const WorkflowManager: React.FC = () => {
             gradingHighlightNodes={challengeGradingResult?.highlightedNodes}
             waypointSelectDemandId={waypointSelectDemandId}
             srDisplayState={srDisplayState}
+            replayDownLinkIds={replayDownLinkIds}
+            comparisonMode={comparisonMode}
+            comparisonByLink={comparisonByLink}
             tePolicySelectMode={
               teQuickSelectActive ? "link" :
               teIsSelecting && teDraft ? (teDraft.type === "REQUIRE_WAYPOINT" ? "node" : "link") : null
@@ -1781,6 +1920,7 @@ const WorkflowManager: React.FC = () => {
             onUpdateLink={handleUpdateLink}
             onDeleteLink={handleDeleteLink}
             onToggleLinkOperationalStatus={handleToggleLinkOperationalStatus}
+            comparisonByLink={comparisonByLink}
             onStartConnect={currentStep === 1 ? handleStartConnect : undefined}
             onAddDemandFrom={handleAddDemandFrom}
             onCenterNode={handleCenterNode}

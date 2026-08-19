@@ -5,6 +5,7 @@ import {
   AlgorithmName,
   LinkInput,
   NodeInput,
+  SimulationFailureEvent,
   SimulationResult,
   TrafficDemandInput,
   TrafficDistributionMode,
@@ -14,6 +15,7 @@ import TermHint from "../components/TermHint";
 import SegmentRoutingEditor from "../components/SegmentRoutingEditor";
 import TrafficDistributionEditor from "../components/TrafficDistributionEditor";
 import TEPolicyEditor, { TEPolicyDraft } from "../components/TEPolicyEditor";
+import FailureScheduleEditor from "../components/FailureScheduleEditor";
 import { isDistributionValid } from "../utils/trafficDistribution";
 
 interface AlgorithmSelectionPageProps {
@@ -55,6 +57,11 @@ interface AlgorithmSelectionPageProps {
   onRemoveTEPolicy: (policyId: string) => void;
   teQuickSelectActive: boolean;
   onStartTEQuickLinkSelect: () => void;
+  // Scheduled mid-simulation failures (PR 6) — rendered for every algorithm
+  // (ECMP, Segment Routing, and Distance Vector all support it).
+  failureSchedule: SimulationFailureEvent[];
+  onAddFailureEvent: (linkId: string, triggerValue: number) => void;
+  onRemoveFailureEvent: (eventId: string) => void;
 }
 
 const algorithms = [
@@ -120,6 +127,9 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
   onRemoveTEPolicy,
   teQuickSelectActive,
   onStartTEQuickLinkSelect,
+  failureSchedule,
+  onAddFailureEvent,
+  onRemoveFailureEvent,
 }) => {
   const [showTheory, setShowTheory] = useState(false);
   const selected = algorithms.find((a) => a.id === algorithmConfig.selectedAlgorithm) ?? algorithms[0];
@@ -237,6 +247,15 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
           onStartTEQuickLinkSelect={onStartTEQuickLinkSelect}
         />
       )}
+
+      {/* Scheduled mid-simulation failures — supported by every algorithm */}
+      <FailureScheduleEditor
+        schedule={failureSchedule}
+        links={links}
+        nodes={nodes}
+        onAdd={onAddFailureEvent}
+        onRemove={onRemoveFailureEvent}
+      />
 
       {/* Congestion threshold */}
       <div className="threshold-row">

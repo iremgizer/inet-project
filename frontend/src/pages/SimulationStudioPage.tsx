@@ -1,7 +1,9 @@
 import React from "react";
 import { ArrowLeft, X, BarChart3, Lightbulb } from "lucide-react";
 import ResultSummaryPanel from "../components/ResultSummaryPanel";
+import ComparisonPanel from "../components/ComparisonPanel";
 import { SimulationResult, SimulationTraceEvent } from "../types/network";
+import { ComparisonMode, SimulationComparison } from "../utils/comparison";
 
 interface SimulationStudioPageProps {
   result: SimulationResult | null;
@@ -13,6 +15,13 @@ interface SimulationStudioPageProps {
   onDisableTrace: () => void;
   onBack: () => void;
   lectureInsight?: string | null;
+  // Before/After comparison (PR 6, Part 2) — `result` above is "current";
+  // `baselineResult` may be the same object (nothing to compare yet).
+  baselineResult: SimulationResult | null;
+  comparison: SimulationComparison | null;
+  comparisonMode: ComparisonMode;
+  onComparisonModeChange: (mode: ComparisonMode) => void;
+  onSetBaseline: () => void;
 }
 
 const SimulationStudioPage: React.FC<SimulationStudioPageProps> = ({
@@ -24,6 +33,11 @@ const SimulationStudioPage: React.FC<SimulationStudioPageProps> = ({
   onDisableTrace,
   onBack,
   lectureInsight,
+  baselineResult,
+  comparison,
+  comparisonMode,
+  onComparisonModeChange,
+  onSetBaseline,
 }) => {
   // ── No result yet ──────────────────────────────────────────────────────────
   if (!result) {
@@ -61,6 +75,15 @@ const SimulationStudioPage: React.FC<SimulationStudioPageProps> = ({
             <p className="lecture-insight-text">{lectureInsight}</p>
           </div>
         )}
+
+        <ComparisonPanel
+          baseline={baselineResult}
+          current={result}
+          comparison={comparison}
+          mode={comparisonMode}
+          onModeChange={onComparisonModeChange}
+          onSetBaseline={onSetBaseline}
+        />
 
         <ResultSummaryPanel result={result} onShowTrace={onEnableTrace} />
 

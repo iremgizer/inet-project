@@ -8,6 +8,7 @@ import {
   utilizationLabel,
 } from "../utils/networkInspectors";
 import type { NetworkInput } from "../types/network";
+import { COMPARISON_STATUS_LABEL, LinkComparisonEntry } from "../utils/comparison";
 
 interface LinkDetailPanelProps {
   link: LinkInput;
@@ -22,6 +23,10 @@ interface LinkDetailPanelProps {
   canEditLinks?: boolean;
   canEditWeights?: boolean;
   canEditCapacities?: boolean;
+  /** Before/After comparison (PR 6, Part 2) — set only when a baseline
+   * exists and differs from the current result. Undefined/null renders
+   * nothing extra (no comparison available). */
+  comparisonEntry?: LinkComparisonEntry | null;
 }
 
 const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
@@ -34,6 +39,7 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
   canEditLinks = true,
   canEditWeights = true,
   canEditCapacities = true,
+  comparisonEntry = null,
 }) => {
   const [showFormula, setShowFormula] = useState(false);
 
@@ -202,6 +208,45 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
             <pre className="formula-block">
               {`util = load / capacity\n     = ${lr.load.toFixed(2)} / ${lr.capacity}\n     = ${lr.utilization.toFixed(4)}`}
             </pre>
+          )}
+        </div>
+      )}
+
+      {/* ── Before/After comparison (PR 6, Part 2) ── */}
+      {comparisonEntry && (
+        <div className="li-section li-comparison">
+          <div className="detail-section-title">Before / After</div>
+          <div className="li-comparison-grid">
+            <div className="li-comparison-metric">
+              <span className="li-comparison-metric-label">Utilization</span>
+              <span className="li-comparison-metric-value">
+                {(comparisonEntry.beforeUtilization * 100).toFixed(0)}% &rarr; {(comparisonEntry.afterUtilization * 100).toFixed(0)}%
+              </span>
+              <span className={`li-comparison-change ${
+                comparisonEntry.utilizationDeltaPct > 0 ? "li-comparison-change--worse"
+                : comparisonEntry.utilizationDeltaPct < 0 ? "li-comparison-change--better" : ""
+              }`}>
+                {comparisonEntry.utilizationDeltaPct > 0 ? "+" : ""}{comparisonEntry.utilizationDeltaPct.toFixed(0)} pp
+              </span>
+            </div>
+            <div className="li-comparison-metric">
+              <span className="li-comparison-metric-label">Load</span>
+              <span className="li-comparison-metric-value">
+                {comparisonEntry.beforeLoad.toFixed(2)} &rarr; {comparisonEntry.afterLoad.toFixed(2)}
+              </span>
+            </div>
+          </div>
+          <div className="li-comparison-status-row">
+            <span className="li-comparison-metric-label">Status</span>
+            <span className={`li-comparison-status-badge li-comparison-status-badge--${comparisonEntry.status.toLowerCase()}`}>
+              {COMPARISON_STATUS_LABEL[comparisonEntry.status]}
+            </span>
+          </div>
+          {comparisonEntry.status === "DOWN" && (
+            <div className="li-comparison-status-row">
+              <span className="li-comparison-metric-label">Operational state</span>
+              <span className="li-comparison-metric-value">UP &rarr; DOWN</span>
+            </div>
           )}
         </div>
       )}

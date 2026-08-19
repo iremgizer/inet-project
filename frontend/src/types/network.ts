@@ -80,6 +80,21 @@ export interface TrafficEngineeringPolicy {
   penalty?: number | null;
 }
 
+export type FailureTriggerType = "TRACE_STEP";
+
+/** A scheduled mid-simulation link failure (PR 6) — additive on top of
+ * PR 5's `LinkInput.operationalStatus`, not a replacement for it. Where
+ * `operationalStatus="DOWN"` means "down for the whole run," a
+ * `SimulationFailureEvent` means "UP at the start, transitions to DOWN
+ * partway through it" — the link is UP for trace steps 0..triggerValue,
+ * then a LINK_FAILURE trace event fires and routing recomputes around it. */
+export interface SimulationFailureEvent {
+  eventId: string;
+  linkId: string;
+  triggerType: FailureTriggerType;
+  triggerValue: number;
+}
+
 export interface AlgorithmConfig {
   selectedAlgorithm: AlgorithmName;
   algorithmType: AlgorithmType;
@@ -98,6 +113,10 @@ export interface AlgorithmConfig {
   // intent read by ECMP and Segment Routing (Distance Vector ignores them
   // and reports why via debugInfo). An empty array has zero effect.
   tePolicies?: TrafficEngineeringPolicy[];
+  // Scheduled mid-simulation link failures (PR 6) — optional, algorithm-
+  // agnostic (ECMP, Segment Routing, and Distance Vector all support it).
+  // An empty array (the default) has zero effect on the trace.
+  failureSchedule?: SimulationFailureEvent[];
 }
 
 export interface SimulationRequest {

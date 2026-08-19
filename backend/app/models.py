@@ -148,6 +148,30 @@ class TrafficEngineeringPolicy(BaseModel):
     priority: int = 0
     penalty: Optional[float] = Field(None, ge=0.0)
 
+FailureTriggerType = Literal["TRACE_STEP"]
+
+class SimulationFailureEvent(BaseModel):
+    """A scheduled mid-simulation link failure (PR 6) — additive on top of
+    the PR 5 `LinkInput.operationalStatus` model, not a replacement for it.
+    Where `operationalStatus="DOWN"` means "this link is down for the whole
+    run", a `SimulationFailureEvent` means "this link is UP at the start of
+    the run and transitions to DOWN partway through it", so a student can
+    watch routing recompute live during replay instead of only comparing two
+    already-different starting topologies.
+
+    `triggerType="TRACE_STEP"` (the only trigger type PR 6 supports, by
+    design — see the module docstring in `app/utils/failure_schedule.py` for
+    why arbitrary wall-clock timing was deliberately left out) with
+    `triggerValue=N` means: steps 0..N are the baseline state; immediately
+    after trace step N is emitted, this link transitions UP -> DOWN, a
+    LINK_FAILURE trace event follows, and any already-routed demand crossing
+    it is recomputed against the graph with it removed.
+    """
+    eventId: str
+    linkId: str
+    triggerType: FailureTriggerType = "TRACE_STEP"
+    triggerValue: int = Field(..., ge=0)
+
 class AlgorithmConfig(BaseModel):
     selectedAlgorithm: AlgorithmName
     algorithmType: AlgorithmType
@@ -174,6 +198,12 @@ class AlgorithmConfig(BaseModel):
     # educational semantics. An empty list (the default) has zero effect on
     # any algorithm.
     tePolicies: List[TrafficEngineeringPolicy] = Field(default_factory=list)
+    # Scheduled mid-simulation link failures (PR 6) — optional and
+    # algorithm-agnostic (ECMP, Segment Routing, and Distance Vector all
+    # support it; see each algorithm's own module for how). An empty list
+    # (the default) means no scheduled failures, and every algorithm's trace
+    # is byte-identical to before this field existed.
+    failureSchedule: List[SimulationFailureEvent] = Field(default_factory=list)
 
 class SimulationRequest(BaseModel):
     network: NetworkInput

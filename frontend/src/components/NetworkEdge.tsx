@@ -14,6 +14,7 @@ import {
   severityStrokeWidth,
   severityGlowColor,
 } from "../utils/graphVisuals";
+import { COMPARISON_STATUS_COLOR } from "../utils/comparison";
 
 export interface NetworkEdgeData extends Record<string, unknown> {
   weight: number;
@@ -49,6 +50,9 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
     gradingLinkStatus,
     network,
     tePolicies,
+    replayDownLinkIds,
+    comparisonMode,
+    comparisonByLink,
   } = useContext(SimulationOverlayContext);
 
   const d = data as NetworkEdgeData;
@@ -65,7 +69,26 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
   //    Deliberately NOT reusing the red congestion glow or FORBID_LINK's
   //    dash pattern — those mean "traffic avoided this" while DOWN means
   //    "traffic physically cannot use this."
-  const isDown = d.operationalStatus === "DOWN";
+  //
+  //    Mid-simulation failure replay (PR 6) — while a trace is being
+  //    replayed, `replayDownLinkIds` (derived from the trace itself, see
+  //    utils/failureReplay.ts) is authoritative instead of the persistent
+  //    field: a link scheduled to fail partway through the run must show
+  //    UP for every step before that point, even though the network's
+  //    final/persistent state has it DOWN. Outside trace mode
+  //    (replayDownLinkIds === null), the persistent field is unchanged
+  //    PR 5 behavior.
+  // ── Before/After/Difference comparison (PR 6, Part 2) — a dedicated
+  //    encoding, only active in "difference" mode, deliberately distinct
+  //    from congestion severity/TE policy/path-identity colors (spec: "do
+  //    not confuse this with normal path colors"). A DOWN entry folds into
+  //    `isDown` below so "down" reuses the exact same stone/neutral
+  //    treatment and reads the same way everywhere, trace replay included.
+  const comparisonEntry = comparisonMode === "difference" ? comparisonByLink?.get(id) ?? null : null;
+
+  const isDown =
+    (replayDownLinkIds ? replayDownLinkIds.has(id) : d.operationalStatus === "DOWN") ||
+    comparisonEntry?.status === "DOWN";
 
   // ── Traffic Engineering policy markers — a visual channel of their own,
   //    kept separate from path identity (stroke color) and congestion
@@ -99,12 +122,14 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
     : "low";
 
   // ── Stroke color ────────────────────────────────────────────────────────────
-  // Priority: DOWN (structural, out of service) > grading > trace-highlighted
-  // > demand color (path identity) > base
+  // Priority: DOWN (structural, out of service) > difference-mode comparison
+  // > grading > trace-highlighted > demand color (path identity) > base
   let stroke = "#94a3b8";
 
   if (isDown) {
     stroke = "#a8a29e";
+  } else if (comparisonEntry) {
+    stroke = COMPARISON_STATUS_COLOR[comparisonEntry.status];
   } else if (gradingStatus === "correct") {
     stroke = "#22c55e";
   } else if (gradingStatus === "wrong") {
@@ -141,7 +166,7 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
   // A wide semi-transparent halo behind the path communicates congestion severity
   // without overriding the demand identity color. Never shown for a DOWN link —
   // it carries no traffic, so there is no severity to glow about.
-  const glowColor = !isDown && isSimulated && !gradingStatus ? severityGlowColor(severity) : null;
+  const glowColor = !isDown && !comparisonEntry && isSimulated && !gradingStatus ? severityGlowColor(severity) : null;
   const showGlow = glowColor !== null;
 
   const [edgePath, labelX, labelY] = getStraightPath({ sourceX, sourceY, targetX, targetY });

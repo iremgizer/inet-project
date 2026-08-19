@@ -11343,6 +11343,10 @@ html, body, #root {
 
 .te-policy-kind-dot--hard { background:var(--danger) }
 .te-policy-kind-dot--soft { background:var(--warning) }
+/* Scheduled failure (PR 6) — same stone/neutral hue used for the DOWN link
+   state elsewhere, deliberately distinct from hard/soft policy colors. */
+.te-policy-kind-dot--down { background:#78716c }
+.te-policy-item--down { border-color:#78716c40 }
 
 .te-policy-text {
   flex:1;
@@ -11693,3 +11697,182 @@ html, body, #root {
 .te-quick-popup-option:hover .te-quick-popup-radio {
   border-color:var(--warning)
 }
+
+/* ── Before/After comparison (PR 6, Part 2) ─────────────────────────────── */
+
+.comparison-panel {
+  display:flex;
+  flex-direction:column;
+  gap:.7rem;
+  background:var(--surface-2);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:.8rem .9rem;
+  margin-bottom:1rem
+}
+
+.comparison-panel-header {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px
+}
+
+.comparison-panel-title {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-weight:700;
+  font-size:.85rem;
+  color:var(--text)
+}
+
+.comparison-empty-hint {
+  font-size:.8rem;
+  color:var(--text-2);
+  margin:0
+}
+
+.comparison-mode-toggle {
+  display:inline-flex;
+  align-self:flex-start;
+  border:1px solid var(--border-strong);
+  border-radius:var(--radius-sm);
+  overflow:hidden
+}
+
+.comparison-mode-btn {
+  background:var(--surface);
+  border:none;
+  padding:.35rem .8rem;
+  font-size:.78rem;
+  font-weight:600;
+  color:var(--text-2);
+  cursor:pointer
+}
+
+.comparison-mode-btn + .comparison-mode-btn {
+  border-left:1px solid var(--border-strong)
+}
+
+.comparison-mode-btn--active {
+  background:var(--accent, #0071e3);
+  color:#fff
+}
+
+.comparison-summary {
+  display:flex;
+  flex-direction:column;
+  gap:.35rem
+}
+
+.comparison-summary-row {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  font-size:.8rem
+}
+
+.comparison-summary-label {
+  color:var(--text-2)
+}
+
+.comparison-summary-value {
+  font-weight:600;
+  color:var(--text);
+  font-variant-numeric:tabular-nums;
+  display:inline-flex;
+  align-items:center;
+  gap:6px
+}
+
+.comparison-delta {
+  font-size:.72rem;
+  font-weight:700;
+  padding:1px 6px;
+  border-radius:999px;
+  background:var(--surface-3)
+}
+
+.comparison-delta--worse { color:#dc2626; background:#dc262614 }
+.comparison-delta--better { color:#16a34a; background:#16a34a14 }
+
+.comparison-legend {
+  display:flex;
+  flex-wrap:wrap;
+  gap:.5rem .9rem;
+  padding-top:.2rem
+}
+
+.comparison-legend-item {
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  font-size:.74rem;
+  color:var(--text-2)
+}
+
+.comparison-legend-swatch {
+  width:9px;
+  height:9px;
+  border-radius:50%;
+  flex-shrink:0
+}
+
+/* Link Inspector comparison block (PR 6, Part 2) */
+
+.li-comparison-grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:.6rem
+}
+
+.li-comparison-metric {
+  display:flex;
+  flex-direction:column;
+  gap:2px
+}
+
+.li-comparison-metric-label {
+  font-size:.7rem;
+  color:var(--text-3);
+  text-transform:uppercase;
+  letter-spacing:.04em
+}
+
+.li-comparison-metric-value {
+  font-size:.85rem;
+  font-weight:600;
+  color:var(--text);
+  font-variant-numeric:tabular-nums
+}
+
+.li-comparison-change {
+  font-size:.72rem;
+  font-weight:700;
+  width:fit-content
+}
+
+.li-comparison-change--worse { color:#dc2626 }
+.li-comparison-change--better { color:#16a34a }
+
+.li-comparison-status-row {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-top:.5rem
+}
+
+.li-comparison-status-badge {
+  font-size:.74rem;
+  font-weight:700;
+  padding:2px 8px;
+  border-radius:999px
+}
+
+.li-comparison-status-badge--improved { color:#0d9488; background:#0d948814 }
+.li-comparison-status-badge--unchanged { color:#64748b; background:#64748b14 }
+.li-comparison-status-badge--worsened { color:#f97316; background:#f9731614 }
+.li-comparison-status-badge--new_congestion { color:#dc2626; background:#dc262614 }
+.li-comparison-status-badge--resolved_congestion { color:#16a34a; background:#16a34a14 }
+.li-comparison-status-badge--down { color:#57534e; background:#78716c1f }
