@@ -19,6 +19,12 @@ function buildNarrative(result: SimulationResult): string {
 
   if (algo === "ECMP") {
     const multiPathDemands = result.pathResults.filter((pr) => pr.paths.length > 1).length;
+    const customDemands = result.traceEvents.filter(
+      (e) => e.stepType === "PATH_DISTRIBUTION" && e.metadata?.mode === "CUSTOM"
+    ).length;
+    if (customDemands > 0) {
+      return `ECMP found equal-cost paths and applied a custom traffic distribution on ${customDemands} demand${customDemands > 1 ? "s" : ""}, splitting the rest equally.`;
+    }
     if (multiPathDemands > 0) {
       return `ECMP found equal-cost paths and split traffic across ${totalPaths} routes — ${multiPathDemands} demand${multiPathDemands > 1 ? "s" : ""} used multiple paths simultaneously.`;
     }
@@ -73,6 +79,45 @@ function buildSRDemandSummaries(result: SimulationResult): SRDemandSummary[] {
     });
 }
 
+// ── ECMP traffic distribution section ─────────────────────────────────────────
+
+interface ECMPPathShareSummary {
+  pathId: string;
+  pathLabel: string;
+  route: string;
+  percent: number;
+}
+
+interface ECMPDistributionSummary {
+  demandId: string;
+  mode: "EQUAL" | "CUSTOM";
+  paths: ECMPPathShareSummary[];
+}
+
+// Self-contained like buildSRDemandSummaries above: percentages are derived
+// from each path's own share of its demand's *delivered* traffic, so no
+// `network` prop is needed to know the original demand amount.
+function buildDistributionSummaries(result: SimulationResult): ECMPDistributionSummary[] {
+  const distEvents = result.traceEvents.filter((e) => e.stepType === "PATH_DISTRIBUTION" && e.activeDemandId);
+  return result.pathResults
+    .filter((pr) => pr.paths.length > 1)
+    .map((pr) => {
+      const demandTotal = pr.paths.reduce((sum, p) => sum + p.trafficShare, 0);
+      const distEvent = distEvents.find((e) => e.activeDemandId === pr.demandId);
+      const mode: "EQUAL" | "CUSTOM" = distEvent?.metadata?.mode === "CUSTOM" ? "CUSTOM" : "EQUAL";
+      return {
+        demandId: pr.demandId,
+        mode,
+        paths: pr.paths.map((p, i) => ({
+          pathId: p.pathId ?? `path-${i + 1}`,
+          pathLabel: `Path ${i + 1}`,
+          route: p.nodes.join(" → "),
+          percent: demandTotal > 0 ? (p.trafficShare / demandTotal) * 100 : 0,
+        })),
+      };
+    });
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowTrace }) => {
@@ -89,6 +134,8 @@ const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowT
   const totalPaths = result.pathResults.reduce((acc, pr) => acc + pr.paths.length, 0);
   const isSegmentRouting = result.algorithm === "SEGMENT_ROUTING";
   const srDemandSummaries = isSegmentRouting ? buildSRDemandSummaries(result) : [];
+  const isEcmp = result.algorithm === "ECMP";
+  const distributionSummaries = isEcmp ? buildDistributionSummaries(result) : [];
 
   return (
     <div className="result-summary">
@@ -174,6 +221,27 @@ const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowT
                 <span className="result-sr-demand-label">Resolved path:</span>{" "}
                 {s.resolvedPathLabels.join(" → ")}
               </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ECMP traffic distribution section */}
+      {isEcmp && distributionSummaries.length > 0 && (
+        <div className="result-td-section">
+          <div className="result-td-title">Traffic Distribution</div>
+          {distributionSummaries.map((s) => (
+            <div key={s.demandId} className="result-td-demand">
+              <span className={`result-td-mode-badge result-td-mode-badge--${s.mode.toLowerCase()}`}>
+                {s.mode === "CUSTOM" ? "Custom split" : "Equal split"}
+              </span>
+              {s.paths.map((p) => (
+                <div key={p.pathId} className="result-td-path-row">
+                  <span className="result-td-path-label">{p.pathLabel}</span>
+                  <span className="result-td-path-route">{p.route}</span>
+                  <span className="result-td-path-pct">{p.percent.toFixed(0)}%</span>
+                </div>
+              ))}
             </div>
           ))}
         </div>

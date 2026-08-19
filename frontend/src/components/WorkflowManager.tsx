@@ -46,6 +46,7 @@ import {
 import { gradeChallenge } from "../utils/challengeGrading";
 import { resolveHints } from "../utils/challengeHints";
 import { deriveSegmentRoutingDisplayState } from "../utils/segmentRoutingTrace";
+import { buildCustomDistributionsFromResult } from "../utils/trafficDistribution";
 import { EXAMPLE_CHALLENGES } from "../utils/exampleChallenges";
 import {
   ensureDemoClassroomData, resetDemoClassroomData,
@@ -77,6 +78,7 @@ import {
   SimulationResult,
   TopologyType,
   TrafficDemandInput,
+  TrafficDistributionMode,
 } from "../types/network";
 
 export type WorkflowStep = 0 | 1 | 2 | 3 | 4;
@@ -140,6 +142,13 @@ const WorkflowManager: React.FC = () => {
   // Mutually exclusive with connect mode (see handleStartConnect /
   // handleStartWaypointSelect below) and with normal node/link selection.
   const [waypointSelectDemandId, setWaypointSelectDemandId] = useState<string | null>(null);
+
+  // ── ECMP traffic distribution mode ────────────────────────────────────────
+  // UI-only toggle. "EQUAL" keeps algorithmConfig.trafficDistributions empty
+  // (byte-identical to plain ECMP). "CUSTOM" is only materialized into real
+  // per-path shares once a fresh ECMP result is available to discover paths
+  // from — see handleDistributionModeChange.
+  const [distributionMode, setDistributionMode] = useState<TrafficDistributionMode>("EQUAL");
 
   // ── Lecture mode ──────────────────────────────────────────────────────────
   const [lectureInsight, setLectureInsight] = useState<string | null>(null);
@@ -336,11 +345,15 @@ const WorkflowManager: React.FC = () => {
   const handleDeleteDemand = useCallback((id: string) => {
     if (!lockedFieldsRef.current.canEditDemands) { toast("Traffic demands are locked by the teacher.", "info"); return; }
     setNetwork((prev) => ({ ...prev, demands: prev.demands.filter((d) => d.id !== id) }));
-    setAlgorithmConfig((prev) =>
-      prev.segmentRoutingPolicies?.some((p) => p.demandId === id)
-        ? { ...prev, segmentRoutingPolicies: prev.segmentRoutingPolicies.filter((p) => p.demandId !== id) }
-        : prev
-    );
+    setAlgorithmConfig((prev) => ({
+      ...prev,
+      segmentRoutingPolicies: prev.segmentRoutingPolicies?.some((p) => p.demandId === id)
+        ? prev.segmentRoutingPolicies.filter((p) => p.demandId !== id)
+        : prev.segmentRoutingPolicies,
+      trafficDistributions: prev.trafficDistributions?.some((d) => d.demandId === id)
+        ? prev.trafficDistributions.filter((d) => d.demandId !== id)
+        : prev.trafficDistributions,
+    }));
     setSimulationResult(null);
   }, [toast]);
 
@@ -349,11 +362,17 @@ const WorkflowManager: React.FC = () => {
     setSimulationResult(null);
     setSelectedType(null);
     setSelectedId(null);
+    // A new topology invalidates any node ids / path ids referenced by
+    // per-demand config from the old one — clear rather than risk a stale
+    // waypoint or path-share reference the backend would (correctly) reject.
+    setAlgorithmConfig((prev) => ({ ...prev, segmentRoutingPolicies: [], trafficDistributions: [] }));
+    setDistributionMode("EQUAL");
   }, []);
 
   const handleResetNetwork = useCallback(() => {
     setNetwork(triangleTemplate);
     setAlgorithmConfig(defaultAlgorithmConfig);
+    setDistributionMode("EQUAL");
     setSimulationResult(null);
     setSelectedType(null);
     setSelectedId(null);
@@ -574,6 +593,37 @@ const WorkflowManager: React.FC = () => {
     setSelectedType(null);
     setSelectedId(null);
     setCurrentStep(2);
+  }, []);
+
+  // ── ECMP traffic distribution ─────────────────────────────────────────────
+
+  const handleDistributionModeChange = useCallback((mode: "EQUAL" | "CUSTOM") => {
+    setDistributionMode(mode);
+    if (mode === "EQUAL") {
+      setAlgorithmConfig((prev) => ({ ...prev, trafficDistributions: [] }));
+      return;
+    }
+    // CUSTOM: only materialize real per-path shares once a fresh ECMP result
+    // is available to discover paths from — otherwise leave the array empty
+    // (still safe: an empty trafficDistributions list is equal-split by
+    // definition, so there is no way to submit a half-configured request).
+    if (simulationResult?.algorithm === "ECMP") {
+      setAlgorithmConfig((prev) => ({
+        ...prev,
+        trafficDistributions: buildCustomDistributionsFromResult(network.demands, simulationResult.pathResults),
+      }));
+    }
+  }, [simulationResult, network.demands]);
+
+  const handleDistributionShareChange = useCallback((demandId: string, pathId: string, sharePercent: number) => {
+    setAlgorithmConfig((prev) => ({
+      ...prev,
+      trafficDistributions: (prev.trafficDistributions ?? []).map((d) =>
+        d.demandId === demandId
+          ? { ...d, paths: d.paths.map((p) => (p.pathId === pathId ? { ...p, share: sharePercent / 100 } : p)) }
+          : d
+      ),
+    }));
   }, []);
 
   // ── Simulation ────────────────────────────────────────────────────────────
@@ -1014,6 +1064,10 @@ const WorkflowManager: React.FC = () => {
           onAddWaypoint={handleAddWaypoint}
           onRemoveWaypoint={handleRemoveWaypoint}
           onMoveWaypoint={handleMoveWaypoint}
+          simulationResult={simulationResult}
+          distributionMode={distributionMode}
+          onDistributionModeChange={handleDistributionModeChange}
+          onDistributionShareChange={handleDistributionShareChange}
         />
       );
     return (

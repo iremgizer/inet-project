@@ -72,6 +72,34 @@ class SegmentRoutingPolicy(BaseModel):
     demandId: str
     segments: List[str] = Field(default_factory=list)
 
+TrafficDistributionMode = Literal["EQUAL", "CUSTOM"]
+
+class PathDistribution(BaseModel):
+    """One path's share of a demand's traffic, as a fraction (0..1) of the
+    demand amount — NOT a link weight. `pathId` must match one of the stable,
+    deterministic path ids ECMP assigns after sorting a demand's equal-cost
+    paths lexicographically by node sequence (see ecmp.py); the same
+    topology + demand always produce the same pathId for the same route."""
+    pathId: str
+    share: float = Field(..., ge=0.0, le=1.0)
+
+class TrafficDistribution(BaseModel):
+    """ECMP traffic-distribution override for one demand.
+
+    Deliberately distinct from link `weight` (routing cost, used to find the
+    equal-cost paths in the first place) — this only decides how much of an
+    already-routed demand's traffic goes over each already-discovered
+    equal-cost path. `mode="EQUAL"` (the default) reproduces today's ECMP
+    behavior exactly and ignores `paths` entirely. `paths` is only read when
+    `mode="CUSTOM"`, and every discovered path must have an explicit share
+    summing to 1.0 (100%) — ECMP never silently normalizes or fills in a
+    default for a missing one; an invalid distribution is a rejected request,
+    not a best-effort guess.
+    """
+    demandId: str
+    mode: TrafficDistributionMode = "EQUAL"
+    paths: List[PathDistribution] = Field(default_factory=list)
+
 class AlgorithmConfig(BaseModel):
     selectedAlgorithm: AlgorithmName
     algorithmType: AlgorithmType
@@ -85,6 +113,11 @@ class AlgorithmConfig(BaseModel):
     # configuration specific to the chosen algorithm, not topology state —
     # ECMP/DISTANCE_VECTOR requests simply omit it (default: empty list).
     segmentRoutingPolicies: List[SegmentRoutingPolicy] = Field(default_factory=list)
+    # ECMP traffic distribution — optional and only meaningful when
+    # selectedAlgorithm == "ECMP". A demand with no matching entry here (or
+    # mode="EQUAL") splits traffic equally across its equal-cost paths,
+    # exactly as ECMP already did before this field existed.
+    trafficDistributions: List[TrafficDistribution] = Field(default_factory=list)
 
 class SimulationRequest(BaseModel):
     network: NetworkInput
@@ -94,6 +127,11 @@ class PathShare(BaseModel):
     nodes: List[str]
     cost: float
     trafficShare: float
+    # Stable path identifier ("path-1", "path-2", ...) assigned after sorting
+    # a demand's equal-cost paths lexicographically by node sequence. Only
+    # populated by ECMP today; None for Distance Vector / Segment Routing
+    # (single path per demand — nothing to distinguish).
+    pathId: Optional[str] = None
 
 class PathResult(BaseModel):
     demandId: str

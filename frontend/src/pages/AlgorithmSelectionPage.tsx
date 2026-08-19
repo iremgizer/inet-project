@@ -1,8 +1,17 @@
 import React, { useState } from "react";
 import { ChevronDown, ChevronUp, Zap, GitBranch } from "lucide-react";
-import { AlgorithmConfig, AlgorithmName, NodeInput, SegmentRoutingPolicy, TrafficDemandInput } from "../types/network";
+import {
+  AlgorithmConfig,
+  AlgorithmName,
+  NodeInput,
+  SimulationResult,
+  TrafficDemandInput,
+  TrafficDistributionMode,
+} from "../types/network";
 import TermHint from "../components/TermHint";
 import SegmentRoutingEditor from "../components/SegmentRoutingEditor";
+import TrafficDistributionEditor from "../components/TrafficDistributionEditor";
+import { isDistributionValid } from "../utils/trafficDistribution";
 
 interface AlgorithmSelectionPageProps {
   algorithmConfig: AlgorithmConfig;
@@ -22,6 +31,12 @@ interface AlgorithmSelectionPageProps {
   onAddWaypoint: (demandId: string, nodeId: string) => void;
   onRemoveWaypoint: (demandId: string, index: number) => void;
   onMoveWaypoint: (demandId: string, index: number, direction: "up" | "down") => void;
+  // ECMP traffic distribution — only rendered/used when
+  // selectedAlgorithm === "ECMP".
+  simulationResult: SimulationResult | null;
+  distributionMode: TrafficDistributionMode;
+  onDistributionModeChange: (mode: TrafficDistributionMode) => void;
+  onDistributionShareChange: (demandId: string, pathId: string, sharePercent: number) => void;
 }
 
 const algorithms = [
@@ -70,10 +85,16 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
   onAddWaypoint,
   onRemoveWaypoint,
   onMoveWaypoint,
+  simulationResult,
+  distributionMode,
+  onDistributionModeChange,
+  onDistributionShareChange,
 }) => {
   const [showTheory, setShowTheory] = useState(false);
   const selected = algorithms.find((a) => a.id === algorithmConfig.selectedAlgorithm) ?? algorithms[0];
   const isSegmentRouting = selected.id === "SEGMENT_ROUTING";
+  const isEcmp = selected.id === "ECMP";
+  const distributionsInvalid = isEcmp && !isDistributionValid(algorithmConfig.trafficDistributions ?? []);
 
   return (
     <div className="page">
@@ -151,6 +172,19 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
         />
       )}
 
+      {/* ECMP traffic distribution configuration */}
+      {isEcmp && (
+        <TrafficDistributionEditor
+          demands={demands}
+          nodes={nodes}
+          distributionMode={distributionMode}
+          distributions={algorithmConfig.trafficDistributions ?? []}
+          simulationResult={simulationResult}
+          onModeChange={onDistributionModeChange}
+          onShareChange={onDistributionShareChange}
+        />
+      )}
+
       {/* Congestion threshold */}
       <div className="threshold-row">
         <label className="field field--inline">
@@ -178,7 +212,8 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
         <button
           className="btn-primary btn-run"
           onClick={onStartSimulation}
-          disabled={isRunning}
+          disabled={isRunning || distributionsInvalid}
+          title={distributionsInvalid ? "Traffic distribution shares must total 100% for every demand" : undefined}
         >
           {isRunning ? (
             <><span className="spinner" /> Running…</>

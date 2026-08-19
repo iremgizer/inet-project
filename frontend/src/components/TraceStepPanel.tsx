@@ -54,7 +54,11 @@ function classifyStep(event: SimulationTraceEvent): StepType {
   if (event.algorithm === "ECMP" || event.algorithm?.startsWith("ECMP")) {
     if (t.includes("initialize demand")) return "ecmp_init";
     if (t.includes("compute candidate") || t.includes("equal-cost")) return "ecmp_paths";
-    if (t.includes("split demand")) return "ecmp_split";
+    // stepType "PATH_DISTRIBUTION" covers both the original equal-split title
+    // ("Split demand equally", still matched below for safety) and the new
+    // custom-distribution title ("Apply custom traffic distribution") — both
+    // render through the same ecmp_split block below via description/formulaText.
+    if (event.stepType === "PATH_DISTRIBUTION" || t.includes("split demand")) return "ecmp_split";
     if (t.includes("add traffic share")) return "ecmp_traffic";
     if (t.includes("compute link utilization")) return "ecmp_util";
     if (t.includes("detect congestion")) return "ecmp_congestion";

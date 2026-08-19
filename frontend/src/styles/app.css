@@ -10931,3 +10931,255 @@ html, body, #root {
   font-weight:600;
   color:var(--text-3)
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ECMP configurable traffic distribution — PR 3
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.td-editor {
+  display:flex;
+  flex-direction:column;
+  gap:.7rem;
+  margin:1rem 0
+}
+
+.td-editor-heading {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:.78rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--text-3)
+}
+
+.td-mode-toggle {
+  display:flex;
+  gap:14px
+}
+
+.td-mode-option {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:.86rem;
+  font-weight:600;
+  color:var(--text-2);
+  cursor:pointer
+}
+
+.td-mode-option input[type="radio"] {
+  accent-color:var(--accent)
+}
+
+.td-hint {
+  font-size:.82rem;
+  color:var(--text-2);
+  background:var(--surface-2);
+  border:1px dashed var(--border-strong);
+  border-radius:var(--radius);
+  padding:.7rem .8rem;
+  margin:0
+}
+
+.td-demand-card {
+  background:var(--surface-2);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:.75rem .85rem;
+  display:flex;
+  flex-direction:column;
+  gap:.5rem
+}
+
+.td-demand-header {
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:.5rem
+}
+
+.td-demand-route {
+  font-size:.92rem;
+  font-weight:700;
+  color:var(--text)
+}
+
+.td-demand-arrow {
+  color:var(--text-3);
+  font-weight:500;
+  margin:0 2px
+}
+
+.td-demand-amount {
+  font-size:.78rem;
+  font-weight:600;
+  color:var(--text-2)
+}
+
+.td-path-row {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:4px 0
+}
+
+.td-path-label {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-width:0;
+  flex:1
+}
+
+.td-path-index {
+  flex-shrink:0;
+  font-size:.72rem;
+  font-weight:700;
+  color:var(--accent);
+  background:var(--accent-light);
+  border-radius:999px;
+  padding:2px 8px
+}
+
+.td-path-route {
+  font-size:.82rem;
+  color:var(--text-2);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+
+.td-path-input-wrap {
+  display:flex;
+  align-items:center;
+  gap:3px;
+  flex-shrink:0
+}
+
+.td-path-input {
+  width:52px;
+  font-size:.86rem;
+  font-weight:600;
+  text-align:right;
+  padding:4px 6px;
+  border-radius:var(--radius-sm);
+  border:1px solid var(--border-strong);
+  background:var(--surface);
+  color:var(--text)
+}
+
+.td-path-pct-sign {
+  font-size:.82rem;
+  color:var(--text-3)
+}
+
+.td-total-row {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:.8rem;
+  font-weight:700;
+  padding-top:6px;
+  border-top:1px dashed var(--border)
+}
+
+.td-total-row--ok {
+  color:var(--success)
+}
+
+.td-total-row--invalid {
+  color:var(--danger)
+}
+
+.td-total-value {
+  font-variant-numeric:tabular-nums
+}
+
+.td-total-warning {
+  font-weight:500;
+  font-size:.74rem;
+  color:var(--danger)
+}
+
+/* ── Result summary — ECMP traffic distribution section ── */
+
+.result-td-section {
+  display:flex;
+  flex-direction:column;
+  gap:.6rem;
+  background:var(--accent-light);
+  border:1px solid var(--accent-border);
+  border-radius:var(--radius);
+  padding:.8rem .9rem
+}
+
+.result-td-title {
+  font-size:.78rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--accent)
+}
+
+.result-td-demand {
+  display:flex;
+  flex-direction:column;
+  gap:3px
+}
+
+.result-td-demand + .result-td-demand {
+  margin-top:6px;
+  padding-top:6px;
+  border-top:1px dashed var(--accent-border)
+}
+
+.result-td-mode-badge {
+  align-self:flex-start;
+  font-size:.66rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  border-radius:4px;
+  padding:1px 6px;
+  margin-bottom:2px
+}
+
+.result-td-mode-badge--equal {
+  background:var(--surface-3);
+  color:var(--text-2)
+}
+
+.result-td-mode-badge--custom {
+  background:var(--accent);
+  color:#fff
+}
+
+.result-td-path-row {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:.82rem
+}
+
+.result-td-path-label {
+  font-weight:700;
+  color:var(--text);
+  flex-shrink:0
+}
+
+.result-td-path-route {
+  color:var(--text-2);
+  flex:1;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+
+.result-td-path-pct {
+  font-weight:700;
+  color:var(--accent);
+  font-variant-numeric:tabular-nums
+}

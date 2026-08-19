@@ -39,6 +39,22 @@ export interface SegmentRoutingPolicy {
   segments: string[]; // ordered waypoint node ids (source/destination excluded)
 }
 
+export type TrafficDistributionMode = "EQUAL" | "CUSTOM";
+
+export interface PathDistribution {
+  pathId: string;
+  /** Fraction (0..1) of the demand's traffic on this path — NOT a link weight. */
+  share: number;
+}
+
+export interface TrafficDistribution {
+  demandId: string;
+  mode: TrafficDistributionMode;
+  /** Only read when mode === "CUSTOM"; every discovered path for the demand
+   * must have an explicit entry summing to 1.0 (100%). */
+  paths: PathDistribution[];
+}
+
 export interface AlgorithmConfig {
   selectedAlgorithm: AlgorithmName;
   algorithmType: AlgorithmType;
@@ -49,6 +65,10 @@ export interface AlgorithmConfig {
   // selectedAlgorithm === "SEGMENT_ROUTING". No SR feature UI ships in this
   // PR; this mirrors the backend's additive, optional field.
   segmentRoutingPolicies?: SegmentRoutingPolicy[];
+  // ECMP configurable traffic distribution — optional, only meaningful when
+  // selectedAlgorithm === "ECMP". A demand with no entry here (or the
+  // default array) splits traffic equally, exactly as ECMP always has.
+  trafficDistributions?: TrafficDistribution[];
 }
 
 export interface SimulationRequest {
@@ -60,6 +80,10 @@ export interface PathShare {
   nodes: string[];
   cost: number;
   trafficShare: number;
+  /** Stable id ("path-1", "path-2", ...) assigned by ECMP after sorting
+   * equal-cost paths lexicographically by node sequence. Undefined for
+   * Distance Vector / Segment Routing (single path per demand). */
+  pathId?: string | null;
 }
 
 export interface PathResult {
