@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import { Trash2, ChevronDown, ChevronUp, PowerOff, Power } from "lucide-react";
 import { LinkInput, SimulationResult } from "../types/network";
 import TermHint from "./TermHint";
 import {
@@ -15,6 +15,10 @@ interface LinkDetailPanelProps {
   result: SimulationResult | null;
   onUpdate: (id: string, update: Partial<LinkInput>) => void;
   onDelete: (id: string) => void;
+  /** Fail/restore this link (PR 5). Omitted entirely in contexts that don't
+   * wire it up (e.g. read-only views) — the section below simply doesn't
+   * render rather than calling something undefined. */
+  onToggleOperationalStatus?: (id: string) => void;
   canEditLinks?: boolean;
   canEditWeights?: boolean;
   canEditCapacities?: boolean;
@@ -26,6 +30,7 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
   result,
   onUpdate,
   onDelete,
+  onToggleOperationalStatus,
   canEditLinks = true,
   canEditWeights = true,
   canEditCapacities = true,
@@ -37,6 +42,7 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
   const nodeLabel = (id: string) => network.nodes.find((n) => n.id === id)?.label ?? id;
 
   const uc = lr ? utilizationColor(lr.utilization) : null;
+  const isDown = (link.operationalStatus ?? "UP") === "DOWN";
 
   return (
     <div className="detail-panel">
@@ -49,7 +55,8 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
         </div>
         <div className="li-header-meta">
           <span className="detail-id">{link.id}</span>
-          {lr && <span className={`link-status-badge link-status-badge--${uc}`}>
+          {isDown && <span className="link-status-badge link-status-badge--down">Down</span>}
+          {!isDown && lr && <span className={`link-status-badge link-status-badge--${uc}`}>
             {lr.isCongested ? "Congested" : utilizationLabel(lr.utilization)}
           </span>}
         </div>
@@ -63,6 +70,33 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
           <Trash2 size={15} />
         </button>
       </div>
+
+      {/* ── Operational status (PR 5) ── */}
+      {onToggleOperationalStatus && (
+        <div className={`li-section li-opstatus${isDown ? " li-opstatus--down" : ""}`}>
+          <div className="li-opstatus-row">
+            <div className="li-opstatus-text">
+              <div className="li-opstatus-label">
+                {isDown ? "Link is down" : "Link is up"}
+              </div>
+              <div className="li-opstatus-hint">
+                {isDown
+                  ? "Excluded from routing. Same id, weight, and capacity — restore to make it eligible again."
+                  : "Fail this link to simulate an outage and see traffic reroute around it."}
+              </div>
+            </div>
+            <button
+              className={`btn-secondary li-opstatus-btn${isDown ? " li-opstatus-btn--restore" : " li-opstatus-btn--fail"}`}
+              onClick={() => onToggleOperationalStatus(link.id)}
+              title={canEditLinks ? (isDown ? "Restore link" : "Fail link") : "Locked by teacher"}
+              disabled={!canEditLinks}
+            >
+              {isDown ? <Power size={14} /> : <PowerOff size={14} />}
+              {isDown ? "Restore link" : "Fail link"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Parameters ── */}
       <div className="li-section">

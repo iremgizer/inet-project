@@ -16,6 +16,7 @@ interface InspectorDrawerProps {
   onDeleteNode: (id: string) => void;
   onUpdateLink: (id: string, update: Partial<LinkInput>) => void;
   onDeleteLink: (id: string) => void;
+  onToggleLinkOperationalStatus?: (id: string) => void;
   onStartConnect?: (id: string) => void;
   onAddDemandFrom?: (id: string) => void;
   onCenterNode?: (id: string) => void;
@@ -33,6 +34,7 @@ const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
   onDeleteNode,
   onUpdateLink,
   onDeleteLink,
+  onToggleLinkOperationalStatus,
   onStartConnect,
   onAddDemandFrom,
   onCenterNode,
@@ -68,6 +70,7 @@ const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
           result={simulationResult}
           onUpdate={onUpdateLink}
           onDelete={onDeleteLink}
+          onToggleOperationalStatus={onToggleLinkOperationalStatus}
           canEditLinks={lockedFields.canEditLinks}
           canEditWeights={lockedFields.canEditWeights}
           canEditCapacities={lockedFields.canEditCapacities}

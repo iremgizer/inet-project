@@ -16,12 +16,23 @@ class NodeInput(BaseModel):
     y: float
     visualType: Optional[str] = "node"
 
+LinkOperationalStatus = Literal["UP", "DOWN"]
+
 class LinkInput(BaseModel):
     id: str
     source: str
     target: str
     capacity: float = Field(..., gt=0)
     weight: float = Field(..., ge=0)
+    # Additive scenario state — deliberately separate from the physical link
+    # identity/weight/capacity above. A DOWN link stays in the topology (same
+    # id, weight, capacity, still visible in the UI) but is excluded from
+    # routing computation (see GraphBuilder.build_graph). This is NOT the
+    # same as deleting the link: physical topology identity is preserved so
+    # the student can restore it and see routing recompute back. Optional and
+    # defaults to "UP" so every old NetworkInput/saved run/JSON file — which
+    # never had this field — continues to mean exactly what it always meant.
+    operationalStatus: LinkOperationalStatus = "UP"
 
 class TrafficDemandInput(BaseModel):
     id: str

@@ -2339,6 +2339,63 @@ tbody tr:hover {
   border:1px solid #fca5a5
 }
 
+/* Link failure (PR 5) — stone/neutral, deliberately not the danger red used
+   for congestion, so "down" reads as a different kind of state at a glance. */
+.link-status-badge--down {
+  background:#78716c1f;
+  color:#57534e;
+  border:1px solid #78716c40
+}
+
+.li-opstatus {
+  border:1px solid var(--border);
+  border-radius:var(--radius-sm);
+  background:var(--surface-2)
+}
+
+.li-opstatus--down {
+  border-color:#78716c40;
+  background:#78716c14
+}
+
+.li-opstatus-row {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px
+}
+
+.li-opstatus-label {
+  font-weight:700;
+  font-size:.85rem;
+  color:var(--text-1)
+}
+
+.li-opstatus-hint {
+  font-size:.72rem;
+  color:var(--text-3);
+  margin-top:2px;
+  max-width:26ch
+}
+
+.li-opstatus-btn {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  white-space:nowrap;
+  flex-shrink:0
+}
+
+.li-opstatus-btn--fail {
+  color:var(--danger);
+  border-color:#fca5a5
+}
+
+.li-opstatus-btn--restore {
+  color:#16a34a;
+  border-color:#bbf7d0
+}
+
 .param-grid {
   display:grid;
   grid-template-columns:1fr 1fr;
@@ -3190,6 +3247,16 @@ tbody tr:hover {
   color:var(--text-3)
 }
 
+.rf-edge-weight-label--down {
+  background: rgba(120,113,108,0.14);
+  border: 1px solid rgba(120,113,108,0.4);
+  color:#57534e;
+  font-weight:700;
+  letter-spacing:.03em;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
 .rf-edge-util-badge {
   font-size:.7rem;
   font-weight:700;
@@ -3267,6 +3334,22 @@ tbody tr:hover {
   color:var(--text-2);
   line-height:1.55;
   padding:0 .1rem
+}
+
+/* Link failure (PR 5) — compact operational-status note, stone/neutral and
+   deliberately quieter than the congestion hero above it: this reports
+   topology state, not a traffic outcome. */
+.result-network-event {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:.76rem;
+  font-weight:600;
+  color:#57534e;
+  background:#78716c1a;
+  border:1px solid #78716c33;
+  border-radius:var(--radius-sm);
+  padding:6px 10px
 }
 
 .result-metrics {
@@ -11389,6 +11472,10 @@ html, body, #root {
 .rf-edge-policy-badge--forbid { color:var(--danger) }
 .rf-edge-policy-badge--avoid  { color:var(--warning) }
 .rf-edge-policy-badge--prefer { color:var(--success) }
+/* Link failure (PR 5) — a deliberately different hue family (stone/neutral,
+   not red/orange/green) so "down" never reads as congestion, a forbid
+   policy, or a grading result at a glance. */
+.rf-edge-policy-badge--down   { color:#78716c }
 
 .rf-node--te-required {
   box-shadow:0 0 0 2px var(--warning), 0 0 0 4px var(--warning-light)
@@ -11430,6 +11517,13 @@ html, body, #root {
 .tsp-te-row--prefer {
   background:var(--success-light);
   color:var(--success)
+}
+
+/* Link failure (PR 5) — stone/neutral, distinct from the forbid/avoid/prefer
+   hues above so it never reads as a TE policy outcome. */
+.tsp-te-row--down {
+  background:#78716c1f;
+  color:#57534e
 }
 
 .tsp-te-arrow {

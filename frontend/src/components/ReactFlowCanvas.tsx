@@ -112,7 +112,11 @@ function toRFEdge(link: LinkInput, isDirected: boolean): Edge {
     id: link.id,
     source: link.source,
     target: link.target,
-    data: { weight: link.weight, capacity: link.capacity } satisfies NetworkEdgeData,
+    data: {
+      weight: link.weight,
+      capacity: link.capacity,
+      operationalStatus: link.operationalStatus ?? "UP",
+    } satisfies NetworkEdgeData,
     type: "networkEdge",
     markerEnd: isDirected
       ? { type: MarkerType.ArrowClosed, width: 14, height: 14 }
@@ -127,7 +131,7 @@ function networkFingerprint(network: NetworkInput): string {
     .sort()
     .join("|");
   const links = network.links
-    .map((l) => `${l.id}:${l.source}:${l.target}:${l.weight}:${l.capacity}`)
+    .map((l) => `${l.id}:${l.source}:${l.target}:${l.weight}:${l.capacity}:${l.operationalStatus ?? "UP"}`)
     .sort()
     .join("|");
   return `${nodes}$$${links}$$${network.isDirected}`;

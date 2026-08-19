@@ -11,12 +11,20 @@ export interface NodeInput {
   visualType?: string;
 }
 
+export type LinkOperationalStatus = "UP" | "DOWN";
+
 export interface LinkInput {
   id: string;
   source: string;
   target: string;
   capacity: number;
   weight: number;
+  /** Additive scenario state, separate from physical identity/weight/
+   * capacity above. A DOWN link stays in the topology (same id, weight,
+   * capacity, still visible) but is excluded from routing. Optional,
+   * defaults to "UP" — old networks/saved runs/JSON without this field mean
+   * exactly what they always meant. */
+  operationalStatus?: LinkOperationalStatus;
 }
 
 export interface TrafficDemandInput {

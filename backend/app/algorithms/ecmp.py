@@ -38,6 +38,23 @@ class ECMPAlgorithm:
             d.demandId: d for d in config.trafficDistributions
         }
 
+        # ── Link failure (PR 5) — global, not per-demand. GraphBuilder has
+        #    already excluded any DOWN link from `graph` above, so every
+        #    demand's routing below automatically recomputes around it with
+        #    no further changes; this is purely an explanatory trace note. ──
+        down_link_ids = GraphBuilder.down_link_ids(network)
+        if down_link_ids:
+            trace_events.append(SimulationTraceEvent(
+                stepId=str(step),
+                algorithm="ECMP",
+                stepType="LINK_FAILURE",
+                title="Link failure",
+                description=f"{len(down_link_ids)} link(s) are down and excluded from routing: {', '.join(down_link_ids)}.",
+                explanationText="A failed link stays part of the physical topology — same id, weight, and capacity — but cannot carry traffic. Routing recomputes as if the link were removed from the graph.",
+                highlightedLinks=down_link_ids,
+            ))
+            step += 1
+
         for demand in network.demands:
             trace_events.append(SimulationTraceEvent(
                 stepId=str(step),

@@ -5,9 +5,9 @@ import {
   EdgeLabelRenderer,
   BaseEdge,
 } from "@xyflow/react";
-import { Ban, ShieldAlert, Star } from "lucide-react";
+import { Ban, ShieldAlert, Star, XCircle } from "lucide-react";
 import { SimulationOverlayContext } from "./ReactFlowCanvas";
-import { LinkResult } from "../types/network";
+import { LinkResult, LinkOperationalStatus } from "../types/network";
 import {
   getUtilSeverity,
   getLinkDemandColor,
@@ -18,6 +18,7 @@ import {
 export interface NetworkEdgeData extends Record<string, unknown> {
   weight: number;
   capacity: number;
+  operationalStatus?: LinkOperationalStatus;
 }
 
 // Large topologies suppress inline labels to reduce noise.
@@ -57,6 +58,15 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
   const nodeCount = network.nodes.length;
   const isLargeTopology = nodeCount > LABEL_SUPPRESS_THRESHOLD;
 
+  // ── Link failure (PR 5) — a structural state, not a traffic outcome. A
+  //    DOWN link cannot appear in any resolved path, so it must read as
+  //    "out of service" regardless of grading/congestion/policy/path-color,
+  //    all of which are about traffic that could never have crossed it.
+  //    Deliberately NOT reusing the red congestion glow or FORBID_LINK's
+  //    dash pattern — those mean "traffic avoided this" while DOWN means
+  //    "traffic physically cannot use this."
+  const isDown = d.operationalStatus === "DOWN";
+
   // ── Traffic Engineering policy markers — a visual channel of their own,
   //    kept separate from path identity (stroke color) and congestion
   //    severity (stroke width/glow) per the app's established hierarchy. ────
@@ -89,10 +99,13 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
     : "low";
 
   // ── Stroke color ────────────────────────────────────────────────────────────
-  // Priority: grading > trace-highlighted > demand color (path identity) > base
+  // Priority: DOWN (structural, out of service) > grading > trace-highlighted
+  // > demand color (path identity) > base
   let stroke = "#94a3b8";
 
-  if (gradingStatus === "correct") {
+  if (isDown) {
+    stroke = "#a8a29e";
+  } else if (gradingStatus === "correct") {
     stroke = "#22c55e";
   } else if (gradingStatus === "wrong") {
     stroke = "#ef4444";
@@ -114,7 +127,9 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
   }
 
   // ── Stroke width ────────────────────────────────────────────────────────────
-  const strokeWidth = gradingStatus
+  const strokeWidth = isDown
+    ? 1.8
+    : gradingStatus
     ? 4
     : selected
     ? Math.max(severityStrokeWidth(severity), 2.5)
@@ -124,8 +139,9 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
 
   // ── Congestion glow (separate visual channel from path color) ───────────────
   // A wide semi-transparent halo behind the path communicates congestion severity
-  // without overriding the demand identity color.
-  const glowColor = isSimulated && !gradingStatus ? severityGlowColor(severity) : null;
+  // without overriding the demand identity color. Never shown for a DOWN link —
+  // it carries no traffic, so there is no severity to glow about.
+  const glowColor = !isDown && isSimulated && !gradingStatus ? severityGlowColor(severity) : null;
   const showGlow = glowColor !== null;
 
   const [edgePath, labelX, labelY] = getStraightPath({ sourceX, sourceY, targetX, targetY });
@@ -148,7 +164,13 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
   let labelContent: React.ReactNode = null;
 
   if (!suppressLabel) {
-    if (isSimulated && displayUtil !== undefined) {
+    if (isDown) {
+      labelContent = (
+        <div className="rf-edge-weight-label rf-edge-weight-label--down">
+          DOWN
+        </div>
+      );
+    } else if (isSimulated && displayUtil !== undefined) {
       const utilPct = (displayUtil * 100).toFixed(0);
       const utilColorClass =
         severity === "congested" || severity === "veryhigh"
@@ -176,7 +198,15 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
     }
   }
 
-  const baseOpacity = isDimmed ? 0.12 : isSimulated && !demandColor && !isTraceMode ? 0.45 : selected ? 1 : 0.85;
+  const baseOpacity = isDimmed
+    ? 0.12
+    : isDown
+    ? 0.55
+    : isSimulated && !demandColor && !isTraceMode
+    ? 0.45
+    : selected
+    ? 1
+    : 0.85;
 
   return (
     <>
@@ -200,7 +230,7 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
           stroke,
           strokeWidth,
           opacity: baseOpacity,
-          strokeDasharray: isForbidden ? "6 4" : undefined,
+          strokeDasharray: isDown ? "2 6" : isForbidden ? "6 4" : undefined,
           transition: "stroke 0.18s, stroke-width 0.18s, opacity 0.18s",
         }}
       />
@@ -217,22 +247,38 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
           </div>
         </EdgeLabelRenderer>
       )}
-      {(isForbidden || isAvoided || isPreferred) && (
+      {isDown ? (
         <EdgeLabelRenderer>
           <div
-            className={`rf-edge-policy-badge ${
-              isForbidden ? "rf-edge-policy-badge--forbid" : isAvoided ? "rf-edge-policy-badge--avoid" : "rf-edge-policy-badge--prefer"
-            }`}
+            className="rf-edge-policy-badge rf-edge-policy-badge--down"
             style={{
               position: "absolute",
               transform: `translate(-50%,-50%) translate(${labelX - perpX}px,${labelY - perpY}px)`,
               pointerEvents: "none",
             }}
-            title={isForbidden ? "Forbidden link" : isAvoided ? "Avoided link" : "Preferred link"}
+            title="Link down — excluded from routing. Any TE policy on this link is stored but has no effect while down."
           >
-            {isForbidden ? <Ban size={11} /> : isAvoided ? <ShieldAlert size={11} /> : <Star size={11} />}
+            <XCircle size={11} />
           </div>
         </EdgeLabelRenderer>
+      ) : (
+        (isForbidden || isAvoided || isPreferred) && (
+          <EdgeLabelRenderer>
+            <div
+              className={`rf-edge-policy-badge ${
+                isForbidden ? "rf-edge-policy-badge--forbid" : isAvoided ? "rf-edge-policy-badge--avoid" : "rf-edge-policy-badge--prefer"
+              }`}
+              style={{
+                position: "absolute",
+                transform: `translate(-50%,-50%) translate(${labelX - perpX}px,${labelY - perpY}px)`,
+                pointerEvents: "none",
+              }}
+              title={isForbidden ? "Forbidden link" : isAvoided ? "Avoided link" : "Preferred link"}
+            >
+              {isForbidden ? <Ban size={11} /> : isAvoided ? <ShieldAlert size={11} /> : <Star size={11} />}
+            </div>
+          </EdgeLabelRenderer>
+        )
       )}
     </>
   );

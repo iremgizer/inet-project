@@ -778,6 +778,37 @@ const WorkflowManager: React.FC = () => {
     setSimulationResult(null);
   }, [clearStaleDistributions]);
 
+  // ── Link failure (PR 5) ─────────────────────────────────────────────────
+  // Failure/restore is global topology state, gated on the same
+  // canEditLinks lock as delete/add link (no new LockedFields field — a
+  // student who can't touch links at all shouldn't be able to fail one
+  // either). Toggling changes which paths exist, so — same safety pattern
+  // as TE policy add/remove above — it invalidates the current result and
+  // any custom ECMP distribution rather than risk stale shares being sent
+  // to the backend for a path set that may no longer exist. Algorithm
+  // selection, demands, and TE policies are all left untouched: a policy on
+  // a now-DOWN link simply has no effect until the link is restored.
+  const handleToggleLinkOperationalStatus = useCallback((id: string) => {
+    if (!lockedFieldsRef.current.canEditLinks) { toast("Link editing is locked by the teacher.", "info"); return; }
+    const link = network.links.find((l) => l.id === id);
+    if (!link) return;
+    const goingDown = (link.operationalStatus ?? "UP") === "UP";
+    setNetwork((prev) => ({
+      ...prev,
+      links: prev.links.map((l) =>
+        l.id === id ? { ...l, operationalStatus: goingDown ? "DOWN" : "UP" } : l
+      ),
+    }));
+    clearStaleDistributions();
+    setSimulationResult(null);
+    toast(
+      goingDown
+        ? `Link ${id} marked down. Rerun the simulation to see rerouting.`
+        : `Link ${id} restored. Rerun the simulation to see routing recompute.`,
+      "info"
+    );
+  }, [network.links, clearStaleDistributions, toast]);
+
   // ── TE policy — graph-first quick-add flow ────────────────────────────────
   // "Select on Graph" from the editor enters link-selection mode immediately
   // (no policy type chosen yet); once a link is clicked, a floating popup
@@ -1749,6 +1780,7 @@ const WorkflowManager: React.FC = () => {
             onDeleteNode={handleDeleteNode}
             onUpdateLink={handleUpdateLink}
             onDeleteLink={handleDeleteLink}
+            onToggleLinkOperationalStatus={handleToggleLinkOperationalStatus}
             onStartConnect={currentStep === 1 ? handleStartConnect : undefined}
             onAddDemandFrom={handleAddDemandFrom}
             onCenterNode={handleCenterNode}

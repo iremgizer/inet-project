@@ -26,6 +26,7 @@ type StepType =
   | "sr_compute_segment_path" | "sr_advance_to_next_segment"
   | "sr_final_route_resolved" | "sr_add_traffic_to_link" | "sr_complete_demand"
   | "te_apply_policy" | "te_waypoint_required"
+  | "link_failure"
   | "generic";
 
 function classifyStep(event: SimulationTraceEvent): StepType {
@@ -36,6 +37,11 @@ function classifyStep(event: SimulationTraceEvent): StepType {
   // by a coincidental title substring.
   if (event.stepType === "APPLY_TE_POLICY") return "te_apply_policy";
   if (event.stepType === "POLICY_WAYPOINT_REQUIRED") return "te_waypoint_required";
+  // Link failure (PR 5) — emitted once per run, ahead of any per-demand
+  // routing, by all three algorithms with the same shape (see
+  // GraphBuilder.down_link_ids), so it's intercepted here too rather than
+  // duplicated into each algorithm's own title-matching below.
+  if (event.stepType === "LINK_FAILURE") return "link_failure";
   // Segment Routing carries a machine-readable `stepType` from the backend
   // (PR 1) — dispatch on that instead of title text, which the other two
   // algorithms below still rely on for historical reasons this PR leaves
@@ -239,6 +245,25 @@ const TraceStepPanel: React.FC<TraceStepPanelProps> = ({
       <span className="tsp-title">{event.title}</span>
     </div>
   );
+
+  // ── link_failure ───────────────────────────────────────────────────────────
+  if (stepType === "link_failure") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.highlightedLinks.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Down links (excluded from route search)</div>
+            {event.highlightedLinks.map((linkId) => (
+              <div key={linkId} className="tsp-te-row tsp-te-row--down">{linkId}</div>
+            ))}
+          </div>
+        )}
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
 
   // ── te_apply_policy ────────────────────────────────────────────────────────
   if (stepType === "te_apply_policy") {

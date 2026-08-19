@@ -32,6 +32,25 @@ class DistanceVectorAlgorithm:
                 f"{len(config.tePolicies)} polic{'y was' if len(config.tePolicies) == 1 else 'ies were'} ignored."
             )
 
+        # ── Link failure (PR 5) — unlike TE policies, this is safe to support:
+        #    failure is global topology state (not demand-scoped), and
+        #    GraphBuilder has already excluded any DOWN link from `graph`
+        #    above — the all-pairs table below is recomputed from that graph
+        #    automatically, so no other change was needed. This is purely an
+        #    explanatory trace note. ─────────────────────────────────────────
+        down_link_ids = GraphBuilder.down_link_ids(network)
+        if down_link_ids:
+            trace_events.append(SimulationTraceEvent(
+                stepId=str(step),
+                algorithm="DISTANCE_VECTOR",
+                stepType="LINK_FAILURE",
+                title="Link failure",
+                description=f"{len(down_link_ids)} link(s) are down and excluded from routing: {', '.join(down_link_ids)}.",
+                explanationText="A failed link stays part of the physical topology — same id, weight, and capacity — but cannot carry traffic. The cost table below is recomputed as if the link were removed from the graph.",
+                highlightedLinks=down_link_ids,
+            ))
+            step += 1
+
         trace_events.append(SimulationTraceEvent(
             stepId=str(step),
             algorithm="DISTANCE_VECTOR",

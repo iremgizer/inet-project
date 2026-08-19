@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ChevronDown, ChevronUp, AlertTriangle, CheckCircle2, PlayCircle } from "lucide-react";
+import { ChevronDown, ChevronUp, AlertTriangle, CheckCircle2, PlayCircle, PowerOff } from "lucide-react";
 import { SimulationResult } from "../types/network";
 import TermHint from "./TermHint";
 
@@ -118,6 +118,28 @@ function buildDistributionSummaries(result: SimulationResult): ECMPDistributionS
     });
 }
 
+// ── Link failure compact indicator (PR 5) ─────────────────────────────────────
+// Deliberately self-contained — derived only from THIS result's own
+// LINK_FAILURE trace event (see GraphBuilder.down_link_ids), with no
+// `previousResult` prop and no before/after comparison. That fuller
+// diff/heatmap treatment is PR 6's job; here a student just needs to see,
+// at a glance, that the run they're looking at included a down link.
+
+interface DownLinkSummary {
+  linkId: string;
+  source: string;
+  target: string;
+}
+
+function buildDownLinksSummary(result: SimulationResult): DownLinkSummary[] {
+  const failureEvent = result.traceEvents.find((e) => e.stepType === "LINK_FAILURE");
+  if (!failureEvent) return [];
+  return failureEvent.highlightedLinks.map((linkId) => {
+    const lr = result.linkResults.find((l) => l.linkId === linkId);
+    return { linkId, source: lr?.source ?? "?", target: lr?.target ?? "?" };
+  });
+}
+
 // ── Traffic Engineering policy section ────────────────────────────────────────
 
 interface TEPolicySummaryLine {
@@ -181,6 +203,7 @@ const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowT
   const isEcmp = result.algorithm === "ECMP";
   const distributionSummaries = isEcmp ? buildDistributionSummaries(result) : [];
   const policySummary = buildAppliedPolicySummary(result);
+  const downLinks = buildDownLinksSummary(result);
 
   return (
     <div className="result-summary">
@@ -201,6 +224,19 @@ const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowT
           <div className="result-hero-sub">{result.algorithm} · max {maxUtilPct}% utilization</div>
         </div>
       </div>
+
+      {/* Network event — compact operational-status note (PR 5). Distinct
+          from the congestion hero above: this reports topology state, not
+          a traffic outcome. */}
+      {downLinks.length > 0 && (
+        <div className="result-network-event">
+          <PowerOff size={13} />
+          <span>
+            Network event: {downLinks.map((d) => `${d.source}-${d.target}`).join(", ")}{" "}
+            link{downLinks.length > 1 ? "s" : ""} down
+          </span>
+        </div>
+      )}
 
       {/* Narrative */}
       <p className="result-narrative">{narrative}</p>
