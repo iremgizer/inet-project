@@ -34,12 +34,21 @@ export interface NetworkInput {
   isDirected: boolean;
 }
 
+export interface SegmentRoutingPolicy {
+  demandId: string;
+  segments: string[]; // ordered waypoint node ids (source/destination excluded)
+}
+
 export interface AlgorithmConfig {
   selectedAlgorithm: AlgorithmName;
   algorithmType: AlgorithmType;
   objective: ObjectiveType;
   congestionThreshold: number;
   maxTraceEvents?: number;
+  // Segment Routing V1 — optional, only meaningful when
+  // selectedAlgorithm === "SEGMENT_ROUTING". No SR feature UI ships in this
+  // PR; this mirrors the backend's additive, optional field.
+  segmentRoutingPolicies?: SegmentRoutingPolicy[];
 }
 
 export interface SimulationRequest {
@@ -105,6 +114,9 @@ export interface SimulationTraceEvent {
   activeNodeId?: string | null;
   activeDestinationId?: string | null;
   activeTableRowIds?: string[] | null;  // format: "nodeId::destinationId"
+  stepType?: string | null;             // machine-readable step category (e.g. "SELECT_ACTIVE_SEGMENT")
+  activeSegmentIndex?: number | null;   // Segment Routing: index into segmentList
+  segmentList?: string[] | null;        // Segment Routing: ordered waypoint stops for this demand
 }
 
 export interface SimulationResult {

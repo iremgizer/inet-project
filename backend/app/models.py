@@ -57,12 +57,34 @@ class NetworkInput(BaseModel):
             raise ValueError("Duplicate demand ids are not allowed")
         return value
 
+class SegmentRoutingPolicy(BaseModel):
+    """Segment Routing V1 policy: an ordered list of waypoint node ids a demand
+    should be routed through.
+
+    Between the demand's source and the first waypoint, between each pair of
+    consecutive waypoints, and between the last waypoint and the demand's
+    destination, traffic follows the normal shortest path under the current
+    link weights — this policy only constrains *which* intermediate nodes are
+    visited, not how each leg between them is routed. The source and final
+    destination should not be repeated inside `segments`; an empty list means
+    plain shortest-path routing for that demand.
+    """
+    demandId: str
+    segments: List[str] = Field(default_factory=list)
+
 class AlgorithmConfig(BaseModel):
     selectedAlgorithm: AlgorithmName
     algorithmType: AlgorithmType
     objective: ObjectiveType
     congestionThreshold: float = Field(1.0, gt=0)
     maxTraceEvents: Optional[int] = None
+    # Segment Routing V1 — optional and only meaningful when
+    # selectedAlgorithm == "SEGMENT_ROUTING". A demand with no matching entry
+    # here (or an entry with empty `segments`) routes via plain shortest path.
+    # Kept on AlgorithmConfig (not NetworkInput) because it is "how to route"
+    # configuration specific to the chosen algorithm, not topology state —
+    # ECMP/DISTANCE_VECTOR requests simply omit it (default: empty list).
+    segmentRoutingPolicies: List[SegmentRoutingPolicy] = Field(default_factory=list)
 
 class SimulationRequest(BaseModel):
     network: NetworkInput
@@ -121,6 +143,17 @@ class SimulationTraceEvent(BaseModel):
     activeNodeId: Optional[str] = None
     activeDestinationId: Optional[str] = None
     activeTableRowIds: Optional[List[str]] = None
+    # Machine-readable step category (e.g. "SELECT_ACTIVE_SEGMENT"), additive
+    # to the human-readable `title`/`description`. Optional and unset by
+    # ECMP/DISTANCE_VECTOR today — introduced for Segment Routing so a future
+    # frontend can dispatch on a stable key instead of matching on title text.
+    stepType: Optional[str] = None
+    # Segment Routing only: index of the currently active waypoint within
+    # `segmentList` (which stop, in order, is being routed toward right now).
+    activeSegmentIndex: Optional[int] = None
+    # Segment Routing only: the demand's ordered waypoint stops (segments +
+    # final destination), for rendering a segment-list / SID panel.
+    segmentList: Optional[List[str]] = None
 
 class SimulationResult(BaseModel):
     simulationRunId: str = Field(default_factory=lambda: str(uuid4()))
