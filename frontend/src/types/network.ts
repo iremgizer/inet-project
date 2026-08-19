@@ -55,6 +55,23 @@ export interface TrafficDistribution {
   paths: PathDistribution[];
 }
 
+export type TEPolicyType = "PREFER_LINK" | "AVOID_LINK" | "FORBID_LINK" | "REQUIRE_WAYPOINT";
+
+export interface TrafficEngineeringPolicy {
+  policyId: string;
+  type: TEPolicyType;
+  /** undefined/null = applies to every demand; set = scoped to just this one. */
+  demandId?: string | null;
+  /** Used by PREFER_LINK / AVOID_LINK / FORBID_LINK. */
+  linkId?: string | null;
+  /** Used by REQUIRE_WAYPOINT. */
+  nodeId?: string | null;
+  priority: number;
+  /** Overrides the default avoid/prefer cost adjustment; ignored by the two
+   * hard-constraint types. */
+  penalty?: number | null;
+}
+
 export interface AlgorithmConfig {
   selectedAlgorithm: AlgorithmName;
   algorithmType: AlgorithmType;
@@ -69,6 +86,10 @@ export interface AlgorithmConfig {
   // selectedAlgorithm === "ECMP". A demand with no entry here (or the
   // default array) splits traffic equally, exactly as ECMP always has.
   trafficDistributions?: TrafficDistribution[];
+  // Traffic Engineering policies — optional, algorithm-agnostic routing
+  // intent read by ECMP and Segment Routing (Distance Vector ignores them
+  // and reports why via debugInfo). An empty array has zero effect.
+  tePolicies?: TrafficEngineeringPolicy[];
 }
 
 export interface SimulationRequest {

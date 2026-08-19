@@ -39,6 +39,7 @@ import {
   NodeInput,
   PathResult,
   SimulationTraceEvent,
+  TrafficEngineeringPolicy,
 } from "../types/network";
 import { buildDemandColorMap } from "../utils/graphVisuals";
 import { SRDisplayState } from "../utils/segmentRoutingTrace";
@@ -65,6 +66,9 @@ export interface SimulationOverlayContextType {
   // Segment Routing: which node id is the "active SID" right now (drives the
   // waypoint-active ring on NetworkNode). null outside SR trace playback.
   srActiveWaypointId: string | null;
+  // Traffic Engineering policies — visualized pre-simulation as small link/
+  // node badges, kept visually separate from path identity/congestion/grading.
+  tePolicies: TrafficEngineeringPolicy[];
 }
 
 const EMPTY_NETWORK: NetworkInput = { nodes: [], links: [], demands: [], topologyType: "custom", isDirected: false };
@@ -88,6 +92,7 @@ export const SimulationOverlayContext =
     gradingLinkStatus: new Map(),
     gradingNodeIds: new Set(),
     srActiveWaypointId: null,
+    tePolicies: [],
   });
 
 // ── Converters ────────────────────────────────────────────────────────────────
@@ -151,6 +156,8 @@ interface ReactFlowCanvasProps {
   gradingHighlightNodes?: string[];
   waypointSelectDemandId?: string | null;
   srDisplayState?: SRDisplayState | null;
+  tePolicySelectMode?: "node" | "link" | null;
+  tePolicies?: TrafficEngineeringPolicy[];
   onMoveNode: (id: string, x: number, y: number) => void;
   onAddLink: (source: string, target: string) => void;
   onDeleteNode: (id: string) => void;
@@ -161,6 +168,8 @@ interface ReactFlowCanvasProps {
   onCancelConnect?: () => void;
   onSelectWaypointNode?: (nodeId: string) => void;
   onCancelWaypointSelect?: () => void;
+  onSelectTEPolicyTarget?: (kind: "node" | "link", id: string) => void;
+  onCancelTEPolicySelect?: () => void;
   onAddNodeShortcut?: () => void;
 }
 
@@ -183,6 +192,8 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
   gradingHighlightNodes,
   waypointSelectDemandId = null,
   srDisplayState = null,
+  tePolicySelectMode = null,
+  tePolicies = [],
   onMoveNode,
   onAddLink,
   onDeleteNode,
@@ -193,6 +204,8 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
   onCancelConnect,
   onSelectWaypointNode,
   onCancelWaypointSelect,
+  onSelectTEPolicyTarget,
+  onCancelTEPolicySelect,
   onAddNodeShortcut,
 }) => {
   const { fitView } = useReactFlow();
@@ -246,7 +259,9 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
         fitView({ padding: 0.15, duration: 300 });
       }
       if (e.key === "Escape") {
-        if (waypointSelectDemandId) {
+        if (tePolicySelectMode) {
+          onCancelTEPolicySelect?.();
+        } else if (waypointSelectDemandId) {
           onCancelWaypointSelect?.();
         } else if (connectSourceId) {
           onCancelConnect?.();
@@ -262,7 +277,7 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [fitView, onSelectNode, onSelectLink, onAddNodeShortcut, connectSourceId, onCancelConnect, waypointSelectDemandId, onCancelWaypointSelect]);
+  }, [fitView, onSelectNode, onSelectLink, onAddNodeShortcut, connectSourceId, onCancelConnect, waypointSelectDemandId, onCancelWaypointSelect, tePolicySelectMode, onCancelTEPolicySelect]);
 
   // ── Simulation overlay context value ─────────────────────────────────────
 
@@ -308,6 +323,7 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
         gradingLinkStatus,
         gradingNodeIds,
         srActiveWaypointId,
+        tePolicies,
       };
     }
     return {
@@ -328,8 +344,9 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
       gradingLinkStatus,
       gradingNodeIds,
       srActiveWaypointId,
+      tePolicies,
     };
-  }, [currentTraceEvent, linkResults, pathResults, isSimulated, isTraceMode, hoveredNodeId, stableSetHoveredNodeId, connectSourceId, network, gradingHighlightLinks, gradingHighlightNodes, srDisplayState]);
+  }, [currentTraceEvent, linkResults, pathResults, isSimulated, isTraceMode, hoveredNodeId, stableSetHoveredNodeId, connectSourceId, network, gradingHighlightLinks, gradingHighlightNodes, srDisplayState, tePolicies]);
 
   // ── RF callbacks ──────────────────────────────────────────────────────────
 
@@ -380,6 +397,11 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
 
   const handleNodeClick = useCallback(
     (_event: unknown, node: Node) => {
+      if (tePolicySelectMode) {
+        if (tePolicySelectMode === "node") onSelectTEPolicyTarget?.("node", node.id);
+        else onCancelTEPolicySelect?.(); // wrong element type for this policy — cancel rather than guess
+        return;
+      }
       if (waypointSelectDemandId) {
         onSelectWaypointNode?.(node.id);
         return;
@@ -392,11 +414,16 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
       }
       onSelectNode(node.id);
     },
-    [waypointSelectDemandId, onSelectWaypointNode, connectSourceId, onCompleteConnect, onSelectNode]
+    [tePolicySelectMode, onSelectTEPolicyTarget, onCancelTEPolicySelect, waypointSelectDemandId, onSelectWaypointNode, connectSourceId, onCompleteConnect, onSelectNode]
   );
 
   const handleEdgeClick = useCallback(
     (_event: unknown, edge: Edge) => {
+      if (tePolicySelectMode) {
+        if (tePolicySelectMode === "link") onSelectTEPolicyTarget?.("link", edge.id);
+        else onCancelTEPolicySelect?.();
+        return;
+      }
       if (waypointSelectDemandId) {
         onCancelWaypointSelect?.();
         return;
@@ -407,10 +434,14 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
       }
       onSelectLink(edge.id);
     },
-    [waypointSelectDemandId, onCancelWaypointSelect, connectSourceId, onCancelConnect, onSelectLink]
+    [tePolicySelectMode, onSelectTEPolicyTarget, onCancelTEPolicySelect, waypointSelectDemandId, onCancelWaypointSelect, connectSourceId, onCancelConnect, onSelectLink]
   );
 
   const handlePaneClick = useCallback(() => {
+    if (tePolicySelectMode) {
+      onCancelTEPolicySelect?.();
+      return;
+    }
     if (waypointSelectDemandId) {
       onCancelWaypointSelect?.();
       return;
@@ -421,7 +452,7 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
     }
     onSelectNode(null);
     onSelectLink(null);
-  }, [waypointSelectDemandId, onCancelWaypointSelect, connectSourceId, onCancelConnect, onSelectNode, onSelectLink]);
+  }, [tePolicySelectMode, onCancelTEPolicySelect, waypointSelectDemandId, onCancelWaypointSelect, connectSourceId, onCancelConnect, onSelectNode, onSelectLink]);
 
   const tokenNode = srDisplayState?.tokenNodeId
     ? network.nodes.find((n) => n.id === srDisplayState.tokenNodeId)

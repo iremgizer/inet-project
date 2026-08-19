@@ -44,6 +44,7 @@ from app.utils.routing_helpers import (
     resolve_segment_route,
     sanitize_segments,
 )
+from app.utils.te_policy import build_demand_policy_graph, combined_waypoints_for_demand
 
 SR_PATH_COLOR = "#0d7d7a"
 
@@ -76,10 +77,24 @@ class SegmentRoutingAlgorithm:
 
             policy = policy_by_demand.get(demand.id)
             raw_segments = policy.segments if policy else []
-            segments = sanitize_segments(raw_segments, demand.source, demand.target)
+            explicit_segments = sanitize_segments(raw_segments, demand.source, demand.target)
+
+            # ── Traffic Engineering policies — no-op (same graph object, zero
+            #    cost) when config.tePolicies is empty or none apply to this
+            #    demand. See app/utils/te_policy.py. ─────────────────────────
+            policy_result = build_demand_policy_graph(graph, link_map, demand.id, config.tePolicies)
+            demand_graph = policy_result.graph
+            # Deterministic combination: explicit SegmentRoutingPolicy segments
+            # first (in their existing order), then any REQUIRE_WAYPOINT policy
+            # waypoints appended after them — see combined_waypoints_for_demand.
+            segments = sanitize_segments(
+                combined_waypoints_for_demand(explicit_segments, policy_result), demand.source, demand.target
+            )
             stops = segments + [demand.target]
 
             # ── Nonexistent waypoint — clear, non-crashing per-demand failure ──
+            # (TE-sourced waypoints are already validated by build_demand_policy_graph;
+            # this also still catches a bad explicit SegmentRoutingPolicy segment.)
             unknown = [seg for seg in segments if seg not in node_ids]
             if unknown:
                 debug.append(
@@ -99,6 +114,26 @@ class SegmentRoutingAlgorithm:
                 activeDemandId=demand.id,
             ))
             step += 1
+
+            if policy_result.has_effect:
+                trace_events.append(SimulationTraceEvent(
+                    stepId=str(step),
+                    algorithm="SEGMENT_ROUTING",
+                    stepType="APPLY_TE_POLICY",
+                    title="Apply traffic engineering policies",
+                    description=policy_result.describe(),
+                    explanationText="Traffic engineering policies adjust which links Segment Routing may use between waypoints and their effective routing cost. The physical link cost shown elsewhere never changes.",
+                    highlightedNodes=[demand.source, demand.target],
+                    highlightedLinks=policy_result.excluded_link_ids + [a["linkId"] for a in policy_result.cost_adjustments],
+                    activeDemandId=demand.id,
+                    metadata={
+                        "excludedLinkIds": policy_result.excluded_link_ids,
+                        "costAdjustments": policy_result.cost_adjustments,
+                        "requiredWaypointNodeIds": policy_result.required_waypoint_node_ids,
+                        "ignoredPolicyIds": policy_result.ignored_policy_ids,
+                    },
+                ))
+                step += 1
 
             trace_events.append(SimulationTraceEvent(
                 stepId=str(step),
@@ -120,7 +155,7 @@ class SegmentRoutingAlgorithm:
             # ── Resolve the route — unreachable segment/destination is a clear,
             #    non-crashing per-demand failure, not a 500. ──────────────────
             try:
-                full_path, leg_paths = resolve_segment_route(graph, demand.source, demand.target, segments)
+                full_path, leg_paths = resolve_segment_route(demand_graph, demand.source, demand.target, segments)
             except nx.NetworkXNoPath:
                 debug.append(
                     f"Demand {demand.id}: no path found between waypoints in the segment list"

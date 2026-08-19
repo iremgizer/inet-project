@@ -17,6 +17,21 @@ class DistanceVectorAlgorithm:
         debug: List[str] = []
         step = 1
 
+        # Traffic Engineering policies (PR 4) are not supported by Distance
+        # Vector: DV computes one all-pairs cost table for the whole graph up
+        # front, not per demand, and a demand-scoped policy (e.g. forbid this
+        # link for just this one demand) has no clean place in a table that
+        # represents "the" cost between every pair of nodes. Supporting only
+        # network-wide (demandId=None) policies would silently ignore
+        # demand-scoped ones, which is worse than not supporting policies at
+        # all — so none are applied here; this notice makes that explicit
+        # rather than silently dropping them.
+        if config.tePolicies:
+            debug.append(
+                "Traffic Engineering Policies are not supported by Distance Vector in this version; "
+                f"{len(config.tePolicies)} polic{'y was' if len(config.tePolicies) == 1 else 'ies were'} ignored."
+            )
+
         trace_events.append(SimulationTraceEvent(
             stepId=str(step),
             algorithm="DISTANCE_VECTOR",

@@ -100,6 +100,43 @@ class TrafficDistribution(BaseModel):
     mode: TrafficDistributionMode = "EQUAL"
     paths: List[PathDistribution] = Field(default_factory=list)
 
+TEPolicyType = Literal["PREFER_LINK", "AVOID_LINK", "FORBID_LINK", "REQUIRE_WAYPOINT"]
+
+class TrafficEngineeringPolicy(BaseModel):
+    """A routing-intent constraint or preference, deliberately independent of
+    any one algorithm (ECMP, Segment Routing, and — later — an optimizer can
+    all consume the same policy shape).
+
+    Hard constraints (change *which* routes are even considered):
+      - FORBID_LINK: the link must not appear in the resolved route.
+      - REQUIRE_WAYPOINT: the route must visit `nodeId`.
+    Soft preferences (change routing *cost*, never route feasibility):
+      - AVOID_LINK: adds a routing-cost penalty to the link (does not remove it).
+      - PREFER_LINK: subtracts a routing-cost penalty from the link (a discount,
+        floored at 0 — never a negative-cost edge).
+
+    `demandId=None` applies the policy to every demand; a set `demandId`
+    scopes it to just that one. `linkId` is used by the three *_LINK types;
+    `nodeId` is used by REQUIRE_WAYPOINT. `penalty` overrides the default
+    avoid/prefer cost adjustment (ignored by the hard constraint types).
+    `priority` breaks ties deterministically when multiple soft policies of
+    the same type reference the same link, or when combining multiple
+    REQUIRE_WAYPOINT policies into an ordered stop list (lower number =
+    applied/visited first; insertion order breaks remaining ties).
+
+    This shape is intentionally routing-mechanism-agnostic: FORBID_LINK is a
+    hard `x_e = 0` constraint, AVOID_LINK/PREFER_LINK are objective-penalty
+    terms, and REQUIRE_WAYPOINT is a routing constraint — the same
+    vocabulary a future MIP-based optimizer would consume directly.
+    """
+    policyId: str
+    type: TEPolicyType
+    demandId: Optional[str] = None
+    linkId: Optional[str] = None
+    nodeId: Optional[str] = None
+    priority: int = 0
+    penalty: Optional[float] = Field(None, ge=0.0)
+
 class AlgorithmConfig(BaseModel):
     selectedAlgorithm: AlgorithmName
     algorithmType: AlgorithmType
@@ -118,6 +155,14 @@ class AlgorithmConfig(BaseModel):
     # mode="EQUAL") splits traffic equally across its equal-cost paths,
     # exactly as ECMP already did before this field existed.
     trafficDistributions: List[TrafficDistribution] = Field(default_factory=list)
+    # Traffic Engineering policies — optional, algorithm-agnostic routing
+    # intent. Read by ECMP and Segment Routing; Distance Vector does not
+    # support them (see distance_vector.py) because it computes one
+    # all-pairs table for the whole graph up front, not per demand, which a
+    # demand-scoped policy cannot cleanly apply to without changing DV's
+    # educational semantics. An empty list (the default) has zero effect on
+    # any algorithm.
+    tePolicies: List[TrafficEngineeringPolicy] = Field(default_factory=list)
 
 class SimulationRequest(BaseModel):
     network: NetworkInput

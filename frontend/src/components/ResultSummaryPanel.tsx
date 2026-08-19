@@ -118,6 +118,50 @@ function buildDistributionSummaries(result: SimulationResult): ECMPDistributionS
     });
 }
 
+// ── Traffic Engineering policy section ────────────────────────────────────────
+
+interface TEPolicySummaryLine {
+  key: string;
+  kind: "forbid" | "avoid" | "prefer" | "waypoint";
+  text: string;
+}
+
+// Derived from APPLY_TE_POLICY trace events (what was actually applied),
+// not from the request's tePolicies list — a policy that referenced an
+// unknown link/node id was ignored, and this reflects that reality.
+function buildAppliedPolicySummary(result: SimulationResult): TEPolicySummaryLine[] {
+  const events = result.traceEvents.filter((e) => e.stepType === "APPLY_TE_POLICY");
+  if (events.length === 0) return [];
+
+  const forbidden = new Set<string>();
+  const adjustments = new Map<string, TEPolicySummaryLine>();
+  const waypoints = new Set<string>();
+
+  for (const e of events) {
+    const meta = e.metadata as {
+      excludedLinkIds?: string[];
+      costAdjustments?: { linkId: string; policyType: string; originalWeight: number; effectiveWeight: number }[];
+      requiredWaypointNodeIds?: string[];
+    } | null | undefined;
+    (meta?.excludedLinkIds ?? []).forEach((id) => forbidden.add(id));
+    (meta?.costAdjustments ?? []).forEach((a) => {
+      const kind: "avoid" | "prefer" = a.policyType === "PREFER_LINK" ? "prefer" : "avoid";
+      adjustments.set(`${a.linkId}-${kind}`, {
+        key: `${a.linkId}-${kind}`,
+        kind,
+        text: `${kind === "avoid" ? "Avoid" : "Prefer"} link ${a.linkId} (${a.originalWeight} → ${a.effectiveWeight})`,
+      });
+    });
+    (meta?.requiredWaypointNodeIds ?? []).forEach((id) => waypoints.add(id));
+  }
+
+  const lines: TEPolicySummaryLine[] = [];
+  forbidden.forEach((id) => lines.push({ key: `forbid-${id}`, kind: "forbid", text: `Forbid link ${id}` }));
+  lines.push(...adjustments.values());
+  waypoints.forEach((id) => lines.push({ key: `wp-${id}`, kind: "waypoint", text: `Require waypoint ${id}` }));
+  return lines;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowTrace }) => {
@@ -136,6 +180,7 @@ const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowT
   const srDemandSummaries = isSegmentRouting ? buildSRDemandSummaries(result) : [];
   const isEcmp = result.algorithm === "ECMP";
   const distributionSummaries = isEcmp ? buildDistributionSummaries(result) : [];
+  const policySummary = buildAppliedPolicySummary(result);
 
   return (
     <div className="result-summary">
@@ -201,6 +246,18 @@ const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowT
                 </span>
               </div>
             ))}
+        </div>
+      )}
+
+      {/* Traffic Engineering policies applied */}
+      {policySummary.length > 0 && (
+        <div className="result-te-section">
+          <div className="result-te-title">Applied policies</div>
+          {policySummary.map((line) => (
+            <div key={line.key} className={`result-te-line result-te-line--${line.kind}`}>
+              {line.text}
+            </div>
+          ))}
         </div>
       )}
 

@@ -25,10 +25,17 @@ type StepType =
   | "sr_start_demand" | "sr_load_segment_list" | "sr_select_active_segment"
   | "sr_compute_segment_path" | "sr_advance_to_next_segment"
   | "sr_final_route_resolved" | "sr_add_traffic_to_link" | "sr_complete_demand"
+  | "te_apply_policy" | "te_waypoint_required"
   | "generic";
 
 function classifyStep(event: SimulationTraceEvent): StepType {
   const t = event.title.toLowerCase();
+  // Traffic Engineering policy steps (PR 4) are emitted by both ECMP and
+  // Segment Routing with the same stepType/shape — check first, ahead of
+  // either algorithm's own title-matching, so it's not accidentally caught
+  // by a coincidental title substring.
+  if (event.stepType === "APPLY_TE_POLICY") return "te_apply_policy";
+  if (event.stepType === "POLICY_WAYPOINT_REQUIRED") return "te_waypoint_required";
   // Segment Routing carries a machine-readable `stepType` from the backend
   // (PR 1) — dispatch on that instead of title text, which the other two
   // algorithms below still rely on for historical reasons this PR leaves
@@ -232,6 +239,72 @@ const TraceStepPanel: React.FC<TraceStepPanelProps> = ({
       <span className="tsp-title">{event.title}</span>
     </div>
   );
+
+  // ── te_apply_policy ────────────────────────────────────────────────────────
+  if (stepType === "te_apply_policy") {
+    const meta = event.metadata as {
+      excludedLinkIds?: string[];
+      costAdjustments?: { linkId: string; policyType: string; originalWeight: number; effectiveWeight: number }[];
+      requiredWaypointNodeIds?: string[];
+    } | null | undefined;
+    const excluded = meta?.excludedLinkIds ?? [];
+    const adjustments = meta?.costAdjustments ?? [];
+    const waypoints = meta?.requiredWaypointNodeIds ?? [];
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {excluded.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Forbidden links (excluded from route search)</div>
+            {excluded.map((linkId) => (
+              <div key={linkId} className="tsp-te-row tsp-te-row--forbid">{linkId}</div>
+            ))}
+          </div>
+        )}
+        {adjustments.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Effective cost adjustments</div>
+            {adjustments.map((a) => (
+              <div key={a.linkId} className={`tsp-te-row tsp-te-row--${a.policyType === "PREFER_LINK" ? "prefer" : "avoid"}`}>
+                {a.linkId}: physical cost {a.originalWeight} <span className="tsp-te-arrow">→</span> effective cost {a.effectiveWeight}
+              </div>
+            ))}
+          </div>
+        )}
+        {waypoints.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Required waypoints</div>
+            <PathNodes nodeIds={waypoints} network={network} />
+          </div>
+        )}
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
+
+  // ── te_waypoint_required ───────────────────────────────────────────────────
+  if (stepType === "te_waypoint_required") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.highlightedNodes.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Resolved route</div>
+            <PathNodes nodeIds={event.highlightedNodes} network={network} />
+          </div>
+        )}
+        {event.costCalculation && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Route cost</div>
+            <FormulaCard text={event.costCalculation} />
+          </div>
+        )}
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
 
   // ── ecmp_init ──────────────────────────────────────────────────────────────
   if (stepType === "ecmp_init") {

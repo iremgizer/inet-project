@@ -4,6 +4,7 @@ import ReactFlowCanvas from "./ReactFlowCanvas";
 import MetricsPanel from "./MetricsPanel";
 import RoutingTablePanel from "./RoutingTablePanel";
 import SegmentListPanel from "./SegmentListPanel";
+import { TEPolicyDraft } from "./TEPolicyEditor";
 import TraceTimeline from "./TraceTimeline";
 import InspectorDrawer from "./InspectorDrawer";
 import SavedRunsDrawer from "./SavedRunsDrawer";
@@ -79,6 +80,7 @@ import {
   TopologyType,
   TrafficDemandInput,
   TrafficDistributionMode,
+  TrafficEngineeringPolicy,
 } from "../types/network";
 
 export type WorkflowStep = 0 | 1 | 2 | 3 | 4;
@@ -149,6 +151,14 @@ const WorkflowManager: React.FC = () => {
   // per-path shares once a fresh ECMP result is available to discover paths
   // from — see handleDistributionModeChange.
   const [distributionMode, setDistributionMode] = useState<TrafficDistributionMode>("EQUAL");
+
+  // ── Traffic Engineering policy draft ──────────────────────────────────────
+  // Mutually exclusive with connect mode and waypoint-select mode (each
+  // cancels the others on entry). `teDraft` is the in-progress "Add policy"
+  // form; `teIsSelecting` is whether a graph click is currently expected to
+  // fill its link/node target.
+  const [teDraft, setTeDraft] = useState<TEPolicyDraft | null>(null);
+  const [teIsSelecting, setTeIsSelecting] = useState(false);
 
   // ── Lecture mode ──────────────────────────────────────────────────────────
   const [lectureInsight, setLectureInsight] = useState<string | null>(null);
@@ -353,6 +363,12 @@ const WorkflowManager: React.FC = () => {
       trafficDistributions: prev.trafficDistributions?.some((d) => d.demandId === id)
         ? prev.trafficDistributions.filter((d) => d.demandId !== id)
         : prev.trafficDistributions,
+      // A demand-scoped policy (demandId === id) is pruned; a global one
+      // (demandId === null) is untouched — it still applies to every
+      // remaining demand.
+      tePolicies: prev.tePolicies?.some((p) => p.demandId === id)
+        ? prev.tePolicies.filter((p) => p.demandId !== id)
+        : prev.tePolicies,
     }));
     setSimulationResult(null);
   }, [toast]);
@@ -362,17 +378,21 @@ const WorkflowManager: React.FC = () => {
     setSimulationResult(null);
     setSelectedType(null);
     setSelectedId(null);
-    // A new topology invalidates any node ids / path ids referenced by
-    // per-demand config from the old one — clear rather than risk a stale
-    // waypoint or path-share reference the backend would (correctly) reject.
-    setAlgorithmConfig((prev) => ({ ...prev, segmentRoutingPolicies: [], trafficDistributions: [] }));
+    // A new topology invalidates any node/link ids referenced by per-demand
+    // config from the old one — clear rather than risk a stale waypoint,
+    // path-share, or policy reference the backend would (correctly) reject.
+    setAlgorithmConfig((prev) => ({ ...prev, segmentRoutingPolicies: [], trafficDistributions: [], tePolicies: [] }));
     setDistributionMode("EQUAL");
+    setTeDraft(null);
+    setTeIsSelecting(false);
   }, []);
 
   const handleResetNetwork = useCallback(() => {
     setNetwork(triangleTemplate);
     setAlgorithmConfig(defaultAlgorithmConfig);
     setDistributionMode("EQUAL");
+    setTeDraft(null);
+    setTeIsSelecting(false);
     setSimulationResult(null);
     setSelectedType(null);
     setSelectedId(null);
@@ -490,7 +510,8 @@ const WorkflowManager: React.FC = () => {
   // ── Connect mode ──────────────────────────────────────────────────────────
 
   const handleStartConnect = useCallback((id: string) => {
-    setWaypointSelectDemandId(null); // connect mode and waypoint-select mode are mutually exclusive
+    setWaypointSelectDemandId(null); // connect mode, waypoint-select, and TE-policy-select are mutually exclusive
+    setTeIsSelecting(false);
     setConnectSourceId(id);
     setSelectedType(null);
     setSelectedId(null);
@@ -509,7 +530,8 @@ const WorkflowManager: React.FC = () => {
   // ── Segment Routing waypoint selection ───────────────────────────────────
 
   const handleStartWaypointSelect = useCallback((demandId: string) => {
-    setConnectSourceId(null); // waypoint-select mode and connect mode are mutually exclusive
+    setConnectSourceId(null); // waypoint-select, connect mode, and TE-policy-select are mutually exclusive
+    setTeIsSelecting(false);
     setSelectedType(null);
     setSelectedId(null);
     setWaypointSelectDemandId(demandId);
@@ -625,6 +647,94 @@ const WorkflowManager: React.FC = () => {
       ),
     }));
   }, []);
+
+  // ── Traffic Engineering policies ──────────────────────────────────────────
+  // A policy change can change which paths ECMP discovers for a demand, so
+  // any custom traffic distribution becomes potentially stale the moment a
+  // policy is added or removed — same safety pattern as topology regeneration
+  // in PR 3 (the backend would also correctly reject a genuinely stale
+  // distribution, but clearing it here avoids a confusing error for a change
+  // the student didn't realize was related).
+  const clearStaleDistributions = useCallback(() => {
+    setDistributionMode("EQUAL");
+    setAlgorithmConfig((prev) => (prev.trafficDistributions?.length ? { ...prev, trafficDistributions: [] } : prev));
+  }, []);
+
+  const handleOpenTEDraft = useCallback(() => {
+    setTeDraft({ type: "AVOID_LINK", demandId: null, linkId: null, nodeId: null });
+  }, []);
+
+  const handleCancelTEDraft = useCallback(() => {
+    setTeDraft(null);
+    setTeIsSelecting(false);
+  }, []);
+
+  const handleUpdateTEDraft = useCallback((patch: Partial<TEPolicyDraft>) => {
+    setTeDraft((prev) => (prev ? { ...prev, ...patch } : prev));
+  }, []);
+
+  const handleStartTEGraphSelect = useCallback(() => {
+    setConnectSourceId(null); // TE-policy-select, connect mode, and waypoint-select are mutually exclusive
+    setWaypointSelectDemandId(null);
+    setSelectedType(null);
+    setSelectedId(null);
+    setTeIsSelecting(true);
+  }, []);
+
+  const handleStopTEGraphSelect = useCallback(() => {
+    setTeIsSelecting(false);
+  }, []);
+
+  const handleSelectTEPolicyTargetFromCanvas = useCallback((kind: "node" | "link", id: string) => {
+    if (!teDraft) return;
+    const expectsNode = teDraft.type === "REQUIRE_WAYPOINT";
+    if ((expectsNode && kind !== "node") || (!expectsNode && kind !== "link")) {
+      toast(`Click a ${expectsNode ? "node" : "link"} for this policy type.`, "info");
+      return;
+    }
+    setTeDraft((prev) => (prev ? { ...prev, linkId: expectsNode ? null : id, nodeId: expectsNode ? id : null } : prev));
+    setTeIsSelecting(false);
+  }, [teDraft, toast]);
+
+  const handleCommitTEDraft = useCallback(() => {
+    if (!teDraft) return;
+    const isWaypoint = teDraft.type === "REQUIRE_WAYPOINT";
+    const targetId = isWaypoint ? teDraft.nodeId : teDraft.linkId;
+    if (!targetId) return;
+
+    const duplicate = (algorithmConfig.tePolicies ?? []).some((p) =>
+      p.type === teDraft.type &&
+      (p.demandId ?? null) === teDraft.demandId &&
+      (isWaypoint ? p.nodeId === targetId : p.linkId === targetId)
+    );
+    if (duplicate) {
+      toast("An identical policy already exists.", "info");
+      return;
+    }
+
+    const newPolicy: TrafficEngineeringPolicy = {
+      policyId: makeId("tepolicy"),
+      type: teDraft.type,
+      demandId: teDraft.demandId,
+      linkId: isWaypoint ? null : teDraft.linkId,
+      nodeId: isWaypoint ? teDraft.nodeId : null,
+      priority: 0,
+    };
+    setAlgorithmConfig((prev) => ({ ...prev, tePolicies: [...(prev.tePolicies ?? []), newPolicy] }));
+    clearStaleDistributions();
+    setSimulationResult(null);
+    setTeDraft(null);
+    setTeIsSelecting(false);
+  }, [teDraft, algorithmConfig.tePolicies, clearStaleDistributions, toast]);
+
+  const handleRemoveTEPolicy = useCallback((policyId: string) => {
+    setAlgorithmConfig((prev) => ({
+      ...prev,
+      tePolicies: (prev.tePolicies ?? []).filter((p) => p.policyId !== policyId),
+    }));
+    clearStaleDistributions();
+    setSimulationResult(null);
+  }, [clearStaleDistributions]);
 
   // ── Simulation ────────────────────────────────────────────────────────────
 
@@ -1058,6 +1168,7 @@ const WorkflowManager: React.FC = () => {
           canChooseAlgorithm={effectiveLockedFields.canChooseAlgorithm}
           demands={network.demands}
           nodes={network.nodes}
+          links={network.links}
           waypointSelectDemandId={waypointSelectDemandId}
           onStartWaypointSelect={handleStartWaypointSelect}
           onStopWaypointSelect={handleStopWaypointSelect}
@@ -1068,6 +1179,16 @@ const WorkflowManager: React.FC = () => {
           distributionMode={distributionMode}
           onDistributionModeChange={handleDistributionModeChange}
           onDistributionShareChange={handleDistributionShareChange}
+          tePolicies={algorithmConfig.tePolicies ?? []}
+          teDraft={teDraft}
+          teIsSelecting={teIsSelecting}
+          onOpenTEDraft={handleOpenTEDraft}
+          onCancelTEDraft={handleCancelTEDraft}
+          onUpdateTEDraft={handleUpdateTEDraft}
+          onStartTEGraphSelect={handleStartTEGraphSelect}
+          onStopTEGraphSelect={handleStopTEGraphSelect}
+          onCommitTEDraft={handleCommitTEDraft}
+          onRemoveTEPolicy={handleRemoveTEPolicy}
         />
       );
     return (
@@ -1491,6 +1612,13 @@ const WorkflowManager: React.FC = () => {
             );
           })()}
 
+          {teIsSelecting && teDraft && (
+            <div className="connect-mode-banner connect-mode-banner--te">
+              Select a {teDraft.type === "REQUIRE_WAYPOINT" ? "node" : "link"} for this policy ·{" "}
+              <kbd>Esc</kbd> to stop
+            </div>
+          )}
+
           <ReactFlowCanvas
             network={network}
             currentTraceEvent={currentTraceEvent}
@@ -1508,6 +1636,8 @@ const WorkflowManager: React.FC = () => {
             gradingHighlightNodes={challengeGradingResult?.highlightedNodes}
             waypointSelectDemandId={waypointSelectDemandId}
             srDisplayState={srDisplayState}
+            tePolicySelectMode={teIsSelecting && teDraft ? (teDraft.type === "REQUIRE_WAYPOINT" ? "node" : "link") : null}
+            tePolicies={algorithmConfig.tePolicies ?? []}
             onMoveNode={handleMoveNode}
             onAddLink={handleAddLink}
             onDeleteNode={handleDeleteNode}
@@ -1518,6 +1648,8 @@ const WorkflowManager: React.FC = () => {
             onCancelConnect={handleCancelConnect}
             onSelectWaypointNode={handleSelectWaypointNodeFromCanvas}
             onCancelWaypointSelect={handleStopWaypointSelect}
+            onSelectTEPolicyTarget={handleSelectTEPolicyTargetFromCanvas}
+            onCancelTEPolicySelect={handleStopTEGraphSelect}
             onAddNodeShortcut={currentStep === 1 ? handleAddNode : undefined}
           />
 

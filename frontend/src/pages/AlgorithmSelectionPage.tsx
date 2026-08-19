@@ -3,14 +3,17 @@ import { ChevronDown, ChevronUp, Zap, GitBranch } from "lucide-react";
 import {
   AlgorithmConfig,
   AlgorithmName,
+  LinkInput,
   NodeInput,
   SimulationResult,
   TrafficDemandInput,
   TrafficDistributionMode,
+  TrafficEngineeringPolicy,
 } from "../types/network";
 import TermHint from "../components/TermHint";
 import SegmentRoutingEditor from "../components/SegmentRoutingEditor";
 import TrafficDistributionEditor from "../components/TrafficDistributionEditor";
+import TEPolicyEditor, { TEPolicyDraft } from "../components/TEPolicyEditor";
 import { isDistributionValid } from "../utils/trafficDistribution";
 
 interface AlgorithmSelectionPageProps {
@@ -25,6 +28,7 @@ interface AlgorithmSelectionPageProps {
   // selectedAlgorithm === "SEGMENT_ROUTING".
   demands: TrafficDemandInput[];
   nodes: NodeInput[];
+  links: LinkInput[];
   waypointSelectDemandId: string | null;
   onStartWaypointSelect: (demandId: string) => void;
   onStopWaypointSelect: () => void;
@@ -37,6 +41,18 @@ interface AlgorithmSelectionPageProps {
   distributionMode: TrafficDistributionMode;
   onDistributionModeChange: (mode: TrafficDistributionMode) => void;
   onDistributionShareChange: (demandId: string, pathId: string, sharePercent: number) => void;
+  // Traffic Engineering policies — rendered for ECMP and Segment Routing
+  // (Distance Vector does not support them; see distance_vector.py).
+  tePolicies: TrafficEngineeringPolicy[];
+  teDraft: TEPolicyDraft | null;
+  teIsSelecting: boolean;
+  onOpenTEDraft: () => void;
+  onCancelTEDraft: () => void;
+  onUpdateTEDraft: (patch: Partial<TEPolicyDraft>) => void;
+  onStartTEGraphSelect: () => void;
+  onStopTEGraphSelect: () => void;
+  onCommitTEDraft: () => void;
+  onRemoveTEPolicy: (policyId: string) => void;
 }
 
 const algorithms = [
@@ -79,6 +95,7 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
   canChooseAlgorithm = true,
   demands,
   nodes,
+  links,
   waypointSelectDemandId,
   onStartWaypointSelect,
   onStopWaypointSelect,
@@ -89,11 +106,22 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
   distributionMode,
   onDistributionModeChange,
   onDistributionShareChange,
+  tePolicies,
+  teDraft,
+  teIsSelecting,
+  onOpenTEDraft,
+  onCancelTEDraft,
+  onUpdateTEDraft,
+  onStartTEGraphSelect,
+  onStopTEGraphSelect,
+  onCommitTEDraft,
+  onRemoveTEPolicy,
 }) => {
   const [showTheory, setShowTheory] = useState(false);
   const selected = algorithms.find((a) => a.id === algorithmConfig.selectedAlgorithm) ?? algorithms[0];
   const isSegmentRouting = selected.id === "SEGMENT_ROUTING";
   const isEcmp = selected.id === "ECMP";
+  const supportsTEPolicies = isEcmp || isSegmentRouting;
   const distributionsInvalid = isEcmp && !isDistributionValid(algorithmConfig.trafficDistributions ?? []);
 
   return (
@@ -182,6 +210,25 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
           simulationResult={simulationResult}
           onModeChange={onDistributionModeChange}
           onShareChange={onDistributionShareChange}
+        />
+      )}
+
+      {/* Traffic Engineering policies — advanced, collapsed by default */}
+      {supportsTEPolicies && (
+        <TEPolicyEditor
+          policies={tePolicies}
+          demands={demands}
+          links={links}
+          nodes={nodes}
+          draft={teDraft}
+          isSelecting={teIsSelecting}
+          onOpenDraft={onOpenTEDraft}
+          onCancelDraft={onCancelTEDraft}
+          onUpdateDraft={onUpdateTEDraft}
+          onStartGraphSelect={onStartTEGraphSelect}
+          onStopGraphSelect={onStopTEGraphSelect}
+          onCommitDraft={onCommitTEDraft}
+          onRemovePolicy={onRemoveTEPolicy}
         />
       )}
 

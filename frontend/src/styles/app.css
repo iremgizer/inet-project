@@ -11183,3 +11183,287 @@ html, body, #root {
   color:var(--accent);
   font-variant-numeric:tabular-nums
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Traffic Engineering policies — PR 4
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Policy editor (AlgorithmSelectionPage, collapsed by default) ── */
+
+.te-editor {
+  margin:1rem 0
+}
+
+.te-editor-toggle {
+  display:flex;
+  align-items:center;
+  gap:6px
+}
+
+.te-editor-count {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:16px;
+  height:16px;
+  padding:0 4px;
+  border-radius:999px;
+  background:var(--warning);
+  color:#fff;
+  font-size:.66rem;
+  font-weight:700
+}
+
+.te-editor-body {
+  display:flex;
+  flex-direction:column;
+  gap:.6rem;
+  margin-top:.6rem
+}
+
+.te-empty-hint {
+  font-size:.82rem;
+  color:var(--text-2);
+  background:var(--surface-2);
+  border:1px dashed var(--border-strong);
+  border-radius:var(--radius);
+  padding:.7rem .8rem;
+  margin:0
+}
+
+.te-policy-list {
+  list-style:none;
+  display:flex;
+  flex-direction:column;
+  gap:.3rem;
+  margin:0;
+  padding:0
+}
+
+.te-policy-item {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:.4rem .6rem;
+  background:var(--surface-2);
+  border:1px solid var(--border);
+  border-radius:var(--radius-sm);
+  font-size:.82rem
+}
+
+.te-policy-kind-dot {
+  flex-shrink:0;
+  width:7px;
+  height:7px;
+  border-radius:50%
+}
+
+.te-policy-kind-dot--hard { background:var(--danger) }
+.te-policy-kind-dot--soft { background:var(--warning) }
+
+.te-policy-text {
+  flex:1;
+  color:var(--text);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+
+.te-policy-scope {
+  flex-shrink:0;
+  font-size:.72rem;
+  color:var(--text-3)
+}
+
+.te-policy-remove {
+  flex-shrink:0
+}
+
+.te-add-btn {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  align-self:flex-start;
+  font-size:.82rem;
+  font-weight:600;
+  padding:6px 12px;
+  border-radius:var(--radius-sm);
+  border:1px solid var(--warning);
+  background:var(--surface);
+  color:var(--warning);
+  cursor:pointer
+}
+
+.te-add-btn:hover {
+  background:var(--warning-light)
+}
+
+.te-draft-form {
+  display:flex;
+  flex-direction:column;
+  gap:.6rem;
+  background:var(--surface-2);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:.7rem .8rem
+}
+
+.te-draft-row {
+  display:flex;
+  gap:.5rem;
+  align-items:flex-end;
+  flex-wrap:wrap
+}
+
+.te-draft-field {
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+  font-size:.76rem;
+  font-weight:600;
+  color:var(--text-2);
+  flex:1;
+  min-width:120px
+}
+
+.te-draft-field--wide {
+  flex:2
+}
+
+.te-graph-select-btn {
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  font-size:.78rem;
+  font-weight:600;
+  padding:6px 10px;
+  border-radius:var(--radius-sm);
+  border:1px solid var(--warning);
+  background:var(--surface);
+  color:var(--warning);
+  cursor:pointer;
+  white-space:nowrap
+}
+
+.te-graph-select-btn--active {
+  background:var(--warning);
+  color:#fff
+}
+
+.te-selecting-hint {
+  font-size:.76rem;
+  color:var(--warning);
+  margin:0
+}
+
+.te-selected-hint {
+  font-size:.78rem;
+  color:var(--text-2);
+  margin:0
+}
+
+.te-draft-actions {
+  display:flex;
+  justify-content:flex-end;
+  gap:.5rem
+}
+
+/* ── Graph banner (TE policy graph-select mode) ── */
+
+.connect-mode-banner--te {
+  background:var(--warning)
+}
+
+/* ── Canvas markers ── */
+
+.rf-edge-policy-badge {
+  display:grid;
+  place-items:center;
+  width:18px;
+  height:18px;
+  border-radius:50%;
+  background:var(--surface);
+  box-shadow:0 1px 4px rgba(0,0,0,.18)
+}
+
+.rf-edge-policy-badge--forbid { color:var(--danger) }
+.rf-edge-policy-badge--avoid  { color:var(--warning) }
+.rf-edge-policy-badge--prefer { color:var(--success) }
+
+.rf-node--te-required {
+  box-shadow:0 0 0 2px var(--warning), 0 0 0 4px var(--warning-light)
+}
+
+.rf-node-te-badge {
+  position:absolute;
+  top:-5px;
+  right:-5px;
+  display:grid;
+  place-items:center;
+  width:15px;
+  height:15px;
+  border-radius:50%;
+  background:var(--warning);
+  color:#fff;
+  box-shadow:0 0 0 2px var(--surface)
+}
+
+/* ── Trace step panel — policy rows ── */
+
+.tsp-te-row {
+  font-size:.85rem;
+  padding:4px 8px;
+  border-radius:6px;
+  margin-bottom:3px
+}
+
+.tsp-te-row--forbid {
+  background:var(--danger-light);
+  color:var(--danger)
+}
+
+.tsp-te-row--avoid {
+  background:var(--warning-light);
+  color:var(--warning)
+}
+
+.tsp-te-row--prefer {
+  background:var(--success-light);
+  color:var(--success)
+}
+
+.tsp-te-arrow {
+  color:var(--text-3);
+  margin:0 2px
+}
+
+/* ── Result summary — applied policies section ── */
+
+.result-te-section {
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  background:var(--warning-light);
+  border:1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+  border-radius:var(--radius);
+  padding:.7rem .85rem
+}
+
+.result-te-title {
+  font-size:.78rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--warning);
+  margin-bottom:2px
+}
+
+.result-te-line {
+  font-size:.84rem;
+  color:var(--text)
+}
+
+.result-te-line--forbid  { color:var(--danger) }
+.result-te-line--avoid   { color:var(--warning) }
+.result-te-line--prefer  { color:var(--success) }
+.result-te-line--waypoint{ color:var(--text-2) }

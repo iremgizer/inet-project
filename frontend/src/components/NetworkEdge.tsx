@@ -5,6 +5,7 @@ import {
   EdgeLabelRenderer,
   BaseEdge,
 } from "@xyflow/react";
+import { Ban, ShieldAlert, Star } from "lucide-react";
 import { SimulationOverlayContext } from "./ReactFlowCanvas";
 import { LinkResult } from "../types/network";
 import {
@@ -46,6 +47,7 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
     hoveredNodeId,
     gradingLinkStatus,
     network,
+    tePolicies,
   } = useContext(SimulationOverlayContext);
 
   const d = data as NetworkEdgeData;
@@ -54,6 +56,14 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
   const gradingStatus = gradingLinkStatus.get(id);
   const nodeCount = network.nodes.length;
   const isLargeTopology = nodeCount > LABEL_SUPPRESS_THRESHOLD;
+
+  // ── Traffic Engineering policy markers — a visual channel of their own,
+  //    kept separate from path identity (stroke color) and congestion
+  //    severity (stroke width/glow) per the app's established hierarchy. ────
+  const linkPolicies = tePolicies.filter((p) => p.linkId === id);
+  const isForbidden = linkPolicies.some((p) => p.type === "FORBID_LINK");
+  const isAvoided = linkPolicies.some((p) => p.type === "AVOID_LINK");
+  const isPreferred = linkPolicies.some((p) => p.type === "PREFER_LINK");
 
   const isConnectedToHovered =
     hoveredNodeId !== null && (source === hoveredNodeId || target === hoveredNodeId);
@@ -190,6 +200,7 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
           stroke,
           strokeWidth,
           opacity: baseOpacity,
+          strokeDasharray: isForbidden ? "6 4" : undefined,
           transition: "stroke 0.18s, stroke-width 0.18s, opacity 0.18s",
         }}
       />
@@ -203,6 +214,23 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
             }}
           >
             {labelContent}
+          </div>
+        </EdgeLabelRenderer>
+      )}
+      {(isForbidden || isAvoided || isPreferred) && (
+        <EdgeLabelRenderer>
+          <div
+            className={`rf-edge-policy-badge ${
+              isForbidden ? "rf-edge-policy-badge--forbid" : isAvoided ? "rf-edge-policy-badge--avoid" : "rf-edge-policy-badge--prefer"
+            }`}
+            style={{
+              position: "absolute",
+              transform: `translate(-50%,-50%) translate(${labelX - perpX}px,${labelY - perpY}px)`,
+              pointerEvents: "none",
+            }}
+            title={isForbidden ? "Forbidden link" : isAvoided ? "Avoided link" : "Preferred link"}
+          >
+            {isForbidden ? <Ban size={11} /> : isAvoided ? <ShieldAlert size={11} /> : <Star size={11} />}
           </div>
         </EdgeLabelRenderer>
       )}
