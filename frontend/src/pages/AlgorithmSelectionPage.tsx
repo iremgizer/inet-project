@@ -53,6 +53,8 @@ interface AlgorithmSelectionPageProps {
   onStopTEGraphSelect: () => void;
   onCommitTEDraft: () => void;
   onRemoveTEPolicy: (policyId: string) => void;
+  teQuickSelectActive: boolean;
+  onStartTEQuickLinkSelect: () => void;
 }
 
 const algorithms = [
@@ -116,6 +118,8 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
   onStopTEGraphSelect,
   onCommitTEDraft,
   onRemoveTEPolicy,
+  teQuickSelectActive,
+  onStartTEQuickLinkSelect,
 }) => {
   const [showTheory, setShowTheory] = useState(false);
   const selected = algorithms.find((a) => a.id === algorithmConfig.selectedAlgorithm) ?? algorithms[0];
@@ -229,6 +233,8 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
           onStopGraphSelect={onStopTEGraphSelect}
           onCommitDraft={onCommitTEDraft}
           onRemovePolicy={onRemoveTEPolicy}
+          teQuickSelectActive={teQuickSelectActive}
+          onStartTEQuickLinkSelect={onStartTEQuickLinkSelect}
         />
       )}
 

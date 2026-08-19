@@ -30,6 +30,11 @@ interface TEPolicyEditorProps {
   onStopGraphSelect: () => void;
   onCommitDraft: () => void;
   onRemovePolicy: (policyId: string) => void;
+  // Additional, more direct graph-first flow for link policies (Prefer/Avoid/
+  // Forbid): click a link first, then pick the type from a popup on the
+  // canvas. The dropdown-based draft flow above remains fully available.
+  teQuickSelectActive: boolean;
+  onStartTEQuickLinkSelect: () => void;
 }
 
 const POLICY_LABELS: Record<TEPolicyType, string> = {
@@ -60,6 +65,8 @@ const TEPolicyEditor: React.FC<TEPolicyEditorProps> = ({
   onStopGraphSelect,
   onCommitDraft,
   onRemovePolicy,
+  teQuickSelectActive,
+  onStartTEQuickLinkSelect,
 }) => {
   const [open, setOpen] = useState(false);
 
@@ -121,9 +128,18 @@ const TEPolicyEditor: React.FC<TEPolicyEditorProps> = ({
           )}
 
           {!draft ? (
-            <button className="te-add-btn" onClick={onOpenDraft}>
-              <Plus size={13} /> Add policy
-            </button>
+            <div className="te-add-row">
+              <button className="te-add-btn" onClick={onOpenDraft}>
+                <Plus size={13} /> Add policy
+              </button>
+              <button
+                className={`te-quick-btn${teQuickSelectActive ? " te-quick-btn--active" : ""}`}
+                onClick={onStartTEQuickLinkSelect}
+                disabled={teQuickSelectActive}
+              >
+                <MousePointerClick size={13} /> {teQuickSelectActive ? "Selecting…" : "Select on Graph"}
+              </button>
+            </div>
           ) : (
             <div className="te-draft-form">
               <div className="te-draft-row">

@@ -5,6 +5,7 @@ import MetricsPanel from "./MetricsPanel";
 import RoutingTablePanel from "./RoutingTablePanel";
 import SegmentListPanel from "./SegmentListPanel";
 import { TEPolicyDraft } from "./TEPolicyEditor";
+import { TEQuickLinkPolicyType } from "./TEQuickPolicyPopup";
 import TraceTimeline from "./TraceTimeline";
 import InspectorDrawer from "./InspectorDrawer";
 import SavedRunsDrawer from "./SavedRunsDrawer";
@@ -159,6 +160,16 @@ const WorkflowManager: React.FC = () => {
   // fill its link/node target.
   const [teDraft, setTeDraft] = useState<TEPolicyDraft | null>(null);
   const [teIsSelecting, setTeIsSelecting] = useState(false);
+
+  // ── Traffic Engineering quick-add flow (graph-first) ──────────────────────
+  // An additional, more direct way to create a link policy: "Select on
+  // Graph" enters link-selection mode with no type chosen yet
+  // (`teQuickSelectActive`); once a link is clicked, `teQuickPopupLinkId`
+  // holds its id and a floating popup on the canvas offers Prefer/Avoid/
+  // Forbid. Mutually exclusive with everything else, including the dropdown
+  // draft flow above.
+  const [teQuickSelectActive, setTeQuickSelectActive] = useState(false);
+  const [teQuickPopupLinkId, setTeQuickPopupLinkId] = useState<string | null>(null);
 
   // ── Lecture mode ──────────────────────────────────────────────────────────
   const [lectureInsight, setLectureInsight] = useState<string | null>(null);
@@ -385,6 +396,8 @@ const WorkflowManager: React.FC = () => {
     setDistributionMode("EQUAL");
     setTeDraft(null);
     setTeIsSelecting(false);
+    setTeQuickSelectActive(false);
+    setTeQuickPopupLinkId(null);
   }, []);
 
   const handleResetNetwork = useCallback(() => {
@@ -393,6 +406,8 @@ const WorkflowManager: React.FC = () => {
     setDistributionMode("EQUAL");
     setTeDraft(null);
     setTeIsSelecting(false);
+    setTeQuickSelectActive(false);
+    setTeQuickPopupLinkId(null);
     setSimulationResult(null);
     setSelectedType(null);
     setSelectedId(null);
@@ -512,6 +527,8 @@ const WorkflowManager: React.FC = () => {
   const handleStartConnect = useCallback((id: string) => {
     setWaypointSelectDemandId(null); // connect mode, waypoint-select, and TE-policy-select are mutually exclusive
     setTeIsSelecting(false);
+    setTeQuickSelectActive(false);
+    setTeQuickPopupLinkId(null);
     setConnectSourceId(id);
     setSelectedType(null);
     setSelectedId(null);
@@ -532,6 +549,8 @@ const WorkflowManager: React.FC = () => {
   const handleStartWaypointSelect = useCallback((demandId: string) => {
     setConnectSourceId(null); // waypoint-select, connect mode, and TE-policy-select are mutually exclusive
     setTeIsSelecting(false);
+    setTeQuickSelectActive(false);
+    setTeQuickPopupLinkId(null);
     setSelectedType(null);
     setSelectedId(null);
     setWaypointSelectDemandId(demandId);
@@ -660,7 +679,30 @@ const WorkflowManager: React.FC = () => {
     setAlgorithmConfig((prev) => (prev.trafficDistributions?.length ? { ...prev, trafficDistributions: [] } : prev));
   }, []);
 
+  // Shared by both the dropdown draft flow and the graph-first quick-add
+  // flow below — one place that checks for a pointless duplicate, appends
+  // the policy, and invalidates any now-possibly-stale custom distribution.
+  const addTEPolicy = useCallback((policy: Omit<TrafficEngineeringPolicy, "policyId">): boolean => {
+    const duplicate = (algorithmConfig.tePolicies ?? []).some((p) =>
+      p.type === policy.type &&
+      (p.demandId ?? null) === (policy.demandId ?? null) &&
+      (p.linkId ?? null) === (policy.linkId ?? null) &&
+      (p.nodeId ?? null) === (policy.nodeId ?? null)
+    );
+    if (duplicate) {
+      toast("An identical policy already exists.", "info");
+      return false;
+    }
+    const newPolicy: TrafficEngineeringPolicy = { policyId: makeId("tepolicy"), ...policy };
+    setAlgorithmConfig((prev) => ({ ...prev, tePolicies: [...(prev.tePolicies ?? []), newPolicy] }));
+    clearStaleDistributions();
+    setSimulationResult(null);
+    return true;
+  }, [algorithmConfig.tePolicies, clearStaleDistributions, toast]);
+
   const handleOpenTEDraft = useCallback(() => {
+    setTeQuickSelectActive(false); // dropdown draft and quick-add are mutually exclusive
+    setTeQuickPopupLinkId(null);
     setTeDraft({ type: "AVOID_LINK", demandId: null, linkId: null, nodeId: null });
   }, []);
 
@@ -674,8 +716,12 @@ const WorkflowManager: React.FC = () => {
   }, []);
 
   const handleStartTEGraphSelect = useCallback(() => {
-    setConnectSourceId(null); // TE-policy-select, connect mode, and waypoint-select are mutually exclusive
+    // Dropdown-flow "Pick on graph" — mutually exclusive with connect mode,
+    // waypoint-select, and the quick-add flow below.
+    setConnectSourceId(null);
     setWaypointSelectDemandId(null);
+    setTeQuickSelectActive(false);
+    setTeQuickPopupLinkId(null);
     setSelectedType(null);
     setSelectedId(null);
     setTeIsSelecting(true);
@@ -686,6 +732,15 @@ const WorkflowManager: React.FC = () => {
   }, []);
 
   const handleSelectTEPolicyTargetFromCanvas = useCallback((kind: "node" | "link", id: string) => {
+    if (teQuickSelectActive) {
+      // Quick-add flow: a link click hands off to the floating popup instead
+      // of a form field — REQUIRE_WAYPOINT (node-based) isn't part of this
+      // flow, so `kind` is always "link" here by construction.
+      if (kind !== "link") return;
+      setTeQuickSelectActive(false);
+      setTeQuickPopupLinkId(id);
+      return;
+    }
     if (!teDraft) return;
     const expectsNode = teDraft.type === "REQUIRE_WAYPOINT";
     if ((expectsNode && kind !== "node") || (!expectsNode && kind !== "link")) {
@@ -694,38 +749,25 @@ const WorkflowManager: React.FC = () => {
     }
     setTeDraft((prev) => (prev ? { ...prev, linkId: expectsNode ? null : id, nodeId: expectsNode ? id : null } : prev));
     setTeIsSelecting(false);
-  }, [teDraft, toast]);
+  }, [teQuickSelectActive, teDraft, toast]);
 
   const handleCommitTEDraft = useCallback(() => {
     if (!teDraft) return;
     const isWaypoint = teDraft.type === "REQUIRE_WAYPOINT";
     const targetId = isWaypoint ? teDraft.nodeId : teDraft.linkId;
     if (!targetId) return;
-
-    const duplicate = (algorithmConfig.tePolicies ?? []).some((p) =>
-      p.type === teDraft.type &&
-      (p.demandId ?? null) === teDraft.demandId &&
-      (isWaypoint ? p.nodeId === targetId : p.linkId === targetId)
-    );
-    if (duplicate) {
-      toast("An identical policy already exists.", "info");
-      return;
-    }
-
-    const newPolicy: TrafficEngineeringPolicy = {
-      policyId: makeId("tepolicy"),
+    const added = addTEPolicy({
       type: teDraft.type,
       demandId: teDraft.demandId,
       linkId: isWaypoint ? null : teDraft.linkId,
       nodeId: isWaypoint ? teDraft.nodeId : null,
       priority: 0,
-    };
-    setAlgorithmConfig((prev) => ({ ...prev, tePolicies: [...(prev.tePolicies ?? []), newPolicy] }));
-    clearStaleDistributions();
-    setSimulationResult(null);
-    setTeDraft(null);
-    setTeIsSelecting(false);
-  }, [teDraft, algorithmConfig.tePolicies, clearStaleDistributions, toast]);
+    });
+    if (added) {
+      setTeDraft(null);
+      setTeIsSelecting(false);
+    }
+  }, [teDraft, addTEPolicy]);
 
   const handleRemoveTEPolicy = useCallback((policyId: string) => {
     setAlgorithmConfig((prev) => ({
@@ -735,6 +777,34 @@ const WorkflowManager: React.FC = () => {
     clearStaleDistributions();
     setSimulationResult(null);
   }, [clearStaleDistributions]);
+
+  // ── TE policy — graph-first quick-add flow ────────────────────────────────
+  // "Select on Graph" from the editor enters link-selection mode immediately
+  // (no policy type chosen yet); once a link is clicked, a floating popup
+  // anchored to it lets the student pick Prefer/Avoid/Forbid in one more
+  // click. Additional to, not a replacement for, the dropdown draft above.
+
+  const handleStartTEQuickLinkSelect = useCallback(() => {
+    setConnectSourceId(null);
+    setWaypointSelectDemandId(null);
+    setTeDraft(null);
+    setTeIsSelecting(false);
+    setSelectedType(null);
+    setSelectedId(null);
+    setTeQuickPopupLinkId(null);
+    setTeQuickSelectActive(true);
+  }, []);
+
+  const handleCancelTEQuickFlow = useCallback(() => {
+    setTeQuickSelectActive(false);
+    setTeQuickPopupLinkId(null);
+  }, []);
+
+  const handleChooseTEQuickPolicy = useCallback((type: TEQuickLinkPolicyType) => {
+    if (!teQuickPopupLinkId) return;
+    addTEPolicy({ type, demandId: null, linkId: teQuickPopupLinkId, nodeId: null, priority: 0 });
+    setTeQuickPopupLinkId(null);
+  }, [teQuickPopupLinkId, addTEPolicy]);
 
   // ── Simulation ────────────────────────────────────────────────────────────
 
@@ -1189,6 +1259,8 @@ const WorkflowManager: React.FC = () => {
           onStopTEGraphSelect={handleStopTEGraphSelect}
           onCommitTEDraft={handleCommitTEDraft}
           onRemoveTEPolicy={handleRemoveTEPolicy}
+          teQuickSelectActive={teQuickSelectActive}
+          onStartTEQuickLinkSelect={handleStartTEQuickLinkSelect}
         />
       );
     return (
@@ -1619,6 +1691,12 @@ const WorkflowManager: React.FC = () => {
             </div>
           )}
 
+          {teQuickSelectActive && (
+            <div className="connect-mode-banner connect-mode-banner--te">
+              Select a link on the graph · <kbd>Esc</kbd> to stop
+            </div>
+          )}
+
           <ReactFlowCanvas
             network={network}
             currentTraceEvent={currentTraceEvent}
@@ -1636,8 +1714,12 @@ const WorkflowManager: React.FC = () => {
             gradingHighlightNodes={challengeGradingResult?.highlightedNodes}
             waypointSelectDemandId={waypointSelectDemandId}
             srDisplayState={srDisplayState}
-            tePolicySelectMode={teIsSelecting && teDraft ? (teDraft.type === "REQUIRE_WAYPOINT" ? "node" : "link") : null}
+            tePolicySelectMode={
+              teQuickSelectActive ? "link" :
+              teIsSelecting && teDraft ? (teDraft.type === "REQUIRE_WAYPOINT" ? "node" : "link") : null
+            }
             tePolicies={algorithmConfig.tePolicies ?? []}
+            teQuickPopupLinkId={teQuickPopupLinkId}
             onMoveNode={handleMoveNode}
             onAddLink={handleAddLink}
             onDeleteNode={handleDeleteNode}
@@ -1649,7 +1731,9 @@ const WorkflowManager: React.FC = () => {
             onSelectWaypointNode={handleSelectWaypointNodeFromCanvas}
             onCancelWaypointSelect={handleStopWaypointSelect}
             onSelectTEPolicyTarget={handleSelectTEPolicyTargetFromCanvas}
-            onCancelTEPolicySelect={handleStopTEGraphSelect}
+            onCancelTEPolicySelect={teQuickSelectActive ? handleCancelTEQuickFlow : handleStopTEGraphSelect}
+            onChooseTEQuickPolicy={handleChooseTEQuickPolicy}
+            onCancelTEQuickPopup={handleCancelTEQuickFlow}
             onAddNodeShortcut={currentStep === 1 ? handleAddNode : undefined}
           />
 

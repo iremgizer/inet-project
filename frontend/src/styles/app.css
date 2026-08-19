@@ -11467,3 +11467,135 @@ html, body, #root {
 .result-te-line--avoid   { color:var(--warning) }
 .result-te-line--prefer  { color:var(--success) }
 .result-te-line--waypoint{ color:var(--text-2) }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   TE policy quick-add (graph-first flow) — additional to the dropdown editor
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.te-add-row {
+  display:flex;
+  gap:.5rem;
+  flex-wrap:wrap
+}
+
+.te-quick-btn {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:.82rem;
+  font-weight:600;
+  padding:6px 12px;
+  border-radius:var(--radius-sm);
+  border:1px dashed var(--warning);
+  background:var(--surface);
+  color:var(--warning);
+  cursor:pointer
+}
+
+.te-quick-btn:hover:not(:disabled) {
+  background:var(--warning-light)
+}
+
+.te-quick-btn--active {
+  border-style:solid;
+  background:var(--warning);
+  color:#fff;
+  cursor:default
+}
+
+.te-quick-btn:disabled {
+  opacity:.85
+}
+
+/* ── Floating popup on the canvas (React Flow ViewportPortal) ── */
+
+.te-quick-popup {
+  position:absolute;
+  top:0;
+  left:0;
+  z-index:20;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  min-width:190px;
+  background:var(--surface);
+  border:1px solid var(--warning);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow-lg);
+  padding:.5rem;
+  pointer-events:auto
+}
+
+.te-quick-popup-header {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:8px;
+  margin-bottom:4px;
+  padding-bottom:6px;
+  border-bottom:1px solid var(--border)
+}
+
+.te-quick-popup-title {
+  font-size:.72rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+  color:var(--warning)
+}
+
+.te-quick-popup-subtitle {
+  font-size:.78rem;
+  font-weight:600;
+  color:var(--text);
+  margin-top:2px
+}
+
+.te-quick-popup-close {
+  flex-shrink:0;
+  display:grid;
+  place-items:center;
+  width:18px;
+  height:18px;
+  border:none;
+  background:transparent;
+  color:var(--text-3);
+  border-radius:4px;
+  cursor:pointer
+}
+
+.te-quick-popup-close:hover {
+  background:var(--surface-2);
+  color:var(--text)
+}
+
+.te-quick-popup-option {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  width:100%;
+  text-align:left;
+  font-size:.84rem;
+  color:var(--text);
+  background:none;
+  border:none;
+  border-radius:var(--radius-sm);
+  padding:6px 8px;
+  cursor:pointer
+}
+
+.te-quick-popup-option:hover {
+  background:var(--warning-light)
+}
+
+.te-quick-popup-radio {
+  flex-shrink:0;
+  width:11px;
+  height:11px;
+  border-radius:50%;
+  border:2px solid var(--border-strong)
+}
+
+.te-quick-popup-option:hover .te-quick-popup-radio {
+  border-color:var(--warning)
+}

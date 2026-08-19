@@ -32,6 +32,7 @@ import NetworkNode from "./NetworkNode";
 import NetworkEdge, { NetworkEdgeData } from "./NetworkEdge";
 import GraphLegend from "./GraphLegend";
 import PacketToken from "./PacketToken";
+import TEQuickPolicyPopup, { TEQuickLinkPolicyType } from "./TEQuickPolicyPopup";
 import {
   LinkInput,
   LinkResult,
@@ -158,6 +159,12 @@ interface ReactFlowCanvasProps {
   srDisplayState?: SRDisplayState | null;
   tePolicySelectMode?: "node" | "link" | null;
   tePolicies?: TrafficEngineeringPolicy[];
+  // Quick graph-first policy popup — opens once a link is clicked during the
+  // "Select on Graph" quick-add flow (see TEPolicyEditor / WorkflowManager).
+  // Additional to, not a replacement for, the dropdown-based draft flow above.
+  teQuickPopupLinkId?: string | null;
+  onChooseTEQuickPolicy?: (type: TEQuickLinkPolicyType) => void;
+  onCancelTEQuickPopup?: () => void;
   onMoveNode: (id: string, x: number, y: number) => void;
   onAddLink: (source: string, target: string) => void;
   onDeleteNode: (id: string) => void;
@@ -194,6 +201,9 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
   srDisplayState = null,
   tePolicySelectMode = null,
   tePolicies = [],
+  teQuickPopupLinkId = null,
+  onChooseTEQuickPolicy,
+  onCancelTEQuickPopup,
   onMoveNode,
   onAddLink,
   onDeleteNode,
@@ -259,7 +269,9 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
         fitView({ padding: 0.15, duration: 300 });
       }
       if (e.key === "Escape") {
-        if (tePolicySelectMode) {
+        if (teQuickPopupLinkId) {
+          onCancelTEQuickPopup?.();
+        } else if (tePolicySelectMode) {
           onCancelTEPolicySelect?.();
         } else if (waypointSelectDemandId) {
           onCancelWaypointSelect?.();
@@ -277,7 +289,7 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [fitView, onSelectNode, onSelectLink, onAddNodeShortcut, connectSourceId, onCancelConnect, waypointSelectDemandId, onCancelWaypointSelect, tePolicySelectMode, onCancelTEPolicySelect]);
+  }, [fitView, onSelectNode, onSelectLink, onAddNodeShortcut, connectSourceId, onCancelConnect, waypointSelectDemandId, onCancelWaypointSelect, tePolicySelectMode, onCancelTEPolicySelect, teQuickPopupLinkId, onCancelTEQuickPopup]);
 
   // ── Simulation overlay context value ─────────────────────────────────────
 
@@ -397,6 +409,10 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
 
   const handleNodeClick = useCallback(
     (_event: unknown, node: Node) => {
+      if (teQuickPopupLinkId) {
+        onCancelTEQuickPopup?.(); // first click just dismisses the popup, like a context menu
+        return;
+      }
       if (tePolicySelectMode) {
         if (tePolicySelectMode === "node") onSelectTEPolicyTarget?.("node", node.id);
         else onCancelTEPolicySelect?.(); // wrong element type for this policy — cancel rather than guess
@@ -414,11 +430,15 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
       }
       onSelectNode(node.id);
     },
-    [tePolicySelectMode, onSelectTEPolicyTarget, onCancelTEPolicySelect, waypointSelectDemandId, onSelectWaypointNode, connectSourceId, onCompleteConnect, onSelectNode]
+    [teQuickPopupLinkId, onCancelTEQuickPopup, tePolicySelectMode, onSelectTEPolicyTarget, onCancelTEPolicySelect, waypointSelectDemandId, onSelectWaypointNode, connectSourceId, onCompleteConnect, onSelectNode]
   );
 
   const handleEdgeClick = useCallback(
     (_event: unknown, edge: Edge) => {
+      if (teQuickPopupLinkId) {
+        onCancelTEQuickPopup?.();
+        return;
+      }
       if (tePolicySelectMode) {
         if (tePolicySelectMode === "link") onSelectTEPolicyTarget?.("link", edge.id);
         else onCancelTEPolicySelect?.();
@@ -434,10 +454,14 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
       }
       onSelectLink(edge.id);
     },
-    [tePolicySelectMode, onSelectTEPolicyTarget, onCancelTEPolicySelect, waypointSelectDemandId, onCancelWaypointSelect, connectSourceId, onCancelConnect, onSelectLink]
+    [teQuickPopupLinkId, onCancelTEQuickPopup, tePolicySelectMode, onSelectTEPolicyTarget, onCancelTEPolicySelect, waypointSelectDemandId, onCancelWaypointSelect, connectSourceId, onCancelConnect, onSelectLink]
   );
 
   const handlePaneClick = useCallback(() => {
+    if (teQuickPopupLinkId) {
+      onCancelTEQuickPopup?.();
+      return;
+    }
     if (tePolicySelectMode) {
       onCancelTEPolicySelect?.();
       return;
@@ -452,10 +476,14 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
     }
     onSelectNode(null);
     onSelectLink(null);
-  }, [tePolicySelectMode, onCancelTEPolicySelect, waypointSelectDemandId, onCancelWaypointSelect, connectSourceId, onCancelConnect, onSelectNode, onSelectLink]);
+  }, [teQuickPopupLinkId, onCancelTEQuickPopup, tePolicySelectMode, onCancelTEPolicySelect, waypointSelectDemandId, onCancelWaypointSelect, connectSourceId, onCancelConnect, onSelectNode, onSelectLink]);
 
   const tokenNode = srDisplayState?.tokenNodeId
     ? network.nodes.find((n) => n.id === srDisplayState.tokenNodeId)
+    : undefined;
+
+  const teQuickPopupLink = teQuickPopupLinkId
+    ? network.links.find((l) => l.id === teQuickPopupLinkId)
     : undefined;
 
   return (
@@ -503,6 +531,14 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
           <GraphLegend />
         </Panel>
         {tokenNode && <PacketToken node={tokenNode} label={srDisplayState?.demandId ?? ""} />}
+        {teQuickPopupLink && onChooseTEQuickPolicy && onCancelTEQuickPopup && (
+          <TEQuickPolicyPopup
+            link={teQuickPopupLink}
+            nodes={network.nodes}
+            onChoose={onChooseTEQuickPolicy}
+            onCancel={onCancelTEQuickPopup}
+          />
+        )}
       </ReactFlow>
     </SimulationOverlayContext.Provider>
   );
