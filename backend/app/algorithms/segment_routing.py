@@ -1,23 +1,62 @@
-"""Segment Routing V1 — waypoint-based routing.
+"""Segment Routing V1 — waypoint-based routing, ECMP-within-segments (PR0).
 
 Educational abstraction, deliberately NOT modeling SR-MPLS control-plane
 mechanics (no label stacks, no push/swap/pop, no LDP/RSVP-TE signaling).
 
 Semantics: a demand may carry an ordered list of waypoint node ids
-(`SegmentRoutingPolicy.segments`). The resolved route is the concatenation of
-the shortest path from the demand's source to the first waypoint, from each
-waypoint to the next, and from the last waypoint to the destination — under
-the network's current link weights. A waypoint only constrains *which* nodes
-are visited; the path *between* waypoints is still ordinary shortest-path
-routing. An empty (or missing) segment list means plain shortest-path
-routing, identical to Distance Vector's single-path behavior.
+(`SegmentRoutingPolicy.segments`). The resolved route concatenates the legs
+source → first waypoint, waypoint → next waypoint, ..., last waypoint →
+destination — under the network's current link weights. A waypoint only
+constrains *which* nodes are visited; the path *between* waypoints is still
+ordinary shortest-path routing. An empty (or missing) segment list means
+plain shortest-path routing between source and destination directly (one leg).
 
-Traffic placement, utilization, and congestion reuse the exact same
-load-accumulation / utilization / congestion-threshold semantics as ECMP and
-Distance Vector (see `app/utils/routing_helpers.py` and `app/utils/metrics.py`)
-— V1 places each demand's full traffic on its one resolved route, with no
-multi-path splitting (that is ECMP's job, and weighted splitting is PR 3).
+PR0 change (was: single arbitrary shortest path per leg): for every leg, ALL
+equal-cost shortest paths are found and the traffic arriving at that leg's
+source is split evenly across them (`app.utils.routing_helpers.
+compute_ecmp_leg_distribution`) — the same equal-cost-path-discovery and
+equal-split primitives ECMP itself uses. A leg with only one shortest path
+behaves exactly as before (no observable change). This makes Segment
+Routing's routing model "waypoint constraints + ECMP between consecutive
+segment endpoints" — matching the routing model used by Parham, Fenz, Süss,
+Foerster, Schmid, "Traffic Engineering with Joint Link Weight and Segment
+Optimization" (ACM CoNEXT '21), see
+`docs/research/sprint2-mip-architecture-analysis.md`.
+
+Flow semantics (important, see the module's tests for worked examples): the
+full demand amount is present at *every* waypoint — an earlier leg's ECMP
+split among several paths does not reduce the total; those paths converge
+back at the waypoint, and the *next* leg's ECMP split starts fresh from that
+same full amount. This is NOT "split the original demand independently and
+identically at every leg" — it is "the aggregate traffic re-mixes fully at
+each waypoint" (the standard ECMP assumption: a split decision depends only
+on the outgoing links available at that hop, never on which upstream path a
+unit of flow arrived by). Concretely, for a demand of 10 units through one
+waypoint C, with 2 equal-cost paths on each side: A-B and A-E each carry 5
+(the A→C leg's split), and independently C-F and C-G each carry 5 (the C→D
+leg's split) — never 2.5 unless you are looking at one specific *end-to-end*
+path combination (see below).
+
+`PathResult` representation: Sprint 1's existing `PathShare` model already
+supports multiple entries per demand (ECMP has always used exactly this for
+its own equal-cost splits), so this file materializes the full end-to-end
+Cartesian product of leg paths as one `PathShare` per combination, each
+carrying `nodes` as a complete source-to-destination sequence — this is what
+lets every piece of *existing*, algorithm-agnostic code that walks
+`pathResults[].paths[].nodes` (node-role bookkeeping, the link usage
+inspector, Before/After route-change comparison, `path_uses_link` for
+mid-simulation failure recompute) keep working unmodified. A combination's
+`trafficShare` is the product of its constituent legs' fractional shares
+times the demand amount — see `_materialize_path_shares` for the exact
+computation and why it is conservative (sums to the demand amount) by
+construction.
+
+Custom/weighted splitting is deliberately NOT supported here yet (PR0 is
+equal-split only, matching ECMP's own pre-PR3 baseline) — see
+`app.models.TrafficDistribution` for that concept, not extended to Segment
+Routing in this PR.
 """
+import itertools
 import time
 from typing import Dict, List, Tuple
 
@@ -38,13 +77,14 @@ from app.utils.failure_schedule import FailureScheduler
 from app.utils.graph_builder import GraphBuilder
 from app.utils.metrics import Metrics
 from app.utils.routing_helpers import (
+    EcmpLegDistribution,
     build_node_roles,
     cap_trace,
+    compute_ecmp_leg_distribution,
     path_cost_calculation,
     path_link_ids,
     path_total_weight,
     path_uses_link,
-    resolve_segment_route,
     sanitize_segments,
 )
 from app.utils.te_policy import build_demand_policy_graph, combined_waypoints_for_demand
@@ -102,12 +142,12 @@ class SegmentRoutingAlgorithm:
                 path_results.append(PathResult(demandId=demand.id, source=demand.source, target=demand.target, paths=[]))
                 continue
 
-            step, path_share, reachable = SegmentRoutingAlgorithm._route_demand(
+            step, path_shares, reachable = SegmentRoutingAlgorithm._route_demand(
                 demand, graph, link_map, node_ids, policy_by_demand, config, link_loads, step, trace_events, debug,
             )
             path_results.append(PathResult(
                 demandId=demand.id, source=demand.source, target=demand.target,
-                paths=[path_share] if reachable else [],
+                paths=path_shares if reachable else [],
             ))
             if reachable:
                 trace_events.append(SimulationTraceEvent(
@@ -228,21 +268,24 @@ class SegmentRoutingAlgorithm:
         step: int,
         trace_events: List[SimulationTraceEvent],
         debug: List[str],
-    ) -> Tuple[int, "PathShare | None", bool]:
+    ) -> Tuple[int, List[PathShare], bool]:
         """Resolves and places traffic for one demand's Segment Routing
-        route — waypoint list, TE-policy application, per-leg shortest-path
-        resolution, and traffic placement — mutating `link_loads` in place
-        exactly as the original inline loop body always did.
+        route — waypoint list, TE-policy application, per-leg ECMP-aware
+        path resolution, and traffic placement — mutating `link_loads` in
+        place exactly as the original inline loop body always did.
 
         Factored out of `run()` so the exact same logic can run twice for
         the same demand: once for its original route, and again (PR 6, see
         `_apply_due_failures` below) to recompute it after a scheduled
         mid-simulation failure, against the same `graph` object with the
         failed link's edge already removed. The waypoint list itself is
-        never touched by a failure — only the shortest path *between*
-        waypoints is recomputed, so a reroute still visits the same stops
-        and only fails if a waypoint or the destination becomes genuinely
-        unreachable. Returns `(next_step, path_share, reachable)`.
+        never touched by a failure — only the ECMP path set *between*
+        waypoints is recomputed (fewer/different equal-cost paths, or none —
+        see PR0's ECMP-within-segments semantics in the module docstring),
+        so a reroute still visits the same stops and only fails if a
+        waypoint or the destination becomes genuinely unreachable. Returns
+        `(next_step, path_shares, reachable)` — `path_shares` may contain
+        more than one entry (see `_materialize_path_shares`).
         """
         policy = policy_by_demand.get(demand.id)
         raw_segments = policy.segments if policy else []
@@ -267,7 +310,7 @@ class SegmentRoutingAlgorithm:
             debug.append(
                 f"Demand {demand.id}: unknown waypoint node id(s) {unknown} — skipping demand"
             )
-            return step, None, False
+            return step, [], False
 
         trace_events.append(SimulationTraceEvent(
             stepId=str(step),
@@ -275,7 +318,7 @@ class SegmentRoutingAlgorithm:
             stepType="START_DEMAND",
             title="Start demand",
             description=f"Demand {demand.id}: {demand.source} to {demand.target}, amount {demand.amount}.",
-            explanationText="Segment Routing steers traffic through an ordered list of waypoints. Between waypoints, traffic follows the normal shortest path under the current link weights.",
+            explanationText="Segment Routing steers traffic through an ordered list of waypoints. Between waypoints, traffic follows ECMP — all equal-cost shortest paths, split evenly — under the current link weights.",
             highlightedNodes=[demand.source, demand.target],
             activeDemandId=demand.id,
         ))
@@ -309,7 +352,7 @@ class SegmentRoutingAlgorithm:
             description=(
                 f"Segment list for {demand.id}: {' -> '.join(stops)}."
                 if segments else
-                f"Segment list for {demand.id}: (none) — direct shortest path to {demand.target}."
+                f"Segment list for {demand.id}: (none) — direct ECMP routing to {demand.target}."
             ),
             explanationText="Each stop is a waypoint the route must pass through, in order, before reaching the final destination.",
             highlightedNodes=stops,
@@ -318,21 +361,34 @@ class SegmentRoutingAlgorithm:
         ))
         step += 1
 
-        # ── Resolve the route — unreachable segment/destination is a clear,
-        #    non-crashing per-demand failure, not a 500. ──────────────────
-        try:
-            full_path, leg_paths = resolve_segment_route(demand_graph, demand.source, demand.target, segments)
-        except nx.NetworkXNoPath:
-            debug.append(
-                f"Demand {demand.id}: no path found between waypoints in the segment list"
-            )
-            return step, None, False
-        except nx.NodeNotFound as exc:
-            debug.append(f"Demand {demand.id}: {exc}")
-            return step, None, False
+        # ── Resolve every leg's ECMP distribution BEFORE narrating or
+        #    accounting for any of them: if any leg is unreachable, the whole
+        #    demand is unreachable, and nothing partial (from legs that
+        #    happened to resolve before the failing one) should be added to
+        #    link_loads or shown in the trace — conservation requires a
+        #    failed demand to deliver (and therefore add) exactly zero
+        #    traffic, never a leftover partial amount. ────────────────────
+        waypoints = [demand.source] + segments + [demand.target]
+        leg_distributions: List[EcmpLegDistribution] = []
+        for i in range(len(waypoints) - 1):
+            try:
+                leg_distributions.append(
+                    compute_ecmp_leg_distribution(
+                        demand_graph, link_map, waypoints[i], waypoints[i + 1], demand.amount,
+                    )
+                )
+            except nx.NetworkXNoPath:
+                debug.append(
+                    f"Demand {demand.id}: no path found between waypoints in the segment list"
+                )
+                return step, [], False
+            except nx.NodeNotFound as exc:
+                debug.append(f"Demand {demand.id}: {exc}")
+                return step, [], False
 
-        for i, leg in enumerate(leg_paths):
-            leg_source, leg_target = leg[0], leg[-1]
+        # ── All legs resolved — narrate and account for them in order. ────
+        for i, dist in enumerate(leg_distributions):
+            leg_source, leg_target = waypoints[i], waypoints[i + 1]
 
             trace_events.append(SimulationTraceEvent(
                 stepId=str(step),
@@ -340,7 +396,7 @@ class SegmentRoutingAlgorithm:
                 stepType="SELECT_ACTIVE_SEGMENT",
                 title=f"Select active segment: {leg_target}",
                 description=f"Routing from {leg_source} toward waypoint {leg_target}.",
-                explanationText="Each segment routes toward its waypoint using the shortest path under current link weights.",
+                explanationText="Each segment routes toward its waypoint using ECMP under current link weights.",
                 highlightedNodes=[leg_source, leg_target],
                 activeDemandId=demand.id,
                 activeNodeId=leg_source,
@@ -350,32 +406,97 @@ class SegmentRoutingAlgorithm:
             ))
             step += 1
 
+            path_count_text = (
+                "1 shortest path" if len(dist.paths) == 1 else f"{len(dist.paths)} equal-cost shortest paths"
+            )
             trace_events.append(SimulationTraceEvent(
                 stepId=str(step),
                 algorithm="SEGMENT_ROUTING",
                 stepType="COMPUTE_SEGMENT_PATH",
                 title=f"Compute path to {leg_target}",
-                description=f"Shortest path {leg_source} -> {leg_target}: {' -> '.join(leg)}.",
-                explanationText="Path cost is the sum of link weights along this segment.",
-                highlightedNodes=leg,
-                highlightedLinks=path_link_ids(leg, link_map),
+                description=f"Found {path_count_text} from {leg_source} to {leg_target}.",
+                explanationText="Path cost is the sum of link weights along a segment. When several paths tie for the minimum cost, Segment Routing now treats them exactly like ECMP: all of them carry traffic.",
+                highlightedNodes=list({node for path in dist.paths for node in path}),
+                highlightedLinks=list({lid for path in dist.paths for lid in path_link_ids(path, link_map)}),
                 activeDemandId=demand.id,
+                activeDestinationId=leg_target,
                 activeSegmentIndex=i,
                 segmentList=stops,
-                costCalculation=path_cost_calculation(leg, link_map),
-                pathGroupId=f"sr-{demand.id}",
+                costCalculation="\n".join(path_cost_calculation(path, link_map) for path in dist.paths),
+                pathGroupId=f"sr-{demand.id}-leg{i}",
                 pathColor=SR_PATH_COLOR,
+                metadata={"pathCount": len(dist.paths)},
             ))
             step += 1
 
-            if i < len(leg_paths) - 1:
+            if len(dist.paths) > 1:
+                pct = f"{100.0 / len(dist.paths):g}%"
+                breakdown = "\n".join(
+                    f"Path {j + 1} ({pct}): {demand.amount:g} / {len(dist.paths)} = {round(share, 6):g}"
+                    for j, share in enumerate(dist.shares)
+                )
+                trace_events.append(SimulationTraceEvent(
+                    stepId=str(step),
+                    algorithm="SEGMENT_ROUTING",
+                    stepType="SEGMENT_ECMP_SPLIT",
+                    title="Split traffic across equal-cost paths",
+                    description=(
+                        f"{demand.amount:g} units split equally across {len(dist.paths)} paths: "
+                        + " / ".join(f"{round(share, 6):g}" for share in dist.shares) + "."
+                    ),
+                    explanationText="Just like plain ECMP, the traffic arriving at this segment's source splits evenly across every equal-cost path toward the segment's target.",
+                    highlightedNodes=[leg_source, leg_target],
+                    activeDemandId=demand.id,
+                    activeDestinationId=leg_target,
+                    activeSegmentIndex=i,
+                    segmentList=stops,
+                    formulaText=breakdown,
+                    pathGroupId=f"sr-{demand.id}-leg{i}",
+                    pathColor=SR_PATH_COLOR,
+                ))
+                step += 1
+
+            # This leg's contribution to the running totals — computed once
+            # by `compute_ecmp_leg_distribution` above; the per-path events
+            # below are purely descriptive of work already accounted for
+            # here, never a second source of truth for the load numbers.
+            for link_id, leg_amount in dist.link_loads.items():
+                link_loads[link_id] += leg_amount
+
+            for path_index, (path, share) in enumerate(zip(dist.paths, dist.shares)):
+                delta: Dict[str, float] = {}
+                for u, v in zip(path, path[1:]):
+                    edge_link = link_map.get((u, v))
+                    if edge_link:
+                        delta[edge_link.id] = round(delta.get(edge_link.id, 0.0) + share, 6)
+                path_label = f" (Path {path_index + 1})" if len(dist.paths) > 1 else ""
+                trace_events.append(SimulationTraceEvent(
+                    stepId=str(step),
+                    algorithm="SEGMENT_ROUTING",
+                    stepType="ADD_TRAFFIC_TO_LINK",
+                    title="Add traffic to segment path",
+                    description=f"Added {round(share, 6):g} units on {' -> '.join(path)}{path_label}.",
+                    explanationText="Each equal-cost path in this segment contributes its share to every link along it.",
+                    highlightedNodes=path,
+                    highlightedLinks=path_link_ids(path, link_map),
+                    activeDemandId=demand.id,
+                    activeSegmentIndex=i,
+                    segmentList=stops,
+                    pathGroupId=f"sr-{demand.id}-leg{i}",
+                    pathColor=SR_PATH_COLOR,
+                    linkLoadDelta=delta,
+                    currentLinkLoads={key: round(value, 6) for key, value in link_loads.items()},
+                ))
+                step += 1
+
+            if i < len(leg_distributions) - 1:
                 trace_events.append(SimulationTraceEvent(
                     stepId=str(step),
                     algorithm="SEGMENT_ROUTING",
                     stepType="ADVANCE_TO_NEXT_SEGMENT",
                     title=f"Reach segment: {leg_target}",
                     description=f"Waypoint {leg_target} reached — advancing to the next segment.",
-                    explanationText="The waypoint is marked complete and the next segment becomes active.",
+                    explanationText="The waypoint is marked complete and the next segment becomes active. All ECMP branches from the previous segment converge here before the next segment's split (if any) begins.",
                     highlightedNodes=[leg_target],
                     activeDemandId=demand.id,
                     activeSegmentIndex=i,
@@ -383,49 +504,95 @@ class SegmentRoutingAlgorithm:
                 ))
                 step += 1
 
+        path_shares = SegmentRoutingAlgorithm._materialize_path_shares(leg_distributions, demand.amount, link_map)
+
+        # Same "route: cost = ..." shape `path_cost_calculation` already uses
+        # elsewhere (ECMP's candidate-paths step, this file's own
+        # COMPUTE_SEGMENT_PATH above) — the frontend's `parseCostCalcLines`
+        # splits on ": cost =", so keeping the same convention here lets it
+        # render this multi-route summary with the same list styling with no
+        # bespoke parsing.
+        combo_lines = "\n".join(
+            f"{' -> '.join(ps.nodes)}: cost = {ps.cost:g}, share = {round(ps.trafficShare, 6):g} units"
+            for ps in path_shares
+        )
         trace_events.append(SimulationTraceEvent(
             stepId=str(step),
             algorithm="SEGMENT_ROUTING",
             stepType="FINAL_ROUTE_RESOLVED",
             title="Final route resolved",
-            description=f"Demand {demand.id} resolved route: {' -> '.join(full_path)}.",
-            explanationText="The final route concatenates each segment's shortest path, sharing waypoint nodes rather than repeating them.",
-            highlightedNodes=full_path,
-            highlightedLinks=path_link_ids(full_path, link_map),
+            description=(
+                f"Demand {demand.id} resolved into {len(path_shares)} end-to-end route(s)."
+                if len(path_shares) > 1 else
+                f"Demand {demand.id} resolved route: {' -> '.join(path_shares[0].nodes)}."
+            ),
+            explanationText="Each end-to-end route concatenates one path per segment, sharing waypoint nodes rather than repeating them. Its traffic share is the product of each segment's own ECMP share.",
+            highlightedNodes=list({node for ps in path_shares for node in ps.nodes}),
+            highlightedLinks=list({lid for ps in path_shares for lid in path_link_ids(ps.nodes, link_map)}),
             activeDemandId=demand.id,
-            costCalculation=path_cost_calculation(full_path, link_map),
+            costCalculation=combo_lines,
             segmentList=stops,
             pathGroupId=f"sr-{demand.id}",
             pathColor=SR_PATH_COLOR,
         ))
         step += 1
 
-        cost = path_total_weight(full_path, link_map)
-        path_share = PathShare(nodes=full_path, cost=cost, trafficShare=demand.amount)
+        return step, path_shares, True
 
-        delta: Dict[str, float] = {}
-        for u, v in zip(full_path, full_path[1:]):
-            edge_link = link_map.get((u, v))
-            if edge_link:
-                link_loads[edge_link.id] += demand.amount
-                delta[edge_link.id] = round(delta.get(edge_link.id, 0.0) + demand.amount, 6)
+    @staticmethod
+    def _materialize_path_shares(
+        leg_distributions: List[EcmpLegDistribution],
+        amount: float,
+        link_map: Dict[tuple, object],
+    ) -> List[PathShare]:
+        """Expands the leg-by-leg ECMP distributions into full end-to-end
+        `PathShare` routes — the Cartesian product of each leg's equal-cost
+        path set, weighted by the product of each leg's fractional share.
 
-        trace_events.append(SimulationTraceEvent(
-            stepId=str(step),
-            algorithm="SEGMENT_ROUTING",
-            stepType="ADD_TRAFFIC_TO_LINK",
-            title="Add traffic to route",
-            description=f"Added {demand.amount} units to {' -> '.join(full_path)}.",
-            explanationText="Segment Routing V1 places each demand's full traffic on its single resolved route — no multi-path splitting.",
-            highlightedNodes=full_path,
-            highlightedLinks=path_link_ids(full_path, link_map),
-            activeDemandId=demand.id,
-            linkLoadDelta=delta,
-            currentLinkLoads={key: round(value, 6) for key, value in link_loads.items()},
-        ))
-        step += 1
+        This assumes traffic re-mixes fully at each waypoint (the standard
+        ECMP "memoryless" assumption: a split decision depends only on the
+        outgoing links available at that hop, never on which upstream path a
+        unit of flow arrived by) — so a combination's absolute share is
+        `amount * Π(leg_share / amount)` over its legs. With `amount == 0`
+        every combination trivially carries zero traffic (no division).
 
-        return step, path_share, True
+        Deterministically sorted by full node sequence (matching every other
+        stable-path-id convention in this codebase — see
+        `resolve_equal_cost_paths`) before `pathId`s are assigned, so the
+        same topology/weights/demand always produces the same ordered
+        combination list.
+
+        A demand with several waypoints, each with several equal-cost
+        alternatives, produces a combination count that multiplies across
+        legs (2 legs x 3 paths each = 9) — exact, not an approximation, but
+        worth knowing: this can grow quickly for a topology with many
+        simultaneous ties across many segments. Fine for the small teaching
+        topologies this project targets; a known limitation for pathological
+        cases (see the PR0 final report).
+        """
+        if not leg_distributions:
+            return []
+
+        combo_lists = [list(zip(dist.paths, dist.shares)) for dist in leg_distributions]
+        raw_combos: List[Tuple[List[str], float]] = []
+        for combo in itertools.product(*combo_lists):
+            full_path: List[str] = [combo[0][0][0]]
+            for leg_path, _ in combo:
+                full_path.extend(leg_path[1:])
+            if amount == 0:
+                share = 0.0
+            else:
+                fraction = 1.0
+                for _, leg_share in combo:
+                    fraction *= leg_share / amount
+                share = fraction * amount
+            raw_combos.append((full_path, share))
+
+        raw_combos.sort(key=lambda item: item[0])
+        return [
+            PathShare(nodes=nodes, cost=path_total_weight(nodes, link_map), trafficShare=share, pathId=f"path-{i + 1}")
+            for i, (nodes, share) in enumerate(raw_combos)
+        ]
 
     @staticmethod
     def _apply_due_failures(
@@ -518,7 +685,7 @@ class SegmentRoutingAlgorithm:
                 ))
                 step += 1
 
-                step, new_path_share, reachable = SegmentRoutingAlgorithm._route_demand(
+                step, new_path_shares, reachable = SegmentRoutingAlgorithm._route_demand(
                     demand, graph, link_map, node_ids, policy_by_demand, config, link_loads, step, trace_events, debug,
                 )
 
@@ -537,16 +704,19 @@ class SegmentRoutingAlgorithm:
                     step += 1
                     continue
 
-                path_results[i] = PathResult(demandId=demand.id, source=demand.source, target=demand.target, paths=[new_path_share])
+                path_results[i] = PathResult(demandId=demand.id, source=demand.source, target=demand.target, paths=new_path_shares)
                 trace_events.append(SimulationTraceEvent(
                     stepId=str(step),
                     algorithm="SEGMENT_ROUTING",
                     stepType="NEW_ROUTE_SELECTED",
                     title="New route selected",
-                    description=f"Demand {demand.id} now routes via: {' -> '.join(new_path_share.nodes)}.",
-                    explanationText="The recomputed route becomes the demand's active path for the rest of the simulation. Its waypoints are unchanged — only the path between them was recomputed.",
-                    highlightedNodes=new_path_share.nodes,
-                    highlightedLinks=path_link_ids(new_path_share.nodes, link_map),
+                    description=(
+                        f"Demand {demand.id} now routes via: "
+                        + "; ".join(" -> ".join(ps.nodes) for ps in new_path_shares) + "."
+                    ),
+                    explanationText="The recomputed route(s) become the demand's active route for the rest of the simulation. Its waypoints are unchanged — only the ECMP path set between them was recomputed.",
+                    highlightedNodes=list({n for ps in new_path_shares for n in ps.nodes}),
+                    highlightedLinks=list({lid for ps in new_path_shares for lid in path_link_ids(ps.nodes, link_map)}),
                     activeDemandId=demand.id,
                 ))
                 step += 1

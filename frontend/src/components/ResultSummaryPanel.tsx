@@ -50,12 +50,21 @@ function buildNarrative(result: SimulationResult): string {
 
 // ── Segment Routing compact section ───────────────────────────────────────────
 
+interface SRResolvedRoute {
+  nodes: string[];
+  percent: number;
+}
+
 interface SRDemandSummary {
   demandId: string;
   sourceLabel: string;
   targetLabel: string;
   waypointLabels: string[];
-  resolvedPathLabels: string[];
+  /** One entry per resolved end-to-end route (PR0: more than one when any
+   * segment leg had an equal-cost tie — see `segment_routing.py`'s module
+   * docstring). Always at least one entry when `pathResults` has any paths
+   * at all. */
+  resolvedRoutes: SRResolvedRoute[];
 }
 
 // ResultSummaryPanel only receives `result` (no `network`), consistent with
@@ -69,12 +78,16 @@ function buildSRDemandSummaries(result: SimulationResult): SRDemandSummary[] {
       const loadEvent = loadEvents.find((e) => e.activeDemandId === pr.demandId);
       const stops = loadEvent?.segmentList ?? [];
       const waypoints = stops.slice(0, -1); // last stop is always the destination
+      const demandTotal = pr.paths.reduce((sum, p) => sum + p.trafficShare, 0);
       return {
         demandId: pr.demandId,
         sourceLabel: pr.source,
         targetLabel: pr.target,
         waypointLabels: waypoints,
-        resolvedPathLabels: pr.paths[0].nodes,
+        resolvedRoutes: pr.paths.map((p) => ({
+          nodes: p.nodes,
+          percent: demandTotal > 0 ? (p.trafficShare / demandTotal) * 100 : 0,
+        })),
       };
     });
 }
@@ -311,9 +324,18 @@ const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowT
                 {s.waypointLabels.length > 0 ? s.waypointLabels.join(" → ") : "(none — shortest path)"}
               </div>
               <div className="result-sr-demand-line">
-                <span className="result-sr-demand-label">Resolved path:</span>{" "}
-                {s.resolvedPathLabels.join(" → ")}
+                <span className="result-sr-demand-label">
+                  {s.resolvedRoutes.length > 1 ? "Resolved routes:" : "Resolved path:"}
+                </span>
               </div>
+              {s.resolvedRoutes.map((route, i) => (
+                <div key={i} className="result-sr-route-row">
+                  <span className="result-sr-route-path">{route.nodes.join(" → ")}</span>
+                  {s.resolvedRoutes.length > 1 && (
+                    <span className="result-sr-route-pct">{route.percent.toFixed(0)}%</span>
+                  )}
+                </div>
+              ))}
             </div>
           ))}
         </div>

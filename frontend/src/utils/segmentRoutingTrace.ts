@@ -28,6 +28,15 @@ export interface SRDisplayState {
 
 const RESOLVED_STEP_TYPES = new Set(["FINAL_ROUTE_RESOLVED", "ADD_TRAFFIC_TO_LINK", "COMPLETE_DEMAND"]);
 
+// PR0 (ECMP-within-segments): a segment leg can now resolve to more than one
+// equal-cost path, so `highlightedNodes` on a COMPUTE_SEGMENT_PATH /
+// SEGMENT_ECMP_SPLIT event is the *union* of every branch's nodes, not one
+// ordered path ending at the leg's target — `legPath[legPath.length - 1]`
+// (the old way of finding "where the leg ends") is no longer reliable. Every
+// leg-scoped event now also carries `activeDestinationId` (the leg's
+// target), which is reliable regardless of how many branches it has.
+const LEG_SCOPED_STEP_TYPES = new Set(["COMPUTE_SEGMENT_PATH", "SEGMENT_ECMP_SPLIT", "ADVANCE_TO_NEXT_SEGMENT"]);
+
 export function deriveSegmentRoutingDisplayState(
   events: SimulationTraceEvent[],
   activeIndex: number,
@@ -51,11 +60,12 @@ export function deriveSegmentRoutingDisplayState(
       tokenNodeId = demand.target;
     } else if (stepType === "SELECT_ACTIVE_SEGMENT") {
       tokenNodeId = event.activeNodeId ?? demand.source;
-    } else if (
-      (stepType === "COMPUTE_SEGMENT_PATH" || stepType === "ADVANCE_TO_NEXT_SEGMENT") &&
-      legPath.length > 0
-    ) {
-      tokenNodeId = legPath[legPath.length - 1];
+    } else if (stepType !== null && LEG_SCOPED_STEP_TYPES.has(stepType)) {
+      // Prefer the explicit leg-target field (reliable with any number of
+      // ECMP branches) over the old "last node of legPath" heuristic, which
+      // assumed a single ordered path and breaks once `highlightedNodes` is
+      // a union across several equal-cost branches.
+      tokenNodeId = event.activeDestinationId ?? (legPath.length > 0 ? legPath[legPath.length - 1] : demand.source);
     } else {
       tokenNodeId = demand.source; // START_DEMAND / LOAD_SEGMENT_LIST — not moving yet
     }

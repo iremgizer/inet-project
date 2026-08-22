@@ -23,7 +23,7 @@ type StepType =
   | "dv_init" | "dv_table" | "dv_route" | "dv_traffic"
   | "dv_util" | "dv_congestion" | "dv_final"
   | "sr_start_demand" | "sr_load_segment_list" | "sr_select_active_segment"
-  | "sr_compute_segment_path" | "sr_advance_to_next_segment"
+  | "sr_compute_segment_path" | "sr_segment_ecmp_split" | "sr_advance_to_next_segment"
   | "sr_final_route_resolved" | "sr_add_traffic_to_link" | "sr_complete_demand"
   | "te_apply_policy" | "te_waypoint_required"
   | "link_failure"
@@ -54,6 +54,7 @@ function classifyStep(event: SimulationTraceEvent): StepType {
       case "LOAD_SEGMENT_LIST": return "sr_load_segment_list";
       case "SELECT_ACTIVE_SEGMENT": return "sr_select_active_segment";
       case "COMPUTE_SEGMENT_PATH": return "sr_compute_segment_path";
+      case "SEGMENT_ECMP_SPLIT": return "sr_segment_ecmp_split";
       case "ADVANCE_TO_NEXT_SEGMENT": return "sr_advance_to_next_segment";
       case "FINAL_ROUTE_RESOLVED": return "sr_final_route_resolved";
       case "ADD_TRAFFIC_TO_LINK": return "sr_add_traffic_to_link";
@@ -532,23 +533,46 @@ const TraceStepPanel: React.FC<TraceStepPanelProps> = ({
   }
 
   // ── sr_compute_segment_path ────────────────────────────────────────────────
+  // PR0 (ECMP-within-segments): a segment can now resolve to more than one
+  // equal-cost path, so `costCalculation` is one "route: cost = ..." line
+  // per path (same format ECMP's own candidate-paths step already uses) —
+  // parsed and listed exactly like `ecmp_paths` below, instead of the old
+  // single-path `PathNodes` rendering (which assumed exactly one ordered
+  // route and would garble a union of several branches' nodes).
   if (stepType === "sr_compute_segment_path") {
+    const lines = event.costCalculation ? parseCostCalcLines(event.costCalculation) : [];
     return (
       <div className="trace-step-panel">
         {renderHeader()}
         <p className="tsp-desc">{event.description}</p>
-        {event.highlightedNodes.length > 0 && (
+        {lines.length > 0 && (
           <div className="tsp-section">
-            <div className="tsp-section-title">Segment path</div>
-            <PathNodes nodeIds={event.highlightedNodes} network={network} />
+            <div className="tsp-section-title">{lines.length > 1 ? "Equal-cost paths" : "Segment path"}</div>
+            {lines.map((l, i) => (
+              <div key={i} className="tsp-path-line">
+                <div className="tsp-path-route">{l.route}</div>
+                {l.detail && <div className="tsp-path-detail">{l.detail}</div>}
+              </div>
+            ))}
           </div>
         )}
-        {event.costCalculation && (
+      </div>
+    );
+  }
+
+  // ── sr_segment_ecmp_split ──────────────────────────────────────────────────
+  if (stepType === "sr_segment_ecmp_split") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.formulaText && (
           <div className="tsp-section">
-            <div className="tsp-section-title">Segment cost</div>
-            <FormulaCard text={event.costCalculation} />
+            <div className="tsp-section-title">Split calculation</div>
+            <FormulaCard text={event.formulaText} />
           </div>
         )}
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
       </div>
     );
   }
@@ -565,21 +589,25 @@ const TraceStepPanel: React.FC<TraceStepPanelProps> = ({
   }
 
   // ── sr_final_route_resolved ────────────────────────────────────────────────
+  // PR0: a demand can now resolve into several end-to-end routes (one per
+  // combination of each segment's equal-cost paths), so this lists each one
+  // — same "Candidate paths" list styling as `ecmp_paths`/
+  // `sr_compute_segment_path` above — instead of a single `PathNodes` route.
   if (stepType === "sr_final_route_resolved") {
+    const lines = event.costCalculation ? parseCostCalcLines(event.costCalculation) : [];
     return (
       <div className="trace-step-panel">
         {renderHeader()}
         <p className="tsp-desc">{event.description}</p>
-        {event.highlightedNodes.length > 0 && (
+        {lines.length > 0 && (
           <div className="tsp-section">
-            <div className="tsp-section-title">Final route</div>
-            <PathNodes nodeIds={event.highlightedNodes} network={network} />
-          </div>
-        )}
-        {event.costCalculation && (
-          <div className="tsp-section">
-            <div className="tsp-section-title">Route cost</div>
-            <FormulaCard text={event.costCalculation} />
+            <div className="tsp-section-title">{lines.length > 1 ? "Resolved routes" : "Final route"}</div>
+            {lines.map((l, i) => (
+              <div key={i} className="tsp-path-line">
+                <div className="tsp-path-route">{l.route}</div>
+                {l.detail && <div className="tsp-path-detail">{l.detail}</div>}
+              </div>
+            ))}
           </div>
         )}
         {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}

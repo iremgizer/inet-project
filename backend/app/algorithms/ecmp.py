@@ -16,7 +16,13 @@ from app.models import (
 from app.utils.failure_schedule import FailureScheduler
 from app.utils.graph_builder import GraphBuilder
 from app.utils.metrics import Metrics
-from app.utils.routing_helpers import path_total_weight, path_uses_link, resolve_segment_route, sanitize_segments
+from app.utils.routing_helpers import (
+    path_total_weight,
+    path_uses_link,
+    resolve_equal_cost_paths,
+    resolve_segment_route,
+    sanitize_segments,
+)
 from app.utils.te_policy import build_demand_policy_graph, combined_waypoints_for_demand
 
 # Tolerance for "do custom shares sum to 1.0 (100%)". Slightly looser than a
@@ -281,11 +287,16 @@ class ECMPAlgorithm:
         else:
             try:
                 shortest_length = nx.shortest_path_length(demand_graph, demand.source, demand.target, weight="weight")
-                # Sorted lexicographically by node sequence so the same path
-                # always lands at the same position — path-1/path-2/... must
-                # be stable across runs/edits, not dependent on NetworkX's
-                # internal (edge-insertion-order-dependent) enumeration order.
-                all_paths = sorted(nx.all_shortest_paths(demand_graph, demand.source, demand.target, weight="weight"))
+                # `resolve_equal_cost_paths` already sorts lexicographically by
+                # node sequence so the same path always lands at the same
+                # position — path-1/path-2/... must be stable across
+                # runs/edits, not dependent on NetworkX's internal
+                # (edge-insertion-order-dependent) enumeration order. (PR0:
+                # extracted to routing_helpers so Segment Routing's own
+                # equal-cost discovery doesn't duplicate this — byte-identical
+                # to the inline `sorted(nx.all_shortest_paths(...))` this
+                # replaces.)
+                all_paths = resolve_equal_cost_paths(demand_graph, demand.source, demand.target)
             except (nx.NetworkXNoPath, nx.NodeNotFound):
                 debug.append(f"No path found for demand {demand.id}")
                 return step, [], False

@@ -219,13 +219,19 @@ def test_trace_events_present_and_ordered():
     assert result.traceEvents
     step_types = [e.stepType for e in result.traceEvents]
 
+    # PR0 (ECMP-within-segments): traffic is now added to links leg-by-leg,
+    # as each segment resolves — not only after the whole route is known —
+    # so ADD_TRAFFIC_TO_LINK now precedes FINAL_ROUTE_RESOLVED (which
+    # summarizes the fully-resolved end-to-end route(s) once every leg's
+    # traffic has already been placed). Deliberate, see segment_routing.py's
+    # module docstring and the PR0 final report.
     expected_order = [
         "START_DEMAND",
         "LOAD_SEGMENT_LIST",
         "SELECT_ACTIVE_SEGMENT",
         "COMPUTE_SEGMENT_PATH",
-        "FINAL_ROUTE_RESOLVED",
         "ADD_TRAFFIC_TO_LINK",
+        "FINAL_ROUTE_RESOLVED",
         "COMPLETE_DEMAND",
         "COMPUTE_LINK_UTILIZATION",
         "DETECT_CONGESTION",
@@ -317,15 +323,15 @@ def test_smoke_via_simulate_endpoint():
     assert loads["AB"] == 0.0
     assert loads["BD"] == 0.0
 
-    # Now the same endpoint with segments=[] — plain shortest-path fallback.
+    # Now the same endpoint with segments=[] — direct ECMP routing (PR0: no
+    # longer an arbitrary single-path pick; both equal-cost paths carry an
+    # equal share, exactly like plain ECMP would).
     request_body["algorithmConfig"]["segmentRoutingPolicies"] = []
     response2 = client.post("/simulate", json=request_body)
     assert response2.status_code == 200
     body2 = response2.json()
     loads2 = {lr["linkId"]: lr["load"] for lr in body2["linkResults"]}
-    # One of the two equal-cost paths was taken; exactly one pair carries the load.
-    assert (loads2["AB"] == 4.0 and loads2["BD"] == 4.0 and loads2["AC"] == 0.0 and loads2["CD"] == 0.0) or \
-           (loads2["AC"] == 4.0 and loads2["CD"] == 4.0 and loads2["AB"] == 0.0 and loads2["BD"] == 0.0)
+    assert loads2["AB"] == 2.0 and loads2["BD"] == 2.0 and loads2["AC"] == 2.0 and loads2["CD"] == 2.0
 
 
 def test_service_dispatch_still_routes_to_segment_routing():
