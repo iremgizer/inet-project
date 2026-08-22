@@ -24,16 +24,24 @@ from pydantic import BaseModel, Field
 
 OptimizationStatus = Literal["OPTIMAL", "FEASIBLE", "INFEASIBLE", "TIME_LIMIT", "ERROR"]
 
-# PR1 produces "OPT" only. PR2 adds "WAYPOINT_OPTIMIZATION". Widened again by
-# LWO/JOINT in later PRs.
-OptimizationMode = Literal["OPT", "WAYPOINT_OPTIMIZATION"]
+# PR1 produces "OPT" only. PR2 added "WAYPOINT_OPTIMIZATION". PR3 adds
+# "LINK_WEIGHT_OPTIMIZATION". Widened again by JOINT in a later PR.
+OptimizationMode = Literal["OPT", "WAYPOINT_OPTIMIZATION", "LINK_WEIGHT_OPTIMIZATION"]
 
-# PR2: which search actually produced a WAYPOINT_OPTIMIZATION result —
-# EXACT_ENUMERATION is a genuinely exhaustive search over an explicitly
-# bounded candidate space (never called "MILP" — see waypoint_optimizer.py's
-# module docstring for why); GREEDY_WPO is Parham et al.'s Algorithm 3, a
-# polynomial heuristic with no optimality guarantee.
-WaypointSearchMethod = Literal["EXACT_ENUMERATION", "GREEDY_WPO"]
+# Which search actually produced a WAYPOINT_OPTIMIZATION or
+# LINK_WEIGHT_OPTIMIZATION result:
+# - EXACT_ENUMERATION: a genuinely exhaustive search over an explicitly
+#   bounded candidate space (never called "MILP" — see waypoint_optimizer.py/
+#   lwo_optimizer.py's own module docstrings for why). Shared by both modes
+#   since both search strategies are the same idea (brute-force over a
+#   bounded discrete space), just over a different candidate shape.
+# - GREEDY_WPO: Parham et al.'s Algorithm 3 (PR2, waypoint search only).
+# - HEURISTIC_LWO: PR3's Fortz&Thorup-inspired deterministic hill-climbing
+#   local search over link weights (see lwo_optimizer.py) — NOT a
+#   reproduction of Fortz&Thorup's actual `HeurOSPF` (no randomized restarts/
+#   tabu search; "no randomness in V1" is this PR's own explicit constraint).
+# Both GREEDY_WPO and HEURISTIC_LWO carry no optimality guarantee.
+SearchMethod = Literal["EXACT_ENUMERATION", "GREEDY_WPO", "HEURISTIC_LWO"]
 
 
 class FlowAssignment(BaseModel):
@@ -95,11 +103,17 @@ class OptimizationResult(BaseModel):
     optimizedMLU: Optional[float] = None
     # baselineMLU - optimizedMLU; positive means the recommendation helps.
     improvement: Optional[float] = None
-    searchMethod: Optional[WaypointSearchMethod] = None
+    searchMethod: Optional[SearchMethod] = None
     searchSpaceSize: Optional[int] = None
     evaluatedCandidates: Optional[int] = None
     # True only for EXACT_ENUMERATION (a genuine exhaustive search over the
-    # declared candidate space); False for GREEDY_WPO. Never true for a
-    # heuristic result — see Part K's OPTIMAL-vs-FEASIBLE status table,
-    # which this field mirrors at the mode-specific level.
+    # declared candidate space); False for GREEDY_WPO/HEURISTIC_LWO. Never
+    # true for a heuristic result — see Part K's OPTIMAL-vs-FEASIBLE status
+    # table, which this field mirrors at the mode-specific level.
     provenOptimal: Optional[bool] = None
+
+    # ── PR3 additions (LINK_WEIGHT_OPTIMIZATION only) ──────────────────────
+    # All optional/defaulted so every PR1/PR2 result and test is completely
+    # unaffected. linkId -> weight, one entry per link in the network.
+    recommendedWeights: Optional[Dict[str, float]] = None
+    baselineWeights: Optional[Dict[str, float]] = None
