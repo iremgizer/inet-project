@@ -1,0 +1,331 @@
+# Sprint 2 — Optimization Layer: Architecture & Research Audit — **Revision 2**
+
+**Status:** Read-only research/architecture audit. No production code changed. No frontend page. No implementation.
+**Branch:** `feat/sprint2-mip-analysis`, based on `feat/sprint1-mid-sim-failure-comparison` @ `0396809`.
+**Supersedes:** Revision 1, preserved at `docs/research/sprint2-mip-architecture-analysis-v1.md` for history.
+**Source of truth for this revision:** every PDF in `docs/research/papers/` (gitignored — see `.gitignore`'s `docs/research/papers/*`), read in full, not just abstracts/introductions.
+
+### What changed since Revision 1, in one paragraph
+
+Two files were added to `docs/research/papers/` that were not available for Revision 1: (1) `211085.pdf`, which turns out to be the previously-missing fifth paper — **Van An Le, Tien Thanh Le, Phi Le Nguyen, Huynh Thi Thanh Binh, Yusheng Ji, "Multi-time-step Segment Routing based Traffic Engineering Leveraging Traffic Prediction," IFIP/IEEE IM 2021** — cited below as **[Le21]**; and (2) `3485983.3494846.pdf`, which is a second copy of the Parham et al. CoNEXT'21 paper (ACM's own DOI-named PDF, ~identical content to `conext21te.pdf`, confirmed by direct diff — see §1.1). Reading [Le21] in full changes one concrete, load-bearing conclusion from Revision 1: it supplies a **complete, fully-specified MILP** for exactly the single-waypoint ("2-Segment Routing") problem that Revision 1 could only address via Parham et al.'s incompletely-specified WPO and a greedy heuristic. Because [Le21]'s routing model is **single-path, unsplittable** — matching Sprint 1's actual Segment Routing implementation far more closely than Parham et al.'s even-split-ECMP model does — this revision **reverses** Revision 1's recommendation that the optimizer must build its own routing subroutine separate from Sprint 1's `resolve_segment_route`. It also **upgrades** the recommended V1 waypoint-optimization approach from a heuristic to an exact MILP, since [Le21] itself demonstrates PuLP-solved exact MILP is practical at real-backbone scale (12–22 nodes) for exactly this problem. Full reasoning in §6–§8; every changed conclusion is called out explicitly rather than silently folded in.
+
+---
+
+## 1. Executive Summary
+
+- **Six papers are now available** in `docs/research/papers/`, all read completely: [Fortz00], [Parham21] (two copies), [LiYeung20]/[LiYeung19], [Brundiers23], and the newly-available [Le21]. No paper remains missing; the one gap flagged in Revision 1 (the fifth paper) is resolved.
+- **The exact Joint (link-weight + waypoint) MILP is still not present in any supplied source.** Both copies of [Parham21] independently defer it to the same external, unsupplied reference (`whatif-tools.net`, their own companion report). This is re-confirmed, not newly discovered — see §5.
+- **A different, and more useful, MILP *is* now completely available**: [Le21]'s `P0` — an exact ILP for single-waypoint (2-segment) routing, minimizing MLU, over a **single, unsplittable, fixed-shortest-path-per-leg** routing model. All decision variables, all constraints, and the objective are explicitly given (§3.6, §5).
+- **This changes Sprint 2's recommended architecture in one specific, important way**: Sprint 1's existing Segment Routing engine (`resolve_segment_route`, single `nx.shortest_path` per leg — confirmed unchanged since Revision 1, §7) is **structurally compatible with [Le21]'s model**, not with [Parham21]'s. Revision 1 recommended building the optimizer's waypoint routing independently of Sprint 1's SR engine specifically to avoid inheriting a mismatch with [Parham21]'s even-split assumption. With [Le21]'s model adopted as the WPO target instead, that mismatch does not exist, and **the optimizer should reuse `routing_helpers.resolve_segment_route` directly** — this is a genuine architectural reversal from Revision 1, justified in §7–§8.
+- **Sprint 1 does not require a routing-model rewrite before Sprint 2.** It requires one small, additive, low-risk hardening step (a determinism regression test on `resolve_segment_route`'s tie-breaking) before it can be safely relied on as a shared contract between the simulator and the optimizer — this is **PR0** (§8).
+- **[Le21] independently validates the Revision 1 solver recommendation**: the paper's own experiments solve exactly this problem class with a MILP solver via the **PuLP** library (their citation [15]) on 9–22 node real backbone topologies, which is comparable to or larger than every topology this project currently ships. This is a real-world existence proof, not a guess, and it upgrades §8's proposed PR3 from "heuristic only" to "exact MILP, with a heuristic fallback for pathologically large student topologies."
+- **The four-mode taxonomy from Revision 1 (OPT / LWO / WPO / Joint) stands**, but "Joint" now needs an explicit disambiguation: Parham's Joint is defined over even-split routing between waypoints; if Sprint 2 builds WPO over [Le21]'s unsplittable model (recommended, for Sprint-1 compatibility), then a composed "LWO + WPO" mode is **not literally Parham's Joint** — it is a Sprint-2-specific hybrid inspired by it. This must be labeled honestly in the product and is recorded as a DECIDE NOW item (§9).
+- Every other Revision 1 finding not discussed above (the pptx-vs-paper audit, the K-segment "voltage constraint" analysis, the solver/library comparison, the `OptimizationResult` contract, infeasibility terminology, preprocessing scalability techniques) was re-checked against the newly available materials, found unaffected, and is carried forward with citations, not repeated wholesale — see §6 for what changed and what didn't.
+
+---
+
+## 2. Source materials — final inventory
+
+| Paper (cited as) | File(s) | Read in full? | Status vs. Revision 1 |
+|---|---|---|---|
+| **[Fortz00]** — Fortz & Thorup, *"Internet Traffic Engineering by Optimizing OSPF Weights,"* IEEE INFOCOM 2000 | `Internet_traffic_engineering_by_optimizing_OSPF_weights.pdf` | Yes (already fully read in Rev. 1; re-checked, unchanged) | No change. |
+| **[Parham21]** — Parham, Fenz, Süss, Foerster, Schmid, *"Traffic Engineering with Joint Link Weight and Segment Optimization,"* ACM CoNEXT 2021 | `conext21te.pdf` **and** `3485983.3494846.pdf` (two independent copies, confirmed near-identical by direct text diff — same 15 pages, same word count within 0.1%, same Appendix A content, same deferral of the Joint MILP to reference [18]) | Yes — this revision additionally read **Appendix A in full** ("Deferred Proofs," Lemmas 3.11–3.14, Theorem 3.15, Lemma 5.3), which Revision 1 only partially covered | Appendix A confirmed to contain **only proofs of the optimality-gap theorems**, no MILP formulation of any kind. Two independent PDF sources now agree on this, which strengthens (does not merely repeat) Revision 1's finding that the exact Joint MILP is not in our materials. |
+| **[LiYeung20]** — Li & Yeung, *"Traffic Engineering in Segment Routing Networks Using MILP,"* IEEE TNSM Vol. 17 No. 3, Sept 2020 | `Traffic_Engineering_in_Segment_Routing_Networks_Using_MILP.pdf` | Yes (fully read in Rev. 1: K-LP, e2-LP, K-MILP, K-sMILP, voltage constraints) | No change. |
+| **[LiYeung19]** — Li & Yeung, same title, shorter conference version, ©2019 IEEE | `Traffic_Engineering_in_Segment_Routing_using_MILP.pdf` | Yes (Rev. 1) | No change. |
+| **[Brundiers23]** — Brundiers, Schüller, Aschenbruck, *"Preprocess your Paths – Speeding up LP-based Optimization for SR TE,"* arXiv:2312.00518, 2023 | `2312.00518v1.pdf` | Yes (Rev. 1) | No change. |
+| **[Le21]** — Van An Le, Tien Thanh Le, Phi Le Nguyen, Huynh Thi Thanh Binh, Yusheng Ji, *"Multi-time-step Segment Routing based Traffic Engineering Leveraging Traffic Prediction,"* IFIP/IEEE IM 2021 | `211085.pdf` | **Newly read in full for this revision** | **New.** Resolves Revision 1's one open gap (the fifth, previously-unlocatable paper) and materially changes §6–§9's recommendations. |
+
+**On the internal presentation (`lp_mip_te.pptx`):** it is **not** in `docs/research/papers/` and is treated in this revision purely as historical context from Revision 1, not as a source. Revision 1's finding stands and gains a third data point: the deck's own bibliography misattributed both the Li & Yeung paper (to "X. Gang et al.") and the Brundiers et al. paper (to "D. Müller et al."); it also cited the sixth paper as "K. Miyasawa et al." — **now falsifiable**, since [Le21] is available and its actual authors are Van An Le, Tien Thanh Le, Phi Le Nguyen, Huynh Thi Thanh Binh, and Yusheng Ji. That is a **third** confirmed misattribution in the same five-entry bibliography (only the Fortz & Thorup and Parham et al. entries were ever correct). This document continues to cite only the papers themselves, never the deck.
+
+---
+
+## 3. Literature Review
+
+Each paper below is summarized against the fixed checklist the task specifies: problem definition, optimization objective, routing model, traffic model, assumptions, mathematical formulation, decision variables, constraints, objective function, heuristics, exact algorithms, scalability discussion, implementation implications.
+
+### 3.1 [Fortz00] — Internet Traffic Engineering by Optimizing OSPF Weights
+
+- **Problem definition:** given a topology, capacities, and a demand matrix, choose OSPF link weights so that OSPF's own shortest-path + equal-cost-multipath (ECMP) routing behavior performs as well as possible.
+- **Optimization objective:** minimize a piecewise-linear, convex penalty function `Φ_a(load)` per link, summed over all links — a heavily-graduated congestion penalty (cost multipliers 1×, 3×, 10×, 70×, 500×, 5000× across utilization bands from <1/3 up to ≥110%), **not** a literal `min-max` MLU objective, though the steep penalty above 100–110% makes it behave like one in practice.
+- **Routing model:** OSPF shortest-path routing with **ECMP even-split** — flow leaving a node toward a destination divides evenly across every outgoing link that lies on a shortest path to that destination.
+- **Traffic model:** a static demand matrix, one snapshot; no prediction, no dynamics.
+- **Assumptions:** directed graph; link weights are the only lever (topology and capacities fixed); routing is a deterministic function of the weight setting.
+- **Mathematical formulation:** the *unrestricted* "general routing problem" (no OSPF/ECMP restriction — this is precisely Revision 1's/this revision's "OPT") **is given in full**: a linear program with per-demand, per-link continuous flow variables, flow-conservation constraints, and the piecewise-linear cost function — the paper's own Proposition 1 states this is solvable in polynomial time (citing Khachiyan). The **OSPF-restricted** problem is explicitly stated to be **not** LP-representable: *"the condition of splitting between shortest paths based on variable weights cannot be formulated as a linear program"* (§II.B) — no exact MIP formulation for it is given anywhere in the paper.
+- **Decision variables (OPT LP only):** per-demand, per-link flow fraction; for OSPF weight optimization, the paper treats the weight vector as the object being searched over by its heuristic, not as MIP decision variables in a written-out formulation.
+- **Constraints (OPT LP only):** flow conservation per node/demand; link cost defined via the piecewise-linear function; standard capacity coupling.
+- **Objective function:** `min Σ_a Φ_a(load(a))` for the OPT LP; for OSPF weight optimization, the same cost function evaluated under OSPF-and-ECMP-induced routing, treated as a black-box function of the weight vector that the local search minimizes.
+- **Heuristics:** a **local search** over weight settings, with hash tables to avoid search cycling/repetition and dynamic-graph algorithms to make re-evaluating the routing after a small weight perturbation fast. This is the paper's actual, complete algorithmic contribution for the hard (OSPF) problem — there is no exact-MIP alternative offered.
+- **Exact algorithms:** only for the unrestricted OPT LP (polynomial-time, via any LP solver); explicitly **not** for OSPF weight optimization, which the paper proves NP-hard (proof itself deferred to an uncited/unsupplied journal version — see Revision 1 §C4, unchanged).
+- **Scalability discussion:** the paper's efficiency contributions (hash-table cycle avoidance, incremental routing recomputation) exist specifically because local search re-evaluates *many* candidate weight settings per run — an implementation-efficiency concern, not a MIP-scale concern (there is no MIP for this problem here).
+- **Implementation implications:** confirms OPT is a clean, reusable LP baseline; confirms LWO cannot be attacked exactly with an LP/MIP as simple as OPT's, and that a local-search heuristic is the literature's own answer, not a corner that this project is cutting on its own.
+
+### 3.2 [Parham21] — Traffic Engineering with Joint Link Weight and Segment Optimization
+
+- **Problem definition:** formalizes and relates four traffic-engineering problems over the *same* network instance: `OPT` (unrestricted flow), `LWO` (weights only, ECMP routing), `WPO` (waypoints only, weights fixed, ECMP-between-waypoints routing), and `Joint` (both weights and waypoints, jointly optimized) — and proves formal gaps between them.
+- **Optimization objective:** minimize Maximum Link Utilization (MLU), literally `min z` s.t. `z ≥ util(e) ∀e` — a true min-max objective, unlike [Fortz00]'s summed penalty.
+- **Routing model:** for `LWO`/`WPO`/`Joint`, flow **must** follow shortest-path links under the given weight setting, and **must split evenly** ("even-split," ES) over every outgoing link on a shortest path — i.e., true ECMP, applied recursively at every waypoint-to-waypoint leg. `OPT` alone permits arbitrary fractional splitting at any node.
+- **Traffic model:** a static demand list `D` of `(s, t, d)` tuples, one snapshot, no prediction/dynamics.
+- **Assumptions:** directed graph; a waypoint is a single node inserted into a demand's route; up to `W` waypoints per demand (paper's own headline analysis is at `W=1`, with generalizations to constant `W`).
+- **Mathematical formulation:** `OPT`'s LP is **not written out** in this paper — deferred to reference [18] (Fenz, Förster, Parham, Schmid, Süß, the authors' own external companion report, not supplied). The exact **Joint MILP is likewise deferred to the same reference [18]**, confirmed independently from both copies of the PDF in this revision (§2). What **is** fully specified in-paper: the definitions of `OPT`/`LWO`/`WPO`/`Joint` (§2), the inequality `OPT ≤ Joint ≤ min{LWO, WPO}` (Eq. 2.1), several fully-worked lower-bound gap constructions (TE-Instances 1–5, with complete proofs including Appendix A), and two fully-specified **polynomial-time heuristic algorithms**: `LWO-APX` (Algorithm 1, an effective-capacity-based approximation for single-source-target LWO) and `GreedyWPO`/`JOINT-Heur` (Algorithms 2–3).
+- **Decision variables:** conceptual, not formalized as MIP variables in-paper — a weight `w(e)` per link, a waypoint (or waypoint sequence) per demand.
+- **Constraints:** likewise conceptual/definitional in-paper (§2's problem statements), not a written constraint system.
+- **Objective function:** `min MLU`, stated precisely, everywhere in the paper.
+- **Heuristics:** `LWO-APX` (Algorithm 1, `O(n log n)`-approximation for single-source-target instances, built on an "effective capacity" concept); `GreedyWPO` (Algorithm 3: per demand, in descending size order, try every node as a single waypoint, keep whichever most reduces MLU under the fixed weight setting — a genuinely complete, implementable, polynomial algorithm); `JOINT-Heur` (Algorithm 2: run `HeurOSPF` [Fortz00]'s local search, run `GreedyWPO` under the resulting weights, re-split demands at the chosen waypoints, re-run `HeurOSPF`) — all three are fully specified and implementable exactly as written.
+- **Exact algorithms:** none for `LWO`/`WPO`/`Joint` are given in-paper (the MIP formulations are external); `OPT` is exactly solvable but its LP is likewise not reproduced here.
+- **Scalability discussion:** the paper's own MILP-based evaluation (§7, "Small Networks") was only run on a single 12-node/30-link topology (Abilene) — the paper itself treats exact MILP solving as impractical beyond small instances and relies on its heuristics for the large-topology evaluation (TopologyZoo/SNDLib, up to 65 nodes).
+- **Implementation implications:** confirms Revision 1's central finding (no exact Joint MILP available to us) with a second, independent copy of the source; additionally supplies enough gap-construction detail (Appendix A, TE-Instances 2–5, general-`W` bound `Ω(n log n / W)`) to build richer hand-verifiable test cases than Revision 1 had (§9).
+
+### 3.3 [LiYeung20] / [LiYeung19] — Traffic Engineering in Segment Routing Networks Using MILP
+
+- **Problem definition:** find a set of `≤K`-segment SR paths carrying a full traffic matrix such that MLU is minimized, explicitly supporting **both** node-SIDs (shortest-path segments) and adjacency-SIDs (single-link segments) — the paper's central critique of prior work is that node-SID-only formulations (`K-LP`) cannot select a specific member of an ECMP group and are therefore provably not optimal.
+- **Optimization objective:** `min MLU`.
+- **Routing model:** an SR path is a concatenation of `≤K` segments, each either a node-SID (shortest path to a node, subject to ECMP even-split at any internal bifurcation — Eq. 21/28 enforce this explicitly) or an adjacency-SID (one specific link, unambiguous, no ECMP ambiguity at all).
+- **Traffic model:** static traffic matrix `[t_ij]`, one snapshot.
+- **Assumptions:** a maximum segment count `K` is fixed in advance; per-demand traffic can be arbitrarily split across multiple discovered K-segment paths at the source (Algorithm 1/2's "traffic splitting at source node").
+- **Mathematical formulation:** **fully specified**, in three variants: `K-LP` (older prior work, node-SID only, LP), `e2-LP` (this paper's enhancement supporting adjacency-SIDs "in part," for `K=2` only), and **`K-MILP`** (this paper's full contribution: complete binary/integer MILP supporting both SID types for general `K`), plus a scalability-motivated **`K-sMILP`** (simplified, segment-based rather than path-based, requiring an auxiliary **"voltage constraint"** mechanism to correctly bound reconstructed path length).
+- **Decision variables:** `y^p_ij ∈ [0,1]` (fraction of flow `t_ij` on segment `p`); `b^p_ij ∈ {0,1}` (segment `p` used by flow `ij`); `v^p_ij ∈ Z+` ("voltage" of segment `p` for flow `ij`, K-sMILP only); path-based variants add `x^p_ij|m`/`z^p_ij|m` per explicit path `m`.
+- **Constraints:** flow conservation over the segment graph (Eq. 26); link capacity (Eq. 27); ECMP equal-split enforcement among node-SID-internal bifurcations (Eq. 21/28); segment-usage-indicator linkage (Eq. 29); and, for `K-sMILP`, the voltage-propagation system (Eqs. 30–32) that bounds the longest reconstructible path to `≤K` segments — this is **not** a simple link-count sum (see §6.3/Revision 1 §E for why a naive `Σ y(e) ≤ K` is wrong).
+- **Objective function:** `min θ` (MLU), with capacity constraints scaled by `θ`.
+- **Heuristics:** none of consequence — the paper's contribution is the exact formulations themselves (`e2-LP`, `K-MILP`, `K-sMILP`); the "simplified" MILP trades completeness (a segment-based solution isn't always exactly reconstructible into a valid path-based one) for tractability, not by heuristic search but by relaxing the model's fidelity.
+- **Exact algorithms:** `K-MILP`/`K-sMILP`, solved directly by a MILP solver — no local search or approximation is proposed for the core contribution.
+- **Scalability discussion:** `K-MILP` is `O(M·|P|·|N|²)` variables/constraints where `|P| ≈ |N|²` and `M` (max K-segment paths per node pair) is `O(|N|^{K−1})` — **exponential in K**; `K-sMILP` reduces this to `O(|P|·|N|²)`, polynomial in `|N|` and independent of `M`, at the cost of the reconstruction-completeness gap above.
+- **Implementation implications:** this remains the only source with a complete adjacency-SID-aware exact formulation; it is explicitly a **V2** concern (Revision 1's assessment, unchanged) given the schema change (a SID-type concept Sprint 1 doesn't have at all) and the exponential-in-K variable count.
+
+### 3.4 [Brundiers23] — Preprocess your Paths
+
+- **Problem definition:** survey and comparative evaluation of techniques to reduce the size of the candidate-SR-path search space *before* handing a problem to an LP/MILP solver, so that SR TE optimization remains usable at real ISP scale.
+- **Optimization objective:** `min θ` (MLU) — reproduces, and explicitly attributes, the base "2SR" LP from Bhatia, Hao, Kodialam, Lakshman, INFOCOM 2015 (**not** one of our six core papers, but its formulation is fully reproduced here as "Problem 1," so it is transitively available to us).
+- **Routing model:** the *original* 2SR LP (Bhatia et al. 2015, as reproduced here) uses continuous, **arbitrarily splittable** `x^k_ij` per middlepoint `k`; the paper explicitly notes that *"newer variations... generally prohibit splitting demands over multiple SR paths by making the `x^k_ij` binary variables"* because arbitrary splitting is not practically deployable — citing further work, not proposing this itself.
+- **Traffic model:** static per-topology demand matrices (Repetita dataset + a real Tier-1 ISP dataset), one snapshot per optimization run; no explicit temporal modeling (contrast with [Le21], §3.5).
+- **Assumptions:** middlepoints are drawn from the full node set unless a preprocessing technique restricts them; the paper studies four specific, independently-sourced preprocessing techniques.
+- **Mathematical formulation:** the base 2SR LP ("Problem 1": `min θ`; `Σ_k x^k_ij = 1`; `Σ t_ij g^k_ij(e) x^k_ij ≤ θc(e)`) is given in full; the four preprocessing techniques are each given as precise, checkable rules (not full MILPs of their own): centrality-based restriction (GSP centrality formula, Eq. 5), Stretch-Bounding (ratio bound, Eq. 6), Demand Pinning (a sorting/thresholding procedure), and SR Path Domination (a formal per-link-load domination/equivalence relation, Eq. 7).
+- **Decision variables/constraints/objective:** as above — this is the one paper in our set whose primary contribution is *outside* the variables/constraints/objective triad; its contribution is a *pre-filter* applied before that triad is ever built.
+- **Heuristics:** three of the four techniques (centrality, stretch-bounding, demand pinning) are heuristic/lossy by construction — proven, in the paper's own evaluation, to trade solution quality for speed.
+- **Exact algorithms:** the fourth technique, **SR Path Domination**, is proven lossless (*"dominated SR paths are never needed for an optimal solution"*) — the only exact/optimality-preserving technique of the four.
+- **Scalability discussion:** this is the paper's whole subject — candidate-path counts of `O(|V|^{k+1})`, unmitigated LP solve times reaching *"multiple hours or even days"* on large topologies, and the paper's own combined-preprocessing result reducing computation time by "a factor of 10 or more" without material quality loss.
+- **Implementation implications:** confirms the arbitrary-vs-unsplittable modeling tension already flagged in Revision 1 (§G), now further corroborated in an even stronger form by [Le21] (§3.5, below) — three independent papers ([Brundiers23]'s citations, [Le21] directly, and Sprint 1's own existing product decision for `TrafficDistribution`) converge on "arbitrary continuous splitting is not what gets deployed."
+
+### 3.5 [Le21] — Multi-time-step Segment Routing based Traffic Engineering Leveraging Traffic Prediction *(new in Revision 2)*
+
+- **Problem definition:** traffic engineering via **2-Segment Routing** (one optional intermediate/waypoint node per demand), extended across a *routing cycle* of `T` future time-steps using traffic prediction, so that the routing policy does not need to be recomputed (and hence traffic does not need to be rerouted) every single time-step.
+- **Optimization objective:** `min θ` (MLU) for the base single-snapshot problem `P0`; the multi-time-step variants `P1`/`P2`/`P3` minimize the **worst-case** MLU over a whole future window, under progressively looser (and cheaper-to-predict) traffic-summarization assumptions.
+- **Routing model — the single most important new fact for this revision:** *"in contrast with [Bhatia et al. 2015]'s problem, we do not consider that the traffic flows can be arbitrarily split and routed by different paths"* (§II, explicit, direct quote). Each demand `(i,j)` selects **exactly one** intermediate node `k` (binary `α^k_ij`, with `Σ_k α^k_ij = 1`); the traffic from `i` to `k` and from `k` to `j` is each routed via **the** shortest path between them (a fixed, precomputed, single path — the paper never discusses ECMP, ties, or multiple equal-cost paths anywhere in its text, confirmed by an explicit full-text search). `k = i` or `k = j` degenerates to plain single-shortest-path routing with no waypoint at all — structurally the same "no waypoint" degenerate case Sprint 1's own `sanitize_segments` already normalizes to.
+- **Traffic model:** the paper's genuine novelty — a sequence of **predicted** traffic matrices `M = [M_1, ..., M_T]` for the next `T` time-steps of a "routing cycle," obtained from an external, separately-trained deep-learning predictor (Graph WaveNet, cited as [12]), not computed by this paper's own optimization.
+- **Assumptions:** undirected graph `G=(V,E)`; centrally-controlled (SDN-style) network; prediction accuracy is treated as an input the TE model must be robust to, not something the TE model itself controls.
+- **Mathematical formulation:** **fully specified and complete** for all four problem variants:
+  - **`P0`** (single time-step, the one directly relevant to Sprint 2 V1's WPO scope): `minimize θ`; `Σ_k α^k_ij = 1 ∀i,j`; `Σ_ij Σ_k g^k_ij(e) α^k_ij m^t_ij ≤ θc(e) ∀e`; `α^k_ij ∈ {0,1}`. Here `g^k_ij(e) = f_ik(e) + f_kj(e)`, with `f_ik(e) ∈ {0,1}` a **precomputed constant** (not a decision variable) indicating whether link `e` lies on the single fixed shortest path from `i` to `k`.
+  - **`P1`** extends `P0`'s capacity constraint to hold at **every** time-step `t ∈ T` simultaneously, using the actual (predicted) matrix at each step — requires predicting all `T` full matrices.
+  - **`P2`** relaxes `P1` to use only the **per-flow maximum** predicted demand over the whole window (`max_{t∈T} m^t_ij`) — requires predicting only one (max-value) matrix, not `T` of them.
+  - **`P3`** is `P2` applied per sub-period (`T` split into `P` sub-periods of length `T_p < T`), trading some of `P2`'s prediction-simplicity back for tighter per-period bounds.
+  - A proven ordering **`θ1* ≤ θ3* ≤ θ2*`** (Theorem 1/2, with a full proof, including a derived performance-ratio upper bound `λ` for `P2` vs. `P1`) formally relates the four variants' optimal objective values.
+- **Decision variables:** `α^k_ij ∈ {0,1}` (which single node, if any, is the waypoint for demand `ij`); `θ ∈ R` (the MLU epigraph variable). No continuous flow-splitting variable exists anywhere in this formulation — a deliberate, stated departure from the 2015 Bhatia et al. LP it builds on.
+- **Constraints:** demand-satisfaction-via-exactly-one-waypoint (`Σ_k α^k_ij = 1`); capacity/MLU-bounding, in one of four forms depending on `P0`–`P3`.
+- **Objective function:** `min θ`, identical in structure to [Parham21]'s and [Brundiers23]'s MLU objectives, but over a provably different (unsplittable) routing-restriction set.
+- **Heuristics:** **`LS2SR`** (Algorithm 1) — an improvement-based local search seeded from plain shortest-path routing, which at each iteration (a) probabilistically selects a heavily-loaded link (probability `∝ load(e)^β`, Eq. 27), (b) probabilistically selects a large flow crossing it (probability `∝ demand^γ`, Eq. 28), and (c) reroutes that flow to the next-more-expensive candidate path in a precomputed, **deduplicated** path list (equivalent paths and non-simple/looping paths explicitly pruned first, §IV-A) — explicitly adapted from Gay, Hartert & Vissicchio's SRLS algorithm (INFOCOM 2017, cited [3], not independently in our source set but described completely enough here to use).
+- **Exact algorithms:** the paper's own experiments **solve `P0`–`P3` to optimality directly**, using the **PuLP** library (cited [15] — `pulp`, the same library recommended in Revision 1 and here) as the MILP solver, on three real backbone datasets: Brain (9 nodes/14 links), Abilene (12 nodes/15 links), and Geant (22 nodes/36 links) — a solve-time budget of 60 seconds was used for the exact solves in their experiments.
+- **Scalability discussion:** the paper states plainly, citing Gay/Hartert/Vissicchio, that *"traditional MILP solvers hardly scal[e] to large topologies with more than 20 nodes"* — which is why `LS2SR` exists at all, targeting **sub-second** re-solves for the *repeated, per-cycle* multi-time-step re-optimization use case specifically, not because the single-snapshot `P0` MILP itself is intractable at their scale (their own experiments solve it directly, successfully, on a 22-node topology).
+- **Implementation implications:** this is the single most consequential new source for Sprint 2's actual architecture (§6–§9 below) — it hands us a complete, validated-at-real-scale, exact ILP for precisely the "one optional waypoint" problem, using precisely the single-shortest-path-per-leg routing model Sprint 1 already implements.
+
+---
+
+## 4. Cross-Paper Comparison
+
+### 4.1 Overlap map
+
+| Concept | Appears in |
+|---|---|
+| `min MLU` as the TE objective | [Parham21], [LiYeung20]/[LiYeung19], [Brundiers23], [Le21] — four of six papers converge on literal min-max MLU. Only [Fortz00] uses a different (summed piecewise-linear penalty) objective, though one engineered to behave similarly near congestion. |
+| ECMP even-split as the routing primitive | [Fortz00] (OSPF/ECMP), [Parham21] (LWO/WPO/Joint's routing-between-waypoints), [LiYeung20]/[LiYeung19] (within a node-SID segment) |
+| Single-path, unsplittable routing as the routing primitive | [Le21] (explicitly, by design) — **the only paper of the six that assumes this**, and it does so by deliberately diverging from the 2015 Bhatia et al. paper that [Brundiers23] also builds on |
+| Arbitrary/continuous flow splitting | [Fortz00]'s "general routing problem" (=OPT), the *original* Bhatia et al. 2SR LP as reproduced in [Brundiers23] |
+| Local-search / heuristic as the practical exact-MIP substitute | [Fortz00] (`HeurOSPF`), [Parham21] (`LWO-APX`, `GreedyWPO`, `JOINT-Heur`, the last explicitly built on `HeurOSPF`), [Le21] (`LS2SR`, explicitly adapted from a third, uncited-but-described paper — Gay/Hartert/Vissicchio) — **three independent papers, three independent heuristic designs, same underlying reason (NP-hardness / poor MIP scaling)** |
+| Preprocessing / candidate-path reduction to control scale | [Brundiers23] (its whole subject), [Le21] (§IV-A's equivalent-path and non-simple-path pruning) — two independently-motivated but structurally similar techniques |
+| Node-SID vs. adjacency-SID | [LiYeung20]/[LiYeung19] only — no other paper models adjacency-SIDs at all; [Le21]'s single-path model sidesteps the issue entirely by never needing to disambiguate an ECMP tie (there is no ECMP in its model) |
+| Multi-time-step / predictive optimization | [Le21] only — genuinely unique among the six; this confirms Revision 1's treatment of "dynamic optimization" as out of Sprint 2 V1's scope was correctly scoped, now with the actual paper available to confirm it rather than guess at it |
+
+### 4.2 Where assumptions differ, and why it matters for Sprint 2
+
+| Axis | [Fortz00] | [Parham21] | [LiYeung20]/[19] | [Brundiers23] | [Le21] |
+|---|---|---|---|---|---|
+| **ECMP assumption** | Yes, mandatory (OSPF-defined) | Yes, mandatory, applied at every waypoint leg | Yes, within a node-SID segment (Eq. 21/28) | Inherited from whichever base LP it's preprocessing (arbitrary-split by default) | **No** — explicitly rejected in favor of single-path routing |
+| **Shortest-path assumption** | Yes (weight-determined) | Yes (weight-determined, between waypoints) | Yes (node-SID = shortest path) | Yes (middlepoint legs are shortest paths) | Yes, but **exactly one** shortest path per leg, no tie-handling discussed |
+| **Link weight treatment** | Decision variable (this is the whole paper) | Decision variable for LWO/Joint; fixed input for WPO | Fixed input throughout (IGP costs given) | Fixed input (weights are given; the paper optimizes path *selection*, not weights) | Fixed input throughout — [Le21] never optimizes weights, only waypoint choice |
+| **Splittability** | Arbitrary (OPT) vs. ECMP-forced (OSPF) | Arbitrary (OPT) vs. ECMP-forced (LWO/WPO/Joint) | Arbitrary across multiple *discovered* K-segment paths, per source-routing table | Arbitrary in the original 2SR LP; explicitly noted as impractical, superseded by binary/unsplittable variants elsewhere in the literature | **Unsplittable by design** — one path per demand, full stop |
+| **Exact vs. heuristic, in-paper** | Heuristic only, for the hard problem (OSPF weights) | Heuristic only, for LWO/WPO/Joint (MILP deferred externally) | **Exact** (K-MILP/K-sMILP is the contribution itself) | N/A (preprocessing layer, sits in front of whatever solver is used) | **Both** — `P0`–`P3` solved exactly via PuLP in their own experiments; `LS2SR` heuristic added specifically for the repeated multi-cycle re-solve, not because the single-snapshot MILP itself is intractable at their scale |
+| **Waypoint handling** | N/A (no waypoint concept) | Up to `W` waypoints per demand, routed via ECMP between each consecutive pair | K-segment paths (`K−1` waypoints), node-SID or adjacency-SID | Middlepoint(s) per demand (terminology varies with the preprocessing technique's own source paper) | **Exactly one, optional** waypoint per demand — the special case `K=2` in [LiYeung20]'s terms, restricted further to unsplittable |
+
+### 4.3 The one genuine, explicit disagreement worth flagging as a disagreement
+
+[Parham21]'s `WPO`/`Joint` and [Le21]'s `P0`–`P3` are **answering superficially the same question** ("what's the best single waypoint per demand to minimize MLU?") **under two different, incompatible routing models** — one even-split-ECMP-between-waypoints, one strictly single-path-unsplittable — and neither paper cites or acknowledges the other (they are contemporaneous, 2021, from unrelated research groups). Nothing in either paper's own text resolves this; it is a genuine, standing disagreement in the literature about what "waypoint optimization" routing semantics should be, and Sprint 2 must pick one deliberately rather than average or ignore the difference. §6.3/§9 record the recommendation and why.
+
+---
+
+## 5. Joint MILP Analysis
+
+Answering the task's five specific questions, directly:
+
+1. **Is the full mathematical formulation of the Joint (link-weight + waypoint) MILP present in our materials?** **No.** Both available copies of [Parham21] (`conext21te.pdf` and `3485983.3494846.pdf`, confirmed independently identical in this respect) state, verbatim: *"The MILP formulation of Joint is presented in [18]"* — and reference [18] in the paper's own bibliography is *"Thomas Fenz, Klaus-Tycho Förster, Mahmoud Parham, Stefan Schmid, and Nikolaus Süß. Traffic engineering with joint link weight and segment optimization. September 2021. https://whatif-tools.net/segment-routing"* — the authors' own external companion report/website, not a paper in `docs/research/papers/` and not otherwise available to us.
+2. **Are all decision variables defined?** Only informally/conceptually (§2's prose definitions of a weight setting `w: E → R+` and a waypoint setting `π: D → V`) — no formal MIP variable list (e.g. no `α[k,i,j]`-style binary array) is written out anywhere in either copy of the paper, including Appendix A (which contains only gap-theorem proofs, confirmed by a full read of Appendix A in this revision — §3.2).
+3. **Are all constraints available?** No — see above; only the *problem definitions* and the *inequality relating the four problems* (`OPT ≤ Joint ≤ min{LWO, WPO}`) are given, not a constraint system.
+4. **Is the objective function explicitly specified?** Yes, at the level of "minimize MLU" — this part is unambiguous and consistent across the whole paper — but an objective statement alone does not make a MILP implementable without its variables and constraints.
+5. **Is it sufficient for implementation?** **No.** What Sprint 2 has, from [Parham21] alone, is enough to implement **the two fully-specified heuristics** (`GreedyWPO`, `JOINT-Heur`) — genuinely useful, genuinely citable, genuinely implementable — but **not** enough to implement an exact Joint MILP solver. This conclusion is unchanged from Revision 1, now confirmed by a second independent copy of the paper and a full read of its Appendix A.
+
+**What Revision 2 adds beyond re-confirming this gap:** [Le21]'s `P0` (§3.5) is a complete, exact MILP — but it is a formulation for **waypoint selection only, weights fixed and given** (structurally, [Parham21]'s `WPO`, not `Joint` — [Le21] never treats link weights as decision variables anywhere in its text). It does **not** fill the Joint-MILP gap; it fills a different, adjacent gap (an exact WPO-class formulation), which Revision 1 also lacked (Revision 1 only had `GreedyWPO`, a heuristic, for this). **Do not conflate the two:** Sprint 2 can now offer an *exact, provably optimal* "Optimize Waypoints" mode (via [Le21]'s `P0`, weights fixed), but "Joint Weights + Waypoints" remains achievable only as the heuristic composition [Parham21] itself proposes (`JOINT-Heur`), never as a proven-optimal MILP solve, with our current sources.
+
+---
+
+## 6. Architecture Re-evaluation
+
+Re-examined against the full literature review above, item by item, exactly as the task requests.
+
+### 6.1 Routing model
+
+**No change to the four-mode taxonomy** (OPT / LWO / WPO / Joint) from Revision 1 — it remains the correct way to avoid the "everything is just MIP" conflation the whole project is trying to avoid. **One refinement**: WPO now has *two* candidate reference models in our literature ([Parham21]'s even-split, [Le21]'s unsplittable single-path), and Sprint 2 must pick one, explicitly, rather than silently blend them (§6.3).
+
+### 6.2 ECMP handling
+
+**Unaffected for LWO.** [Fortz00]/[Parham21] both mandate ECMP even-split for LWO, and Sprint 1's `ecmp.py` already implements exactly this (`sorted(nx.all_shortest_paths(...))`, confirmed unchanged since Revision 1 — see §7). Any Sprint 2 LWO module should keep evaluating candidate weight settings by re-running (or re-deriving from) this same ECMP logic, exactly as Revision 1 recommended.
+
+### 6.3 Segment Routing assumptions & waypoint handling — **the central update of this revision**
+
+Revision 1 concluded Sprint 1 SR is "single-path waypoint routing," diverging from [Parham21]'s even-split model, and recommended the Sprint 2 optimizer build its **own**, separate, even-split-aware internal routing subroutine for WPO/Joint rather than reuse Sprint 1's `resolve_segment_route` — specifically to avoid inheriting a routing-model mismatch.
+
+With [Le21] now available, this recommendation is **reversed, with reasoning**:
+
+- [Le21]'s `P0` is a complete, real-scale-validated, exact MILP for *exactly* "one optional waypoint per demand, single shortest path per leg, unsplittable" — which is *precisely* what Sprint 1's `resolve_segment_route` already computes (§7 confirms the code is unchanged).
+- Building WPO against [Le21]'s model instead of [Parham21]'s therefore means the optimizer's routing assumption and Sprint 1's simulator's routing assumption become **the same assumption**, not two different ones needing careful separation.
+- The practical consequence: the optimizer's precomputed constant `f_ik(e)` (whether link `e` lies on the shortest path from `i` to `k`, in [Le21]'s notation) should be computed by **calling `routing_helpers.resolve_segment_route`/the underlying single-shortest-path resolution directly**, not by re-implementing shortest-path logic inside the optimization module. This is both less code and — more importantly — guarantees that a WPO recommendation, when written back into Sprint 1 (`SegmentRoutingPolicy.segments`) and re-simulated, reproduces the *exact* MLU the optimizer reported, because it is the same underlying path-resolution call in both places.
+- **This is a genuine reversal of a Revision 1 recommendation, made because new evidence (a complete, validated MILP over the matching routing model) became available — not a preference change.**
+
+The one thing this does **not** resolve: [Le21]'s own formulation, like Sprint 1's, never discusses what happens when `i→k` or `k→j` has *multiple* equal-cost shortest paths — both simply call "the" shortest path and move on. This is a shared, not a new, latent assumption, and it is the subject of §7's compatibility finding and §8's PR0.
+
+### 6.4 MLU computation
+
+**Unchanged, unaffected, still fully reusable.** `Metrics.compute_summary()` computes exactly the `max(utilization)` quantity every paper in this literature calls MLU/`θ`/`z`. No paper introduces a different MLU definition that would require changing this function.
+
+### 6.5 Shortest-path computation
+
+**Directly addressed by §6.3 above** — the recommendation is now to have the optimizer's WPO/Joint modules call into the *same* shortest-path resolution Sprint 1 already exposes (`routing_helpers.resolve_segment_route`, and by extension whatever single-path primitive it's built from), rather than parallel-implementing it, as previously recommended for the (now de-prioritized) even-split model.
+
+### 6.6 Optimization flow
+
+**Unchanged from Revision 1's proposed sequence** (build effective graph via `GraphBuilder.build_graph()` → solve OPT → solve LWO/WPO/Joint as separate modes → project into a `SimulationResult`-shaped `OptimizationResult` for reuse by `ComparisonPanel`). [Le21] does not suggest a different pipeline shape for the single-snapshot case; its multi-time-step machinery is explicitly out of scope (§6.8).
+
+### 6.7 Decomposition strategy
+
+**One addition, not a change:** [Le21]'s Theorem 1/2 (`θ1* ≤ θ3* ≤ θ2*`, with a derived performance-ratio bound) is a clean, fully-proven example of *why* a looser, cheaper-to-compute problem formulation (`P2`, using only per-flow maxima) can be justified as "good enough" relative to a tighter, more expensive one (`P1`, using every time-step) — this is a useful, citable pattern for *any future* decision to trade formulation fidelity for tractability, but it is explicitly a **multi-time-step** result and does not change how Sprint 2 V1's single-snapshot OPT/LWO/WPO/Joint modes should be decomposed relative to each other (still: independent modes, not a pipeline where one feeds the next, except `JOINT-Heur`'s own internal LWO→WPO→LWO composition, unchanged from Revision 1).
+
+### 6.8 What did *not* change
+
+- Solver/library analysis (Revision 1 §H) — **strengthened, not changed**: [Le21]'s own experiments used PuLP successfully for exactly this problem class at 9–22-node real-backbone scale, which is direct, independent, real-world confirmation of the PuLP+CBC recommendation, not just a licensing/reproducibility argument as in Revision 1.
+- The `OptimizationResult` contract (Revision 1 §J) and infeasibility terminology (Revision 1 §K) — unaffected; [Le21]'s own `θ` variable maps onto `OptimizationResult.objective` with no change needed, and its solver is used to solve to proven optimality within a time budget, which is exactly the `OPTIMAL` vs. `TIME_LIMIT` distinction Revision 1 already designed for.
+- The pptx constraint audit (Revision 1 §E) — unaffected (the deck is not a source in this revision, §2).
+- Node-SID/adjacency-SID analysis (Revision 1 §F) — unaffected; [Le21] does not engage with adjacency-SIDs at all, consistent with its single-path (no-ECMP-ambiguity) model needing no such disambiguation mechanism in the first place.
+- TE policy compatibility mapping (Revision 1 §M) and failure compatibility (Revision 1 §N) — unaffected by any new source; [Le21]'s multi-time-step framing is the closest any paper comes to Sprint 1's PR6 scheduled-failure feature, and it remains, as Revision 1 already anticipated, **out of Sprint 2 V1's scope** (§6.9) — now confirmed against the actual paper rather than only against an unverifiable secondhand slide-deck description.
+
+### 6.9 Multi-time-step / predictive optimization — now confirmed out of scope, with the actual paper in hand
+
+Revision 1 treated "Multi-time-step SR TE leveraging traffic prediction" as an unverified rumor (only the deck's, since-falsified, author attribution was available). With [Le21] now fully read: **the paper is real, its formulation is real and complete, and it is exactly the kind of specialization Revision 1 predicted it might be** — a genuinely different problem (optimizing a *routing cycle* against *predicted* future traffic, requiring an external ML traffic predictor as a hard dependency) layered on top of the same single-snapshot MLU-minimization core. **Recommendation unchanged, now on firmer ground:** Sprint 2 V1 does not attempt multi-time-step or predictive optimization. If ever revisited, [Le21] is now a fully-available, fully-read source for it — cited here explicitly so a future sprint does not have to re-locate or re-verify it.
+
+---
+
+## 7. Sprint 1 Compatibility Review
+
+**Confirmed via direct re-inspection that no Sprint 1 code changed between Revision 1 and Revision 2** (`git log`/`git diff` show no commits to `backend/app/*` or `frontend/src/*` since Revision 1's commit `0396809`). Every finding below is against the *current, unmodified* code.
+
+### 7.1 Segment Routing semantics — re-verified, conclusion updated
+
+`app/utils/routing_helpers.py`'s `resolve_segment_route()` still calls `nx.shortest_path(graph, waypoints[i], waypoints[i+1], weight="weight")` — **exactly one path per leg**, no ECMP, no splitting, confirmed identical to Revision 1's reading.
+
+**Revision 1's framing** ("this is a compatibility gap against [Parham21], to be fixed later or worked around") **is superseded.** With [Le21] available: **Sprint 1's SR routing model matches [Le21]'s `P0` routing model, term for term** — one optional waypoint, one fixed shortest path per leg, no splitting. It does **not** match [Parham21]'s even-split model, and Revision 1 was right about that specific mismatch — but Revision 1 did not yet know a legitimate, complete, real-scale-validated *alternative* research model existed that Sprint 1 already happens to match. **Conclusion: Sprint 1 SR needs no architectural change to serve as the routing-model target for an exact WPO MILP, provided Sprint 2 adopts [Le21]'s model (recommended, §6.3/§9) rather than [Parham21]'s.**
+
+### 7.2 ECMP behavior — unaffected, still compatible
+
+`app/algorithms/ecmp.py`'s `sorted(nx.all_shortest_paths(demand_graph, ...))` remains exactly the even-split, tie-stable behavior [Fortz00]/[Parham21] require for LWO. No paper read in this revision changes this assessment.
+
+### 7.3 Shortest-path selection — the one real, newly-precise compatibility risk
+
+Both Sprint 1's `resolve_segment_route` and [Le21]'s `f_ik(e)`/`f_kj(e)` precomputation rely on "the" shortest path between two nodes being well-defined, when in fact — on any topology with a tie (multiple equal-cost shortest paths) — **which** path is returned depends on NetworkX's internal Dijkstra tie-breaking, which is not a documented, stable public contract (this exact caveat was already raised in Revision 1 §B.2, in the context of Sprint 1's own internal consistency; it now matters *additionally* as a **cross-module contract** between the simulator and the optimizer). Concretely: if the optimization module (§6.3, recommended to reuse `resolve_segment_route`) is called once to precompute `f_ik(e)` constants for the ILP, and Sprint 1's simulator later independently re-resolves the same route to display/verify the result, **both calls must return the identical path** for the reported MLU to be reproducible — which they will, *in the same process, on the same NetworkX version, on a graph with no structural changes in between*, but this has never been asserted or tested, only assumed. **This is the one concrete "Sprint 1 needs a small adjustment before Sprint 2" finding**, and it motivates PR0 (§8) — not a routing-model change, a **determinism guarantee**.
+
+### 7.4 What Sprint 1 does *not* need before Sprint 2
+
+- No change to `resolve_segment_route`'s algorithm.
+- No change to `ecmp.py`, `distance_vector.py`, `GraphBuilder`, or `Metrics`.
+- No new SID-type concept (adjacency-SID) — still correctly deferred to a V2 that may never happen (§3.3/Revision 1 §F, unaffected).
+- No change to `TrafficDistribution`/`SegmentRoutingPolicy`/`TrafficEngineeringPolicy`/`SimulationFailureEvent` schemas — all remain directly reusable as designed in Revision 1 §A.3, unaffected by anything read in this revision.
+
+---
+
+## 8. Updated Implementation Plan
+
+### PR0 — Preliminary architectural fix required before Sprint 2
+
+**Objective:** make the shortest-path tie-breaking behavior that Sprint 1's SR engine and Sprint 2's WPO optimizer will *both* rely on into an explicit, tested, documented contract — not a silent shared assumption.
+
+**Scope:** additive only, no behavior change.
+1. Add a regression test asserting `resolve_segment_route`'s single-shortest-path resolution is **deterministic across repeated calls** on a graph containing at least one genuine tie (multiple equal-cost shortest paths between two nodes) — i.e., call it twice (or `N` times) on the same graph/waypoints and assert identical output.
+2. Add a one-paragraph docstring note to `resolve_segment_route` (or a new small module-level comment in `routing_helpers.py`) stating explicitly that this function's tie-breaking is now a contract Sprint 2's WPO optimizer depends on for result reproducibility (§7.3), so a future refactor doesn't casually change NetworkX call patterns in a way that silently breaks that assumption.
+3. **Explicitly does not** change routing behavior, does not add ECMP-within-segments, does not add adjacency-SIDs.
+
+**Expected files:** `backend/tests/test_routing_helpers_determinism.py` (new, small), a docstring addition to `backend/app/utils/routing_helpers.py`.
+
+**Testing strategy:** the new test itself; run the full existing 146-test backend suite to confirm zero regression (expected: 146 pass, +1 new = 147).
+
+**Dependencies:** none — this can land independently of and before anything else in this plan.
+
+**Regression risk:** effectively zero — it is a new test plus a comment, no logic touched.
+
+---
+
+### Sprint 2 PRs (revised sequence and content vs. Revision 1)
+
+| PR | Objective | Scope | Dependencies | Expected files | Testing strategy |
+|---|---|---|---|---|---|
+| **PR1** | Optimization foundation: solver adapter, result contract, unrestricted **OPT** LP (§C1 in Revision 1, unaffected by this revision) and congestion-feasibility answer. | New `backend/app/optimization/{models,solver,result}.py` + `opt_flow.py`; `SolverAdapter`/`PulpCbcAdapter`; new `POST /optimize` route. | PR0 (soft — PR1 doesn't touch SR at all, but should land after PR0 for a clean history) | `backend/app/optimization/*`, `backend/app/services/optimization_service.py`, `backend/app/main.py` (+1 route), `backend/requirements.txt` (+PuLP+CBC) | New `test_opt_flow.py`: single-path, parallel-path, structurally-impossible-capacity, infeasible-hard-policy cases (Revision 1 §Q, cases 1/2/4/9) |
+| **PR2** | Optimal-baseline frontend integration — `OptimizationResult → SimulationResult` projection wired to the *unmodified* `ComparisonPanel`. | New types, `optimizeNetwork()` API call, minimal "Optimization Lab" entry point with only "Optimal Flow" enabled. | PR1 | `frontend/src/types/network.ts`, `frontend/src/api/simulationApi.ts`, new `OptimizationLabPage.tsx`, additive `WorkflowManager.tsx` state | Manual scenario verification (no JS test runner in this project, per PR6's own noted limitation) |
+| **PR3 — REVISED** | **Waypoint Optimization, now as an exact MILP** (upgraded from Revision 1's greedy-heuristic-only plan): directly implement [Le21]'s `P0` — `Σ_k α^k_ij=1`, `Σ g^k_ij(e)α^k_ij·m_ij ≤ θc(e)`, `α^k_ij∈{0,1}`, `min θ` — via `SolverAdapter`, with `f_ik(e)`/`f_kj(e)` precomputed by **calling Sprint 1's own `resolve_segment_route`** (§6.3/§7.1's reversed recommendation), not a separately-implemented routing subroutine. Add `GreedyWPO` ([Parham21] Algorithm 3) as an explicit, labeled **fallback heuristic** for topologies too large for the exact solve (per [Le21]'s own ~20-node practical ceiling for exact MILP). | `backend/app/optimization/waypoint_optimizer.py` (both the exact-MILP path and the greedy-fallback path, clearly labeled which is which in `OptimizationResult.status`), `test_wpo.py`. | PR1, **PR0** (this is the module that actually exercises the tie-breaking contract PR0 hardens) | as above | Revision 1 §Q cases 3, 6, plus new cases derived from [Le21]'s own worked datasets' *shape* (small hand-built topologies with a clear single-waypoint improvement, not the real datasets themselves) |
+| **PR4** | **Link Weight Optimization** (unaffected by this revision's new source) — `HeurOSPF`-style local search. | `backend/app/optimization/weight_optimizer.py`, `test_lwo.py`. | PR1 | as above | Revision 1 §Q case 5 ([Parham21] TE-Instance 1) |
+| **PR5 — CLARIFIED** | **"Joint" mode — explicitly labeled as a Sprint-2-specific heuristic hybrid, not [Parham21]'s Joint verbatim.** Composes PR4's LWO with PR3's *exact* WPO (not `GreedyWPO`, unless PR3's fallback path is what's available for a given topology size) — this is a **deliberate departure** from [Parham21]'s own `JOINT-Heur` (which composes `HeurOSPF` with `GreedyWPO`, both heuristics, both under its even-split routing model). Product copy and code comments must say plainly that this "Joint" mode optimizes weights under ECMP and waypoints under single-path routing — two different routing models glued together for product usefulness, not a literal implementation of any one paper's Joint definition. | `backend/app/optimization/joint_optimizer.py`, `test_joint.py`. | PR3, PR4 | as above | Revision 1 §Q cases 6, 7 (case 7's exact reproduction of [Parham21]'s Ω(n) gap requires using PR3's *even-split-compatible* fallback path specifically — flagged as a test-design detail, not a blocker) |
+| **PR6** | Infeasibility explanations + solver UX + performance guards, incl. [Brundiers23]'s SR Path Domination as an always-on, lossless preprocessing pass. | `backend/app/optimization/preprocessing.py`, status/copy updates. | PR1–5 | as Revision 1 | Revision 1 §Q cases 8, 9 end-to-end |
+
+**What changed in this table vs. Revision 1's PR breakdown:** PR3 is upgraded from heuristic-only to exact-MILP-first (§6.3, §5); PR3 gained a dependency on the new PR0; PR5 gained an explicit disambiguation requirement (the "Joint" naming risk identified in §4.3/§9) that Revision 1 did not flag as sharply because Revision 1 did not yet know two *different*, independently-complete waypoint-routing models existed in the literature. PR1, PR2, PR4, PR6 are unchanged.
+
+---
+
+## 9. Risks and Open Questions
+
+**New or materially changed since Revision 1** (Revision 1's full DECIDE-NOW/CAN-DEFER table for items untouched by this revision — weight range, timeout, gap tolerance, soft-policy lexicographic objective, node-SID-only V1 scope, directed/undirected handling — still applies as originally written and is not repeated here to avoid duplication; see `docs/research/sprint2-mip-architecture-analysis-v1.md` §S for those):
+
+| Item | Status |
+|---|---|
+| **Which paper's waypoint-routing model does Sprint 2's WPO target — [Parham21]'s even-split or [Le21]'s unsplittable single-path?** | **DECIDE NOW.** This revision recommends [Le21]'s, for Sprint-1 compatibility and because it is the only one of the two with a complete, exact, real-scale-validated MILP available to us (§5, §6.3). This is the single most consequential decision in this document. |
+| **Is "Joint" allowed to mean a Sprint-2-specific LWO(ECMP)+WPO(single-path) hybrid, given neither matches [Parham21]'s Joint (which requires even-split routing throughout)?** | **DECIDE NOW**, and must be reflected in both code comments/docstrings and any future product copy (§8, PR5) — silently calling this "Joint optimization" without qualification would misrepresent what the papers mean by the term. |
+| **Should PR3's exact-MILP path have a topology-size cutoff that automatically falls back to `GreedyWPO`, and where should that cutoff be?** | **CAN DEFER** to PR3's own implementation — [Le21] suggests ~20 nodes as a rough practical ceiling for exact MILP (citing a third paper, Gay/Hartert/Vissicchio, not independently verified by us), but this project's own topologies are all much smaller, so the cutoff's exact value is low-stakes for V1. |
+| **Is `resolve_segment_route`'s tie-breaking actually stable across the NetworkX versions this project might upgrade to?** | **CAN DEFER**, but PR0's regression test (§8) is exactly the mechanism that would catch a future NetworkX upgrade silently breaking this — recommend running that test as part of any future dependency-upgrade PR's checklist, not just once. |
+| **[Le21]'s `LS2SR` heuristic (link/flow selection probabilities, path-space pruning) — worth adopting as WPO's fallback heuristic instead of, or alongside, [Parham21]'s `GreedyWPO`?** | **CAN DEFER** — both are legitimate, fully-specified options for a fallback path; `GreedyWPO` is simpler to implement correctly (no path-enumeration/pruning machinery needed) and was already the Revision 1 recommendation, so it remains the default unless PR3's implementation experience suggests otherwise. |
+| **Does [Le21]'s equivalent-path/non-simple-path pruning (§IV-A) belong in `preprocessing.py` alongside [Brundiers23]'s four techniques?** | **CAN DEFER** to PR6 — conceptually yes (it's a legitimate, lossless-for-the-unsplittable-case candidate-set reduction, analogous in spirit to SR Path Domination), but Sprint 2 V1's small topologies don't need it yet, matching Revision 1's original "no preprocessing needed for V1 scale" conclusion. |
+| **The fifth (previously missing) paper is now resolved — are there any *other* referenced-but-unsupplied works Sprint 2 should flag before implementation?** | Noted for completeness: [Le21] itself cites Gay/Hartert/Vissicchio (SRLS, INFOCOM 2017) and Jadin/Aubry/Schaus/Bonaventure (CG4SR, INFOCOM 2019) as related heuristic/exact approaches it compares against — neither is in `docs/research/papers/`, and this document does not claim independent verification of either beyond what [Le21] itself reports about them. **CAN DEFER** — nothing in Sprint 2 V1's plan depends on either. |
+
+---
+
+## 10. Final Recommendations
+
+1. **Adopt [Le21]'s `P0` as the reference model for Sprint 2's WPO mode**, implemented as an exact MILP via PuLP+CBC (upgraded from Revision 1's heuristic-only plan), with `GreedyWPO` retained as an explicit, clearly-labeled fallback for topologies beyond exact-MILP's practical scale.
+2. **Reuse `routing_helpers.resolve_segment_route` directly inside the WPO optimizer** rather than building a parallel routing subroutine — the opposite of Revision 1's recommendation, justified by [Le21]'s routing model matching Sprint 1's existing implementation exactly (§6.3, §7.1).
+3. **Land PR0 before any Sprint 2 optimization PR** — a small, additive, zero-behavior-change regression test making `resolve_segment_route`'s determinism an explicit, tested contract, since it now matters for optimizer/simulator result-reproducibility in a way it didn't before this cross-module dependency existed.
+4. **Never present a composed "Joint" mode as [Parham21]'s Joint without qualification** — if Sprint 2's Joint mode mixes ECMP-based LWO with single-path-based WPO (recommended for Sprint 1 compatibility), that is a Sprint-2-specific design choice, not a literal implementation of any single paper's model, and must be labeled as such everywhere it appears (code, tests, any future product copy).
+5. **The exact Joint (weight + waypoint) MILP remains unavailable in our sources, confirmed a second time** via an independent copy of [Parham21] and a full read of its Appendix A — do not attempt to reconstruct it; continue to rely on the fully-specified `JOINT-Heur` heuristic composition for any mode described as "Joint."
+6. **Multi-time-step/predictive optimization remains explicitly out of Sprint 2 V1's scope**, now confirmed against the real paper ([Le21]) rather than an unverifiable slide-deck mention — revisit only as a distinct, future, separately-scoped initiative.
+7. **Every other Revision 1 recommendation not discussed above stands unchanged** — the four-mode taxonomy (OPT/LWO/WPO/Joint), the solver choice (PuLP+CBC behind a `SolverAdapter`, now with an additional real-world validation point from [Le21]), the `OptimizationResult` contract, the infeasibility terminology, the reuse map for `NetworkInput`/`GraphBuilder`/`Metrics`/`TrafficEngineeringPolicy`, and the "no new frontend visualization engine, reuse `ComparisonPanel`" design are all reaffirmed by this revision's full re-read of the literature.
+
+---
+
+## Deliverable confirmation
+
+- ✅ Every PDF in `docs/research/papers/` was read completely (not just abstract/introduction), including [Parham21]'s Appendix A and [Le21]'s full formulation, heuristic, and experimental sections.
+- ✅ This document: `docs/research/sprint2-mip-architecture-analysis.md` (Revision 2), replacing the Revision 1 content at that conceptual slot; Revision 1's original file preserved at `docs/research/sprint2-mip-architecture-analysis-v1.md` for history, not as a second source of truth.
+- ✅ No frontend page, route, React component, or dashboard was created.
+- ✅ No production backend or frontend code was changed — PR0 and all Sprint 2 PRs remain proposals only.
+- ✅ No mathematical formulation was invented: every constraint/variable/objective quoted above is attributed to a specific paper and (where the source uses one) an explicit equation number; every place information is missing (the exact Joint MILP; the unsupplied Gay/Hartert/Vissicchio and Jadin/Aubry/Schaus/Bonaventure papers [Le21] itself cites) is stated as missing, not guessed at.
+- ✅ Every changed conclusion relative to Revision 1 is called out explicitly, with the specific new evidence that caused the change (§0 summary, §6.3, §7.1, §8, §10).
+- ✅ Branch `feat/sprint2-mip-analysis`, based on `feat/sprint1-mid-sim-failure-comparison` @ `0396809` (not `main`). Not merged, not pushed.
