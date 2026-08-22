@@ -24,8 +24,16 @@ from pydantic import BaseModel, Field
 
 OptimizationStatus = Literal["OPTIMAL", "FEASIBLE", "INFEASIBLE", "TIME_LIMIT", "ERROR"]
 
-# Widened to "LWO" | "WPO" | "JOINT" by future PRs — PR1 only ever produces "OPT".
-OptimizationMode = Literal["OPT"]
+# PR1 produces "OPT" only. PR2 adds "WAYPOINT_OPTIMIZATION". Widened again by
+# LWO/JOINT in later PRs.
+OptimizationMode = Literal["OPT", "WAYPOINT_OPTIMIZATION"]
+
+# PR2: which search actually produced a WAYPOINT_OPTIMIZATION result —
+# EXACT_ENUMERATION is a genuinely exhaustive search over an explicitly
+# bounded candidate space (never called "MILP" — see waypoint_optimizer.py's
+# module docstring for why); GREEDY_WPO is Parham et al.'s Algorithm 3, a
+# polynomial heuristic with no optimality guarantee.
+WaypointSearchMethod = Literal["EXACT_ENUMERATION", "GREEDY_WPO"]
 
 
 class FlowAssignment(BaseModel):
@@ -40,6 +48,18 @@ class FlowAssignment(BaseModel):
     demandId: str
     nodes: List[str]
     share: float
+
+
+class WaypointAssignmentEntry(BaseModel):
+    """One demand's recommended waypoint (PR2) — `waypointNodeId=None` is
+    itself a valid, meaningful recommendation ("no additional waypoint helps
+    this demand"), not an absence of data. Mirrors the `WaypointAssignment`
+    shape from docs/research/sprint2-mip-architecture-analysis-v1.md Part J,
+    renamed to avoid colliding with this module's `WaypointAssignment` type
+    alias (a plain `Dict[str, Optional[str]]`, see waypoint_evaluator.py).
+    """
+    demandId: str
+    waypointNodeId: Optional[str] = None
 
 
 class OptimizationResult(BaseModel):
@@ -66,3 +86,20 @@ class OptimizationResult(BaseModel):
     # in that case; None for INFEASIBLE/ERROR).
     lowerBound: Optional[float] = None
     debugInfo: List[str] = Field(default_factory=list)
+
+    # ── PR2 additions (WAYPOINT_OPTIMIZATION only) ─────────────────────────
+    # All optional/defaulted so every PR1 OPT result and test is completely
+    # unaffected — OPT never populates any of these.
+    recommendedWaypoints: Optional[List[WaypointAssignmentEntry]] = None
+    baselineMLU: Optional[float] = None
+    optimizedMLU: Optional[float] = None
+    # baselineMLU - optimizedMLU; positive means the recommendation helps.
+    improvement: Optional[float] = None
+    searchMethod: Optional[WaypointSearchMethod] = None
+    searchSpaceSize: Optional[int] = None
+    evaluatedCandidates: Optional[int] = None
+    # True only for EXACT_ENUMERATION (a genuine exhaustive search over the
+    # declared candidate space); False for GREEDY_WPO. Never true for a
+    # heuristic result — see Part K's OPTIMAL-vs-FEASIBLE status table,
+    # which this field mirrors at the mode-specific level.
+    provenOptimal: Optional[bool] = None
