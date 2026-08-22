@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import itertools
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import networkx as nx
 
@@ -298,6 +298,7 @@ def _exact_enumeration(
     link_map,
     candidate_lists: Dict[str, List[Optional[str]]],
     network: NetworkInput,
+    evaluate_fn: Optional[Callable[[WaypointAssignment], WaypointEvaluationResult]] = None,
 ) -> Tuple[WaypointAssignment, WaypointEvaluationResult, int]:
     """Genuinely exhaustive search over the Cartesian product of every
     demand's own candidate list. Deterministic: `itertools.product` iterates
@@ -308,7 +309,22 @@ def _exact_enumeration(
     yields, since `None` is always each candidate list's first entry) is
     preferred whenever it already achieves the best MLU — a reasonable,
     documented simplicity bias, not an arbitrary one.
+
+    `evaluate_fn`, if given, replaces the default
+    `evaluate_waypoint_assignment(network, demands, demand_graphs,
+    demand_required_waypoints, link_map, assignment)` call — this is the seam
+    PR4's Joint optimizer uses to reuse this exact search algorithm while
+    evaluating against a *fixed* candidate link-weight setting instead of the
+    network's own original weights (see `joint_optimizer.py`). Every existing
+    caller omits it and gets byte-identical behavior to before this
+    parameter existed.
     """
+    if evaluate_fn is None:
+        def evaluate_fn(assignment: WaypointAssignment) -> WaypointEvaluationResult:
+            return evaluate_waypoint_assignment(
+                network, demands, demand_graphs, demand_required_waypoints, link_map, assignment,
+            )
+
     demand_ids = [d.id for d in demands]
     candidate_sequences = [candidate_lists[did] for did in demand_ids]
 
@@ -318,9 +334,7 @@ def _exact_enumeration(
 
     for combo in itertools.product(*candidate_sequences):
         assignment: WaypointAssignment = dict(zip(demand_ids, combo))
-        result = evaluate_waypoint_assignment(
-            network, demands, demand_graphs, demand_required_waypoints, link_map, assignment,
-        )
+        result = evaluate_fn(assignment)
         evaluated += 1
         if best_eval is None or result.mlu < best_eval.mlu - _MLU_IMPROVEMENT_EPSILON:
             best_eval = result
@@ -338,6 +352,7 @@ def _greedy_wpo(
     candidate_lists: Dict[str, List[Optional[str]]],
     network: NetworkInput,
     baseline_eval: WaypointEvaluationResult,
+    evaluate_fn: Optional[Callable[[WaypointAssignment], WaypointEvaluationResult]] = None,
 ) -> Tuple[WaypointAssignment, WaypointEvaluationResult, int]:
     """[Parham21] Algorithm 3 (`GreedyWPO`), followed as written:
 
@@ -356,7 +371,16 @@ def _greedy_wpo(
 
     No additional heuristic behavior beyond the paper's own algorithm is
     added.
+
+    `evaluate_fn`: see `_exact_enumeration`'s docstring — the same reuse
+    seam, used identically by `joint_optimizer.py`.
     """
+    if evaluate_fn is None:
+        def evaluate_fn(assignment: WaypointAssignment) -> WaypointEvaluationResult:
+            return evaluate_waypoint_assignment(
+                network, demands, demand_graphs, demand_required_waypoints, link_map, assignment,
+            )
+
     demand_ids = [d.id for d in demands]
     assignment: WaypointAssignment = {did: None for did in demand_ids}
     evaluated = 1  # the baseline evaluation the caller already computed
@@ -374,9 +398,7 @@ def _greedy_wpo(
                 continue  # None is exactly the current baseline — already scored.
             trial: WaypointAssignment = dict(assignment)
             trial[demand.id] = candidate
-            trial_eval = evaluate_waypoint_assignment(
-                network, demands, demand_graphs, demand_required_waypoints, link_map, trial,
-            )
+            trial_eval = evaluate_fn(trial)
             evaluated += 1
             if trial_eval.mlu < best_mlu - _MLU_IMPROVEMENT_EPSILON:
                 best_mlu = trial_eval.mlu

@@ -59,6 +59,46 @@ class WaypointEvaluationResult:
     unreachable_demand_ids: List[str] = field(default_factory=list)
 
 
+def route_demand_with_waypoints(
+    demand: TrafficDemandInput,
+    graph: "nx.Graph",
+    link_map: LinkMap,
+    required_waypoints: List[str],
+    extra_waypoint: Optional[str],
+) -> Tuple[Dict[str, float], bool]:
+    """Routes one demand through `required_waypoints + ([extra_waypoint] if
+    any)` using PR0's ECMP-within-segments semantics — waypoints resolved as
+    `[source] + segments + [target]`, every consecutive pair via
+    `compute_ecmp_leg_distribution`, each leg's own `link_loads` summed
+    directly (the "aggregate re-mixes fully at every waypoint" semantics
+    `segment_routing.py`'s own module docstring documents).
+
+    This is the one shared per-demand routing step both
+    `evaluate_waypoint_assignment` (below, WPO) and PR4's
+    `joint_evaluator.evaluate_joint_assignment` call — defined exactly once
+    so both optimizers' routing behavior can never silently drift apart.
+
+    Returns `(demand_loads, reachable)`; `demand_loads` is `{}` and
+    `reachable` is `False` if any leg has no path (mirrors every other
+    per-demand "soft failure, not a crash" convention in this codebase).
+    """
+    segments = list(required_waypoints) + ([extra_waypoint] if extra_waypoint else [])
+    waypoints = [demand.source] + segments + [demand.target]
+
+    demand_loads: Dict[str, float] = {}
+    for i in range(len(waypoints) - 1):
+        try:
+            leg = compute_ecmp_leg_distribution(
+                graph, link_map, waypoints[i], waypoints[i + 1], demand.amount
+            )
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            return {}, False
+        for link_id, amount in leg.link_loads.items():
+            demand_loads[link_id] = demand_loads.get(link_id, 0.0) + amount
+
+    return demand_loads, True
+
+
 def evaluate_waypoint_assignment(
     network: NetworkInput,
     demands: List[TrafficDemandInput],
@@ -91,21 +131,8 @@ def evaluate_waypoint_assignment(
         graph = demand_graphs[demand.id]
         required = demand_required_waypoints.get(demand.id, [])
         extra = assignment.get(demand.id)
-        segments = list(required) + ([extra] if extra else [])
-        waypoints = [demand.source] + segments + [demand.target]
 
-        demand_loads: Dict[str, float] = {}
-        reachable = True
-        for i in range(len(waypoints) - 1):
-            try:
-                leg = compute_ecmp_leg_distribution(
-                    graph, link_map, waypoints[i], waypoints[i + 1], demand.amount
-                )
-            except (nx.NetworkXNoPath, nx.NodeNotFound):
-                reachable = False
-                break
-            for link_id, amount in leg.link_loads.items():
-                demand_loads[link_id] = demand_loads.get(link_id, 0.0) + amount
+        demand_loads, reachable = route_demand_with_waypoints(demand, graph, link_map, required, extra)
 
         if not reachable:
             unreachable.append(demand.id)

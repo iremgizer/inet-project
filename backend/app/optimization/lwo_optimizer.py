@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import itertools
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from app.models import AlgorithmConfig, NetworkInput, TrafficDemandInput
 from app.optimization.lwo_evaluator import (
@@ -236,6 +236,7 @@ def _exact_enumeration(
     optimizable_link_ids: List[str],
     baseline_weights: WeightAssignment,
     weight_domain: List[int],
+    evaluate_fn: Optional[Callable[[WeightAssignment], LwoEvaluationResult]] = None,
 ) -> Tuple[WeightAssignment, LwoEvaluationResult, int]:
     """Genuinely exhaustive search over every weight assignment in
     `weight_domain ^ optimizable_link_ids` — links outside
@@ -244,7 +245,19 @@ def _exact_enumeration(
     (`optimizable_link_ids` is pre-sorted; `weight_domain` is
     `range(min, max+1)`, already ascending), and only a strictly better MLU
     displaces the current best — "first encountered wins" on ties.
+
+    `evaluate_fn`, if given, replaces the default
+    `evaluate_link_weights(network, demands, base_graph, link_map,
+    te_policies, candidate)` call — the seam PR4's Joint optimizer uses to
+    reuse this exact search algorithm while evaluating against a *fixed*
+    waypoint assignment instead of ECMP's plain (REQUIRE_WAYPOINT-only)
+    routing model (see `joint_optimizer.py`). Every existing caller omits it
+    and gets byte-identical behavior to before this parameter existed.
     """
+    if evaluate_fn is None:
+        def evaluate_fn(candidate: WeightAssignment) -> LwoEvaluationResult:
+            return evaluate_link_weights(network, demands, base_graph, link_map, te_policies, candidate)
+
     best_weights: Optional[WeightAssignment] = None
     best_eval: Optional[LwoEvaluationResult] = None
     evaluated = 0
@@ -252,7 +265,7 @@ def _exact_enumeration(
     for combo in itertools.product(weight_domain, repeat=len(optimizable_link_ids)):
         candidate: WeightAssignment = dict(baseline_weights)
         candidate.update(zip(optimizable_link_ids, combo))
-        result = evaluate_link_weights(network, demands, base_graph, link_map, te_policies, candidate)
+        result = evaluate_fn(candidate)
         evaluated += 1
         if best_eval is None or result.mlu < best_eval.mlu - _MLU_IMPROVEMENT_EPSILON:
             best_eval = result
@@ -272,6 +285,7 @@ def _heuristic_lwo(
     baseline_weights: WeightAssignment,
     baseline_eval: LwoEvaluationResult,
     weight_domain: List[int],
+    evaluate_fn: Optional[Callable[[WeightAssignment], LwoEvaluationResult]] = None,
 ) -> Tuple[WeightAssignment, LwoEvaluationResult, int]:
     """Deterministic hill-climbing / coordinate descent, inspired by
     [Fortz00]'s `HeurOSPF` local-search structure but simplified per this
@@ -295,7 +309,14 @@ def _heuristic_lwo(
     simulated annealing) is added — this is deliberately the simplest
     reading of "iterative local search," not a reproduction of
     `HeurOSPF` itself.
+
+    `evaluate_fn`: see `_exact_enumeration`'s docstring — the same reuse
+    seam, used identically by `joint_optimizer.py`.
     """
+    if evaluate_fn is None:
+        def evaluate_fn(candidate: WeightAssignment) -> LwoEvaluationResult:
+            return evaluate_link_weights(network, demands, base_graph, link_map, te_policies, candidate)
+
     current_weights: WeightAssignment = dict(baseline_weights)
     current_eval = baseline_eval
     evaluated = 1  # the baseline evaluation the caller already computed
@@ -318,7 +339,7 @@ def _heuristic_lwo(
                     continue
                 trial: WeightAssignment = dict(current_weights)
                 trial[link_id] = value
-                trial_eval = evaluate_link_weights(network, demands, base_graph, link_map, te_policies, trial)
+                trial_eval = evaluate_fn(trial)
                 evaluated += 1
                 if trial_eval.mlu < best_mlu - _MLU_IMPROVEMENT_EPSILON:
                     best_mlu = trial_eval.mlu

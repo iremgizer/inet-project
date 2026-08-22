@@ -24,15 +24,17 @@ from pydantic import BaseModel, Field
 
 OptimizationStatus = Literal["OPTIMAL", "FEASIBLE", "INFEASIBLE", "TIME_LIMIT", "ERROR"]
 
-# PR1 produces "OPT" only. PR2 added "WAYPOINT_OPTIMIZATION". PR3 adds
-# "LINK_WEIGHT_OPTIMIZATION". Widened again by JOINT in a later PR.
-OptimizationMode = Literal["OPT", "WAYPOINT_OPTIMIZATION", "LINK_WEIGHT_OPTIMIZATION"]
+# PR1 produces "OPT" only. PR2 added "WAYPOINT_OPTIMIZATION". PR3 added
+# "LINK_WEIGHT_OPTIMIZATION". PR4 adds "JOINT_OPTIMIZATION".
+OptimizationMode = Literal[
+    "OPT", "WAYPOINT_OPTIMIZATION", "LINK_WEIGHT_OPTIMIZATION", "JOINT_OPTIMIZATION",
+]
 
-# Which search actually produced a WAYPOINT_OPTIMIZATION or
-# LINK_WEIGHT_OPTIMIZATION result:
+# Which search actually produced a WAYPOINT_OPTIMIZATION, LINK_WEIGHT_
+# OPTIMIZATION, or JOINT_OPTIMIZATION result:
 # - EXACT_ENUMERATION: a genuinely exhaustive search over an explicitly
 #   bounded candidate space (never called "MILP" — see waypoint_optimizer.py/
-#   lwo_optimizer.py's own module docstrings for why). Shared by both modes
+#   lwo_optimizer.py's own module docstrings for why). Shared by WPO and LWO
 #   since both search strategies are the same idea (brute-force over a
 #   bounded discrete space), just over a different candidate shape.
 # - GREEDY_WPO: Parham et al.'s Algorithm 3 (PR2, waypoint search only).
@@ -40,8 +42,21 @@ OptimizationMode = Literal["OPT", "WAYPOINT_OPTIMIZATION", "LINK_WEIGHT_OPTIMIZA
 #   local search over link weights (see lwo_optimizer.py) — NOT a
 #   reproduction of Fortz&Thorup's actual `HeurOSPF` (no randomized restarts/
 #   tabu search; "no randomness in V1" is this PR's own explicit constraint).
-# Both GREEDY_WPO and HEURISTIC_LWO carry no optimality guarantee.
-SearchMethod = Literal["EXACT_ENUMERATION", "GREEDY_WPO", "HEURISTIC_LWO"]
+# - EXACT_JOINT_ENUMERATION: PR4's simultaneous brute-force search over
+#   weight assignments x waypoint assignments (see joint_optimizer.py) —
+#   still never called "MILP"; genuinely exhaustive within its declared
+#   combined candidate space.
+# - JOINT_ALTERNATING: PR4's default — iterating HEURISTIC_LWO and
+#   GREEDY_WPO/EXACT_ENUMERATION-per-step in alternation until MLU stops
+#   improving (generalizes [Parham21]'s fixed 3-step `JOINT-Heur`, see
+#   joint_optimizer.py's own module docstring). Never proven jointly
+#   optimal, even when an individual round's own LWO/WPO step happened to
+#   run in its own exact sub-mode.
+# Every SearchMethod except EXACT_ENUMERATION and EXACT_JOINT_ENUMERATION
+# carries no optimality guarantee.
+SearchMethod = Literal[
+    "EXACT_ENUMERATION", "GREEDY_WPO", "HEURISTIC_LWO", "EXACT_JOINT_ENUMERATION", "JOINT_ALTERNATING",
+]
 
 
 class FlowAssignment(BaseModel):
@@ -117,3 +132,16 @@ class OptimizationResult(BaseModel):
     # unaffected. linkId -> weight, one entry per link in the network.
     recommendedWeights: Optional[Dict[str, float]] = None
     baselineWeights: Optional[Dict[str, float]] = None
+
+    # ── PR4 additions (JOINT_OPTIMIZATION only) ────────────────────────────
+    # All optional/defaulted so every PR1/PR2/PR3 result and test is
+    # completely unaffected. recommendedWeights/recommendedWaypoints (both
+    # already defined above) are reused verbatim for Joint's own two
+    # recommendation halves — no new fields needed for those.
+    iterations: Optional[int] = None
+    # Human-readable reason the alternating loop stopped, e.g. "MLU
+    # improvement below epsilon (1e-06) after 3 iteration(s)." or "Maximum
+    # iterations (10) reached." — always populated for JOINT_ALTERNATING;
+    # a fixed "Exhaustive search over the combined candidate space
+    # completed." for EXACT_JOINT_ENUMERATION, which does not iterate.
+    convergenceReason: Optional[str] = None
