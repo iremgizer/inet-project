@@ -197,25 +197,26 @@ These schemas are used internally by the app to validate imported files. Student
 
 ---
 
-## Requirements
+# Running the Project
 
+This section is everything needed to clone, install, and run the project from scratch — no prior knowledge of the codebase required.
+
+## Prerequisites
+
+- **Python** 3.11 or later (developed and tested against 3.13)
 - **Node.js** v18 or later
 - **npm** v9 or later
-- **Python** 3.11 or later
-- **MongoDB** 7 (optional — required only for saving simulation runs and assignments)
+- **MongoDB** — **optional.** The app runs fully without it; see [Optional MongoDB](#optional-mongodb) below for exactly what is and isn't affected.
+- **Solver dependency** — the Optimization Lab's OPT mode solves a linear program with [PuLP](https://github.com/coin-or/pulp) (`pulp==3.3.2`, in `backend/requirements.txt`) using the CBC solver. **No separate CBC install is required** — PuLP bundles a working CBC binary for macOS/Linux/Windows and installs it automatically with `pip install -r requirements.txt`. Nothing solver-related needs to be installed manually.
 
----
-
-## Installation
+## Clone
 
 ```bash
 git clone https://github.com/iremgizer/inet-project.git
 cd inet-project
 ```
 
----
-
-## Running the Backend
+## Backend Setup
 
 Open a terminal in the project root.
 
@@ -229,7 +230,7 @@ python3 -m venv .venv
 source .venv/bin/activate        # macOS / Linux
 # .venv\Scripts\activate         # Windows
 
-# Install dependencies (first time only)
+# Install dependencies (first time only) — this also installs PuLP + its bundled CBC solver
 pip install -r requirements.txt
 
 # Start the development server
@@ -238,11 +239,10 @@ uvicorn app.main:app --reload --port 8000
 
 The backend runs at **http://localhost:8000**
 
-API documentation is available at **http://localhost:8000/docs**
+- API documentation (interactive Swagger UI): **http://localhost:8000/docs**
+- Health check: **http://localhost:8000/health** — returns `{"status": "ok", "mongoAvailable": true|false}`, which is the fastest way to confirm the backend is up and to see whether it detected a running MongoDB.
 
----
-
-## Running the Frontend
+## Frontend Setup
 
 Open a second terminal in the project root.
 
@@ -258,38 +258,56 @@ npm run dev
 
 The frontend runs at **http://localhost:5173**
 
----
+## Running Both
 
-## MongoDB (Optional)
+The backend and frontend are two separate processes and must run in two separate terminals at the same time — `uvicorn` in one (from `backend/`), `npm run dev` in the other (from `frontend/`). The frontend talks to the backend over `http://localhost:8000` by default (overridable with a `VITE_BACKEND_URL` environment variable); the backend's CORS configuration already allows `http://localhost:5173`. Neither process needs to be started in a particular order.
 
-Simulations, saved runs, and classroom assignments can be persisted to a local MongoDB instance. The application works without it — saved runs and assignment storage are silently disabled when the database is unavailable.
+## Optimization Lab
 
-Start a MongoDB 7 container with Docker:
+Sprint 2 adds an opt-in **Optimization Lab**, reachable from the Choose Algorithm screen once a network and traffic demands are configured. It runs four traffic-engineering optimizers against the same topology — **OPT** (unrestricted theoretical optimum), **Waypoint Optimization**, **Link Weight Optimization**, and **Joint Optimization** — each using an exact search when the combinatorial search space is small enough, and falling back to a heuristic otherwise. The search budget (how large a search space is still solved exactly) and a per-run timeout are both user-configurable, and a search-space preview is shown before running so the exact-vs-heuristic trade-off is visible ahead of time. Full detail is in the [Sprint 2 — Optimization Lab](#sprint-2--optimization-lab) section further down and in `docs/research/sprint2-mip-architecture-analysis.md`.
+
+## Optional MongoDB
+
+MongoDB is **entirely optional**. The app is fully usable without it:
+
+| Works without MongoDB | Requires MongoDB |
+|---|---|
+| Guest "Start Building a Network" flow, topology builder, all four algorithms (ECMP, Distance Vector, Segment Routing, ECMP-within-segments), trace replay, Optimization Lab, JSON import/export, demo teacher/student login and dashboards (seeded in `localStorage`) | Persisting simulation runs across sessions/devices; saving Teacher Workspace assignments server-side; loading assignment-type (non-challenge) student work from storage rather than a local file |
+
+When MongoDB is unavailable, the affected save/load actions are silently disabled rather than erroring — check `GET /health`'s `mongoAvailable` field to confirm which mode you're in. Demo data (the pre-seeded teacher/student accounts, assignments, and progress) is always available regardless of MongoDB, since it's seeded in the frontend's own `localStorage`, not the database.
+
+To enable it, start a MongoDB 7 container with Docker:
 
 ```bash
-docker run --name network-viz-mongo \
-  -p 27017:27017 \
-  -d mongo:7
+docker run -d --name network-viz-mongo -p 27018:27017 --restart unless-stopped mongo:7
 ```
 
-If the container already exists:
+(If the container already exists: `docker start network-viz-mongo`.)
+
+Then configure the backend by copying `backend/.env.example` to `backend/.env` (already set to the values below by default — only edit if you need a different port/database):
 
 ```bash
-docker start network-viz-mongo
-```
-
-The backend connects to `mongodb://localhost:27017` and uses the `network_visualizer` database by default. Override these with environment variables if needed:
-
-```bash
-MONGODB_URI=mongodb://localhost:27017
+MONGODB_URI=mongodb://localhost:27018
 MONGODB_DATABASE=network_visualizer
 ```
 
----
+Note the non-default port **27018** — this project intentionally runs its own MongoDB container on 27018 (not MongoDB's usual 27017) so it doesn't collide with any other local MongoDB instance.
 
-## Running Tests
+## Demo / Quick Start
 
-**Backend**
+The fastest way to see the project with no login and no setup beyond the two dev servers running:
+
+1. Open **http://localhost:5173**
+2. Click **Start Building a Network** on the landing page (no account needed)
+3. Use a template or **Import JSON** and load `sample-json/triangle_ecmp.json` (three nodes, two equal-cost paths — the clearest ECMP demo)
+4. Add a traffic demand between two nodes, then choose **ECMP** and run the simulation to see traffic split and congestion coloring
+5. Click **Optimization Lab** on the same Choose Algorithm screen to compare the baseline against OPT / Waypoint / Link Weight / Joint optimization results
+
+For the full guided teacher/student/challenge walkthrough, see [Midterm Demo Script](#midterm-demo-script) below.
+
+## Tests
+
+**Backend — full pytest suite**
 
 ```bash
 cd backend
@@ -297,7 +315,14 @@ source .venv/bin/activate
 python3 -m pytest tests/ -q
 ```
 
-**Frontend — production build check**
+**Frontend — TypeScript check**
+
+```bash
+cd frontend
+npx tsc --noEmit
+```
+
+**Frontend — production build**
 
 ```bash
 cd frontend
