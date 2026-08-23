@@ -1,5 +1,6 @@
 import React, { useCallback, useContext } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
+import { MapPin } from "lucide-react";
 import { SimulationOverlayContext } from "./ReactFlowCanvas";
 
 const NetworkNode: React.FC<NodeProps> = ({ id, data, selected }) => {
@@ -12,13 +13,19 @@ const NetworkNode: React.FC<NodeProps> = ({ id, data, selected }) => {
     linkResults,
     isSimulated,
     gradingNodeIds,
+    srActiveWaypointId,
+    tePolicies,
   } = useContext(SimulationOverlayContext);
 
-  const isHighlighted    = highlightedNodeIds.has(id);
-  const isGradingNode    = gradingNodeIds.has(id);
-  const isHovered        = hoveredNodeId === id;
-  const isConnectSource  = connectSourceId === id;
-  const label            = (data as { label: string }).label;
+  const isHighlighted     = highlightedNodeIds.has(id);
+  const isGradingNode     = gradingNodeIds.has(id);
+  const isHovered         = hoveredNodeId === id;
+  const isConnectSource   = connectSourceId === id;
+  const isActiveWaypoint  = srActiveWaypointId === id;
+  // A REQUIRE_WAYPOINT policy marker — visually distinct (amber pin, dashed
+  // ring) from SR's own solid teal "active SID" ring above.
+  const isRequiredWaypoint = tePolicies.some((p) => p.type === "REQUIRE_WAYPOINT" && p.nodeId === id);
+  const label             = (data as { label: string }).label;
 
   // Compute tooltip info from context
   const connectedLinks = network.links.filter((l) => l.source === id || l.target === id);
@@ -38,6 +45,8 @@ const NetworkNode: React.FC<NodeProps> = ({ id, data, selected }) => {
         isConnectSource   ? "rf-node--connect-source" : "",
         hasCongestion     ? "rf-node--congested"      : "",
         isGradingNode     ? "rf-node--grading"        : "",
+        isActiveWaypoint  ? "rf-node--waypoint-active" : "",
+        isRequiredWaypoint ? "rf-node--te-required"    : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -50,6 +59,11 @@ const NetworkNode: React.FC<NodeProps> = ({ id, data, selected }) => {
       <Handle type="source" position={Position.Left}   id="left"   className="rf-handle" />
 
       <span className="rf-node-label">{label}</span>
+      {isRequiredWaypoint && (
+        <span className="rf-node-te-badge" title="Required waypoint">
+          <MapPin size={9} />
+        </span>
+      )}
 
       {/* Hover tooltip */}
       {isHovered && (

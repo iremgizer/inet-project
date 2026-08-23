@@ -11,12 +11,20 @@ export interface NodeInput {
   visualType?: string;
 }
 
+export type LinkOperationalStatus = "UP" | "DOWN";
+
 export interface LinkInput {
   id: string;
   source: string;
   target: string;
   capacity: number;
   weight: number;
+  /** Additive scenario state, separate from physical identity/weight/
+   * capacity above. A DOWN link stays in the topology (same id, weight,
+   * capacity, still visible) but is excluded from routing. Optional,
+   * defaults to "UP" — old networks/saved runs/JSON without this field mean
+   * exactly what they always meant. */
+  operationalStatus?: LinkOperationalStatus;
 }
 
 export interface TrafficDemandInput {
@@ -34,12 +42,81 @@ export interface NetworkInput {
   isDirected: boolean;
 }
 
+export interface SegmentRoutingPolicy {
+  demandId: string;
+  segments: string[]; // ordered waypoint node ids (source/destination excluded)
+}
+
+export type TrafficDistributionMode = "EQUAL" | "CUSTOM";
+
+export interface PathDistribution {
+  pathId: string;
+  /** Fraction (0..1) of the demand's traffic on this path — NOT a link weight. */
+  share: number;
+}
+
+export interface TrafficDistribution {
+  demandId: string;
+  mode: TrafficDistributionMode;
+  /** Only read when mode === "CUSTOM"; every discovered path for the demand
+   * must have an explicit entry summing to 1.0 (100%). */
+  paths: PathDistribution[];
+}
+
+export type TEPolicyType = "PREFER_LINK" | "AVOID_LINK" | "FORBID_LINK" | "REQUIRE_WAYPOINT";
+
+export interface TrafficEngineeringPolicy {
+  policyId: string;
+  type: TEPolicyType;
+  /** undefined/null = applies to every demand; set = scoped to just this one. */
+  demandId?: string | null;
+  /** Used by PREFER_LINK / AVOID_LINK / FORBID_LINK. */
+  linkId?: string | null;
+  /** Used by REQUIRE_WAYPOINT. */
+  nodeId?: string | null;
+  priority: number;
+  /** Overrides the default avoid/prefer cost adjustment; ignored by the two
+   * hard-constraint types. */
+  penalty?: number | null;
+}
+
+export type FailureTriggerType = "TRACE_STEP";
+
+/** A scheduled mid-simulation link failure (PR 6) — additive on top of
+ * PR 5's `LinkInput.operationalStatus`, not a replacement for it. Where
+ * `operationalStatus="DOWN"` means "down for the whole run," a
+ * `SimulationFailureEvent` means "UP at the start, transitions to DOWN
+ * partway through it" — the link is UP for trace steps 0..triggerValue,
+ * then a LINK_FAILURE trace event fires and routing recomputes around it. */
+export interface SimulationFailureEvent {
+  eventId: string;
+  linkId: string;
+  triggerType: FailureTriggerType;
+  triggerValue: number;
+}
+
 export interface AlgorithmConfig {
   selectedAlgorithm: AlgorithmName;
   algorithmType: AlgorithmType;
   objective: ObjectiveType;
   congestionThreshold: number;
   maxTraceEvents?: number;
+  // Segment Routing V1 — optional, only meaningful when
+  // selectedAlgorithm === "SEGMENT_ROUTING". No SR feature UI ships in this
+  // PR; this mirrors the backend's additive, optional field.
+  segmentRoutingPolicies?: SegmentRoutingPolicy[];
+  // ECMP configurable traffic distribution — optional, only meaningful when
+  // selectedAlgorithm === "ECMP". A demand with no entry here (or the
+  // default array) splits traffic equally, exactly as ECMP always has.
+  trafficDistributions?: TrafficDistribution[];
+  // Traffic Engineering policies — optional, algorithm-agnostic routing
+  // intent read by ECMP and Segment Routing (Distance Vector ignores them
+  // and reports why via debugInfo). An empty array has zero effect.
+  tePolicies?: TrafficEngineeringPolicy[];
+  // Scheduled mid-simulation link failures (PR 6) — optional, algorithm-
+  // agnostic (ECMP, Segment Routing, and Distance Vector all support it).
+  // An empty array (the default) has zero effect on the trace.
+  failureSchedule?: SimulationFailureEvent[];
 }
 
 export interface SimulationRequest {
@@ -51,6 +128,10 @@ export interface PathShare {
   nodes: string[];
   cost: number;
   trafficShare: number;
+  /** Stable id ("path-1", "path-2", ...) assigned by ECMP after sorting
+   * equal-cost paths lexicographically by node sequence. Undefined for
+   * Distance Vector / Segment Routing (single path per demand). */
+  pathId?: string | null;
 }
 
 export interface PathResult {
@@ -105,6 +186,9 @@ export interface SimulationTraceEvent {
   activeNodeId?: string | null;
   activeDestinationId?: string | null;
   activeTableRowIds?: string[] | null;  // format: "nodeId::destinationId"
+  stepType?: string | null;             // machine-readable step category (e.g. "SELECT_ACTIVE_SEGMENT")
+  activeSegmentIndex?: number | null;   // Segment Routing: index into segmentList
+  segmentList?: string[] | null;        // Segment Routing: ordered waypoint stops for this demand
 }
 
 export interface SimulationResult {

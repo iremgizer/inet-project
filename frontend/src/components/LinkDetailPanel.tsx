@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import { Trash2, ChevronDown, ChevronUp, PowerOff, Power } from "lucide-react";
 import { LinkInput, SimulationResult } from "../types/network";
 import TermHint from "./TermHint";
 import {
@@ -8,6 +8,7 @@ import {
   utilizationLabel,
 } from "../utils/networkInspectors";
 import type { NetworkInput } from "../types/network";
+import { COMPARISON_STATUS_LABEL, LinkComparisonEntry } from "../utils/comparison";
 
 interface LinkDetailPanelProps {
   link: LinkInput;
@@ -15,9 +16,17 @@ interface LinkDetailPanelProps {
   result: SimulationResult | null;
   onUpdate: (id: string, update: Partial<LinkInput>) => void;
   onDelete: (id: string) => void;
+  /** Fail/restore this link (PR 5). Omitted entirely in contexts that don't
+   * wire it up (e.g. read-only views) — the section below simply doesn't
+   * render rather than calling something undefined. */
+  onToggleOperationalStatus?: (id: string) => void;
   canEditLinks?: boolean;
   canEditWeights?: boolean;
   canEditCapacities?: boolean;
+  /** Before/After comparison (PR 6, Part 2) — set only when a baseline
+   * exists and differs from the current result. Undefined/null renders
+   * nothing extra (no comparison available). */
+  comparisonEntry?: LinkComparisonEntry | null;
 }
 
 const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
@@ -26,9 +35,11 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
   result,
   onUpdate,
   onDelete,
+  onToggleOperationalStatus,
   canEditLinks = true,
   canEditWeights = true,
   canEditCapacities = true,
+  comparisonEntry = null,
 }) => {
   const [showFormula, setShowFormula] = useState(false);
 
@@ -37,6 +48,7 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
   const nodeLabel = (id: string) => network.nodes.find((n) => n.id === id)?.label ?? id;
 
   const uc = lr ? utilizationColor(lr.utilization) : null;
+  const isDown = (link.operationalStatus ?? "UP") === "DOWN";
 
   return (
     <div className="detail-panel">
@@ -49,7 +61,8 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
         </div>
         <div className="li-header-meta">
           <span className="detail-id">{link.id}</span>
-          {lr && <span className={`link-status-badge link-status-badge--${uc}`}>
+          {isDown && <span className="link-status-badge link-status-badge--down">Down</span>}
+          {!isDown && lr && <span className={`link-status-badge link-status-badge--${uc}`}>
             {lr.isCongested ? "Congested" : utilizationLabel(lr.utilization)}
           </span>}
         </div>
@@ -63,6 +76,33 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
           <Trash2 size={15} />
         </button>
       </div>
+
+      {/* ── Operational status (PR 5) ── */}
+      {onToggleOperationalStatus && (
+        <div className={`li-section li-opstatus${isDown ? " li-opstatus--down" : ""}`}>
+          <div className="li-opstatus-row">
+            <div className="li-opstatus-text">
+              <div className="li-opstatus-label">
+                {isDown ? "Link is down" : "Link is up"}
+              </div>
+              <div className="li-opstatus-hint">
+                {isDown
+                  ? "Excluded from routing. Same id, weight, and capacity — restore to make it eligible again."
+                  : "Fail this link to simulate an outage and see traffic reroute around it."}
+              </div>
+            </div>
+            <button
+              className={`btn-secondary li-opstatus-btn${isDown ? " li-opstatus-btn--restore" : " li-opstatus-btn--fail"}`}
+              onClick={() => onToggleOperationalStatus(link.id)}
+              title={canEditLinks ? (isDown ? "Restore link" : "Fail link") : "Locked by teacher"}
+              disabled={!canEditLinks}
+            >
+              {isDown ? <Power size={14} /> : <PowerOff size={14} />}
+              {isDown ? "Restore link" : "Fail link"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Parameters ── */}
       <div className="li-section">
@@ -168,6 +208,45 @@ const LinkDetailPanel: React.FC<LinkDetailPanelProps> = ({
             <pre className="formula-block">
               {`util = load / capacity\n     = ${lr.load.toFixed(2)} / ${lr.capacity}\n     = ${lr.utilization.toFixed(4)}`}
             </pre>
+          )}
+        </div>
+      )}
+
+      {/* ── Before/After comparison (PR 6, Part 2) ── */}
+      {comparisonEntry && (
+        <div className="li-section li-comparison">
+          <div className="detail-section-title">Before / After</div>
+          <div className="li-comparison-grid">
+            <div className="li-comparison-metric">
+              <span className="li-comparison-metric-label">Utilization</span>
+              <span className="li-comparison-metric-value">
+                {(comparisonEntry.beforeUtilization * 100).toFixed(0)}% &rarr; {(comparisonEntry.afterUtilization * 100).toFixed(0)}%
+              </span>
+              <span className={`li-comparison-change ${
+                comparisonEntry.utilizationDeltaPct > 0 ? "li-comparison-change--worse"
+                : comparisonEntry.utilizationDeltaPct < 0 ? "li-comparison-change--better" : ""
+              }`}>
+                {comparisonEntry.utilizationDeltaPct > 0 ? "+" : ""}{comparisonEntry.utilizationDeltaPct.toFixed(0)} pp
+              </span>
+            </div>
+            <div className="li-comparison-metric">
+              <span className="li-comparison-metric-label">Load</span>
+              <span className="li-comparison-metric-value">
+                {comparisonEntry.beforeLoad.toFixed(2)} &rarr; {comparisonEntry.afterLoad.toFixed(2)}
+              </span>
+            </div>
+          </div>
+          <div className="li-comparison-status-row">
+            <span className="li-comparison-metric-label">Status</span>
+            <span className={`li-comparison-status-badge li-comparison-status-badge--${comparisonEntry.status.toLowerCase()}`}>
+              {COMPARISON_STATUS_LABEL[comparisonEntry.status]}
+            </span>
+          </div>
+          {comparisonEntry.status === "DOWN" && (
+            <div className="li-comparison-status-row">
+              <span className="li-comparison-metric-label">Operational state</span>
+              <span className="li-comparison-metric-value">UP &rarr; DOWN</span>
+            </div>
           )}
         </div>
       )}

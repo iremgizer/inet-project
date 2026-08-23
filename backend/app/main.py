@@ -10,7 +10,9 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Any, Dict, List, Optional
 from app.models import Assignment, GradeRequest, SimulationRequest, StudentSubmission, ChallengeAttemptRecord
+from app.optimization.models import OptimizeRequest, SearchSpaceEstimateRequest
 from app.services.assignment_service import AssignmentStorageService
+from app.services.optimization_service import estimate_search_space, run_optimization
 from app.services.simulation_service import SimulationService
 from app.services.topology_service import TopologyService
 from app.services.grading_service import grade_attempt
@@ -54,6 +56,31 @@ def simulate(request: SimulationRequest):
 @app.get("/topologies")
 def topologies():
     return TopologyService.get_topology_names()
+
+# ── Optimization (Sprint 2, PR5) ────────────────────────────────────────────
+# The only HTTP-facing entry point onto PR1-4's optimizers (OPT/WPO/LWO/
+# JOINT) — see app/services/optimization_service.py. Results are transient
+# (never persisted, never saved alongside a topology) — the Optimization Lab
+# calls this once per "Run" click and holds the response in frontend state
+# only, exactly like every other optimizer call site in this codebase.
+
+@app.post("/optimize")
+def optimize(request: OptimizeRequest):
+    try:
+        return run_optimization(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+# PR6 §3 — search-space preview, called before a student commits to running
+# WPO/LWO/JOINT (and live, again, whenever they adjust the weight range —
+# see the Optimization Lab's own settings panel). No search runs here.
+
+@app.post("/optimize/search-space")
+def optimize_search_space(request: SearchSpaceEstimateRequest):
+    try:
+        return estimate_search_space(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/topology/{topology_type}")
 def load_topology(topology_type: str):

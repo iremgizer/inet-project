@@ -214,6 +214,55 @@ const closFatTreeConfig: AlgorithmConfig = {
   congestionThreshold: 1.0,
 };
 
+// ── ECMP Traffic Distribution (Equal vs Custom) ────────────────────────────────
+//
+// Topology:      B (capacity 4)
+//              /   \
+//             A     D
+//              \   /
+//               C (capacity 12)
+//
+// Demand: A→D = 10 units. Both paths cost 2 (equal-cost) — capacity is what
+// differs between them, not link weight / routing cost.
+//
+// Equal split (ECMP default): 5 units via A-B-D, 5 units via A-C-D
+//   A-B / B-D utilization = 5/4  = 125%  -> CONGESTED
+//   A-C / C-D utilization = 5/12 = 42%
+//
+// Custom split 20% / 80% (favoring the higher-capacity path), same topology,
+// same demand, same link weights — only the traffic SHARE changes:
+//   A-B / B-D utilization = 2/4  = 50%
+//   A-C / C-D utilization = 8/12 = 67%
+//   Max utilization: 125% -> 67%. Congestion resolved without touching a
+//   single link weight or capacity.
+
+const ecmpDistributionNetwork: NetworkInput = {
+  nodes: [
+    { id: "A", label: "A", x: 120, y: 220 },
+    { id: "B", label: "B", x: 360, y: 100 },
+    { id: "C", label: "C", x: 360, y: 340 },
+    { id: "D", label: "D", x: 600, y: 220 },
+  ],
+  links: [
+    { id: "AB", source: "A", target: "B", weight: 1, capacity: 4 },
+    { id: "BD", source: "B", target: "D", weight: 1, capacity: 4 },
+    { id: "AC", source: "A", target: "C", weight: 1, capacity: 12 },
+    { id: "CD", source: "C", target: "D", weight: 1, capacity: 12 },
+  ],
+  demands: [
+    { id: "d1", source: "A", target: "D", amount: 10 },
+  ],
+  topologyType: "custom",
+  isDirected: false,
+};
+
+const ecmpDistributionConfig: AlgorithmConfig = {
+  selectedAlgorithm: "ECMP",
+  algorithmType: "real_world_heuristic",
+  objective: "minimize_max_utilization",
+  congestionThreshold: 1.0,
+};
+
 // ── Exported examples ─────────────────────────────────────────────────────────
 
 export const LECTURE_EXAMPLES: LectureExample[] = [
@@ -299,5 +348,27 @@ export const LECTURE_EXAMPLES: LectureExample[] = [
       "Clos fat-tree topologies are designed for ECMP: equal link weights ensure all paths between hosts have the same cost. With uniform traffic, utilization is perfectly balanced. Try adding more demands to see where congestion first appears.",
     network: closFatTreeNetwork,
     algorithmConfig: closFatTreeConfig,
+  },
+  {
+    id: "ecmp-traffic-distribution",
+    title: "ECMP Traffic Distribution",
+    category: "ECMP",
+    tagline: "Equal split can congest a low-capacity path — a custom split relieves it without touching link cost.",
+    description:
+      "A→D has two equal-cost paths: A-B-D (capacity 4) and A-C-D (capacity 12). " +
+      "ECMP's default equal split sends half of the 10-unit demand — 5 units — down each path, " +
+      "overloading the low-capacity A-B-D path to 125%. The paths are still equal-cost " +
+      "(link weight is unchanged) — only how much traffic rides each one needs to change.",
+    whatToWatch: [
+      "Both paths cost 2 (equal-cost) — capacity is what differs, not routing cost",
+      "Equal split: 5 units each way — A-B/B-D hits 125% utilization (congested)",
+      "Open Algorithm → Traffic Distribution → Custom Split",
+      "Set Path 1 (A-B-D) to 20% and Path 2 (A-C-D) to 80%, then re-run",
+      "Max utilization drops from 125% to 67% — same topology, same demand, only the traffic share changed",
+    ],
+    insight:
+      "Link Cost decides which paths are equal-cost; Traffic Distribution decides how much of the demand rides each one. They are independent controls — here, reshaping the split (not the topology or the weights) is enough to eliminate congestion.",
+    network: ecmpDistributionNetwork,
+    algorithmConfig: ecmpDistributionConfig,
   },
 ];

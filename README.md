@@ -197,25 +197,26 @@ These schemas are used internally by the app to validate imported files. Student
 
 ---
 
-## Requirements
+# Running the Project
 
+This section is everything needed to clone, install, and run the project from scratch — no prior knowledge of the codebase required.
+
+## Prerequisites
+
+- **Python** 3.11 or later (developed and tested against 3.13)
 - **Node.js** v18 or later
 - **npm** v9 or later
-- **Python** 3.11 or later
-- **MongoDB** 7 (optional — required only for saving simulation runs and assignments)
+- **MongoDB** — **optional.** The app runs fully without it; see [Optional MongoDB](#optional-mongodb) below for exactly what is and isn't affected.
+- **Solver dependency** — the Optimization Lab's OPT mode solves a linear program with [PuLP](https://github.com/coin-or/pulp) (`pulp==3.3.2`, in `backend/requirements.txt`) using the CBC solver. **No separate CBC install is required** — PuLP bundles a working CBC binary for macOS/Linux/Windows and installs it automatically with `pip install -r requirements.txt`. Nothing solver-related needs to be installed manually.
 
----
-
-## Installation
+## Clone
 
 ```bash
 git clone https://github.com/iremgizer/inet-project.git
 cd inet-project
 ```
 
----
-
-## Running the Backend
+## Backend Setup
 
 Open a terminal in the project root.
 
@@ -229,7 +230,7 @@ python3 -m venv .venv
 source .venv/bin/activate        # macOS / Linux
 # .venv\Scripts\activate         # Windows
 
-# Install dependencies (first time only)
+# Install dependencies (first time only) — this also installs PuLP + its bundled CBC solver
 pip install -r requirements.txt
 
 # Start the development server
@@ -238,11 +239,10 @@ uvicorn app.main:app --reload --port 8000
 
 The backend runs at **http://localhost:8000**
 
-API documentation is available at **http://localhost:8000/docs**
+- API documentation (interactive Swagger UI): **http://localhost:8000/docs**
+- Health check: **http://localhost:8000/health** — returns `{"status": "ok", "mongoAvailable": true|false}`, which is the fastest way to confirm the backend is up and to see whether it detected a running MongoDB.
 
----
-
-## Running the Frontend
+## Frontend Setup
 
 Open a second terminal in the project root.
 
@@ -258,38 +258,56 @@ npm run dev
 
 The frontend runs at **http://localhost:5173**
 
----
+## Running Both
 
-## MongoDB (Optional)
+The backend and frontend are two separate processes and must run in two separate terminals at the same time — `uvicorn` in one (from `backend/`), `npm run dev` in the other (from `frontend/`). The frontend talks to the backend over `http://localhost:8000` by default (overridable with a `VITE_BACKEND_URL` environment variable); the backend's CORS configuration already allows `http://localhost:5173`. Neither process needs to be started in a particular order.
 
-Simulations, saved runs, and classroom assignments can be persisted to a local MongoDB instance. The application works without it — saved runs and assignment storage are silently disabled when the database is unavailable.
+## Optimization Lab
 
-Start a MongoDB 7 container with Docker:
+Sprint 2 adds an opt-in **Optimization Lab**, reachable from the Choose Algorithm screen once a network and traffic demands are configured. It runs four traffic-engineering optimizers against the same topology — **OPT** (unrestricted theoretical optimum), **Waypoint Optimization**, **Link Weight Optimization**, and **Joint Optimization** — each using an exact search when the combinatorial search space is small enough, and falling back to a heuristic otherwise. The search budget (how large a search space is still solved exactly) and a per-run timeout are both user-configurable, and a search-space preview is shown before running so the exact-vs-heuristic trade-off is visible ahead of time. Full detail is in the [Sprint 2 — Optimization Lab](#sprint-2--optimization-lab) section further down and in `docs/research/sprint2-mip-architecture-analysis.md`.
+
+## Optional MongoDB
+
+MongoDB is **entirely optional**. The app is fully usable without it:
+
+| Works without MongoDB | Requires MongoDB |
+|---|---|
+| Guest "Start Building a Network" flow, topology builder, all four algorithms (ECMP, Distance Vector, Segment Routing, ECMP-within-segments), trace replay, Optimization Lab, JSON import/export, demo teacher/student login and dashboards (seeded in `localStorage`) | Persisting simulation runs across sessions/devices; saving Teacher Workspace assignments server-side; loading assignment-type (non-challenge) student work from storage rather than a local file |
+
+When MongoDB is unavailable, the affected save/load actions are silently disabled rather than erroring — check `GET /health`'s `mongoAvailable` field to confirm which mode you're in. Demo data (the pre-seeded teacher/student accounts, assignments, and progress) is always available regardless of MongoDB, since it's seeded in the frontend's own `localStorage`, not the database.
+
+To enable it, start a MongoDB 7 container with Docker:
 
 ```bash
-docker run --name network-viz-mongo \
-  -p 27017:27017 \
-  -d mongo:7
+docker run -d --name network-viz-mongo -p 27018:27017 --restart unless-stopped mongo:7
 ```
 
-If the container already exists:
+(If the container already exists: `docker start network-viz-mongo`.)
+
+Then configure the backend by copying `backend/.env.example` to `backend/.env` (already set to the values below by default — only edit if you need a different port/database):
 
 ```bash
-docker start network-viz-mongo
-```
-
-The backend connects to `mongodb://localhost:27017` and uses the `network_visualizer` database by default. Override these with environment variables if needed:
-
-```bash
-MONGODB_URI=mongodb://localhost:27017
+MONGODB_URI=mongodb://localhost:27018
 MONGODB_DATABASE=network_visualizer
 ```
 
----
+Note the non-default port **27018** — this project intentionally runs its own MongoDB container on 27018 (not MongoDB's usual 27017) so it doesn't collide with any other local MongoDB instance.
 
-## Running Tests
+## Demo / Quick Start
 
-**Backend**
+The fastest way to see the project with no login and no setup beyond the two dev servers running:
+
+1. Open **http://localhost:5173**
+2. Click **Start Building a Network** on the landing page (no account needed)
+3. Use a template or **Import JSON** and load `sample-json/triangle_ecmp.json` (three nodes, two equal-cost paths — the clearest ECMP demo)
+4. Add a traffic demand between two nodes, then choose **ECMP** and run the simulation to see traffic split and congestion coloring
+5. Click **Optimization Lab** on the same Choose Algorithm screen to compare the baseline against OPT / Waypoint / Link Weight / Joint optimization results
+
+For the full guided teacher/student/challenge walkthrough, see [Midterm Demo Script](#midterm-demo-script) below.
+
+## Tests
+
+**Backend — full pytest suite**
 
 ```bash
 cd backend
@@ -297,7 +315,14 @@ source .venv/bin/activate
 python3 -m pytest tests/ -q
 ```
 
-**Frontend — production build check**
+**Frontend — TypeScript check**
+
+```bash
+cd frontend
+npx tsc --noEmit
+```
+
+**Frontend — production build**
 
 ```bash
 cd frontend
@@ -337,10 +362,10 @@ Run `node validate.js` inside `sample-json/` to validate all files against the s
 
 - ✅ ECMP — Equal-Cost Multi-Path routing with uniform traffic splitting
 - ✅ Distance Vector — Bellman-Ford shortest-path routing with routing table generation
+- ✅ Segment Routing — ECMP-within-segments routing (Sprint 2, see below)
 
 **Planned**
 
-- Segment Routing
 - Custom traffic splitting
 
 ---
@@ -422,9 +447,38 @@ These are intentional scope decisions for a university course prototype, not bug
 | Locked fields | `lockedFields` are enforced in the UI: locked nodes/links cannot be dragged or deleted; locked weights/capacities are read-only; locked algorithm selection is disabled. Handler-level guards also block keyboard shortcuts. |
 | Attempt integrity | `maxAttempts` is enforced in-memory. A student can bypass it by reloading the page. |
 | Grading | Grading calls `POST /grade` on the backend first; falls back to client-side if the backend is unavailable. Expected answers remain visible in the assignment JSON export — not suitable for high-stakes assessments. |
-| Segment Routing | Stub only — returns empty results. Planned for a future sprint. |
+| Segment Routing | Implemented as ECMP-within-segments (Sprint 2, PR0). Full RSVP-TE / SR-TE style explicit tunnels are out of scope. |
 | Concurrency | The FastAPI backend is single-worker with no connection pooling. Not suitable for classroom-scale simultaneous users. |
 | DV convergence | Distance Vector runs to full convergence synchronously. Async Bellman-Ford with failure simulation is not implemented. |
+
+---
+
+## Sprint 2 — Optimization Lab
+
+Sprint 2 adds a second, opt-in workflow stage — the **Optimization Lab** — reachable from the Choose Algorithm screen after a network and traffic demands are configured. It lets a student run four traffic-engineering optimizers against the same topology and compare them against the network's own already-simulated baseline. Full technical detail lives in [`docs/research/sprint2-mip-architecture-analysis.md`](docs/research/sprint2-mip-architecture-analysis.md); this section is the short, student/instructor-facing summary.
+
+**The four modes**
+
+| Mode | What it does | How it searches |
+|---|---|---|
+| **OPT** | Unrestricted optimum — the theoretical best possible link utilization if traffic could be split arbitrarily, ignoring how any real routing algorithm actually forwards packets | Linear program, solved exactly by the CBC solver (PuLP). Not a combinatorial search — there is no "search space" or "candidates evaluated" for OPT. |
+| **WPO** (Waypoint Optimization) | Finds a single intermediate waypoint node per demand that reduces the maximum link utilization (MLU) versus the baseline | Exact enumeration of all waypoint combinations, or a greedy heuristic when the exact search space exceeds the configured budget |
+| **LWO** (Link Weight Optimization) | Reassigns integer link weights within a configurable range to reduce MLU | Same exact-vs-heuristic split, over all weight assignments in the configured range |
+| **Joint** | Optimizes waypoints and weights together | Exact joint enumeration when small enough, otherwise an alternating WPO/LWO heuristic that iterates until convergence or a round limit |
+
+**Exact search vs. heuristic — and why it matters educationally.** WPO/LWO/Joint each have a true combinatorial search space (e.g., for LWO, `(number of weight values)^(number of optimizable links)`). If that space fits inside the configured search budget, the Lab performs an **exact enumeration** and can prove the result is optimal (`provenOptimal: true`). If it doesn't fit, the Lab automatically falls back to a fast **heuristic** and is explicit that the result is only the best the heuristic found — not proven optimal. This lets a student directly observe the classic combinatorial-explosion trade-off: as a topology grows, the exact search space grows exponentially, and at some point no realistic budget can cover it.
+
+**Search budget.** `maxExactCombinations` controls how large a search space is still solved exactly. It defaults to **50,000** and is user-adjustable in the Lab's Optimization Settings panel via three named presets — **Fast** (10,000), **Default** (50,000), **Deep** (250,000) — or a **Custom** value. A search-space preview is shown before running WPO/LWO/Joint (e.g. "Waypoint search space: 12,500 combinations") together with a prediction of whether the current budget permits exact search, so the trade-off is visible before committing to a run. Raising the budget only ever changes whether a given search *can* be solved exactly — it never speeds anything up on its own, and the Lab never promises an exact search will be fast just because it fits inside the budget. A backend safety cap (default 2,000,000, overridable via the `OPTIMIZATION_MAX_EXACT_COMBINATIONS_CAP` environment variable) rejects unreasonably large exact-search requests regardless of what a student sets in the UI.
+
+**Timeout.** Every optimization run carries a wall-clock time limit (`timeLimitSeconds`, default 30s, adjustable 1-300s in Advanced Settings). If a search is still running when the deadline hits, it returns the best result found so far with a clean `TIME_LIMIT` status — never mislabeled as optimal.
+
+**Weight range.** LWO and Joint search integer link weights within a configurable `[minWeight, maxWeight]` range (default 1-5). Widening the range grows the search space — the preview updates live. A result proven optimal is only optimal *within that configured range*, not over all conceivable real-valued weights; the Lab states this explicitly next to any "Proven optimal" badge for LWO/Joint.
+
+**Reading a result card.** Every result shows Method, Runtime, and (for WPO/LWO/Joint) Search space size, Candidates evaluated, and Proven optimal — plus Solver for OPT, Weight range for LWO/Joint, and Iterations/Convergence reason for Joint's heuristic mode. Two badges summarize a result at a glance without relying on color alone: an outcome badge (**PROVEN OPTIMAL** / **BEST FOUND** / **TIME LIMIT**) and a method badge (**EXACT SEARCH** / **HEURISTIC**).
+
+**Congestion-free interpretation.** OPT's own result is the scientific reference point: `OPT.mlu ≤ 1` means congestion-free routing is theoretically possible on this topology (though a specific algorithm like ECMP may still congest it); `OPT.mlu > 1` means congestion is structurally unavoidable no matter how traffic is routed — only added capacity or reduced demand can fix it. A solver-reported `INFEASIBLE` is a separate condition (no valid routing exists at all) and is never presented as either of the above.
+
+**Session-only experiment history.** The Lab keeps a small, in-memory table of every run this session (mode, budget, method, runtime, MLU, proven-optimal) so a student can compare, e.g., a Fast-budget run against a Deep-budget run on the same topology. It is intentionally not saved anywhere and clears on logout/refresh.
 
 ---
 

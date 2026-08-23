@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Network, Waypoints, GitBranch, BarChart3, CheckCircle2, BookOpen, Clock, GraduationCap, Target, ChevronLeft, ChevronRight, LogOut } from "lucide-react";
+import { Network, Waypoints, GitBranch, BarChart3, CheckCircle2, BookOpen, Clock, GraduationCap, Target, ChevronLeft, ChevronRight, LogOut, FlaskConical } from "lucide-react";
 import ReactFlowCanvas from "./ReactFlowCanvas";
 import MetricsPanel from "./MetricsPanel";
 import RoutingTablePanel from "./RoutingTablePanel";
+import SegmentListPanel from "./SegmentListPanel";
+import { TEPolicyDraft } from "./TEPolicyEditor";
+import { TEQuickLinkPolicyType } from "./TEQuickPolicyPopup";
 import TraceTimeline from "./TraceTimeline";
 import InspectorDrawer from "./InspectorDrawer";
 import SavedRunsDrawer from "./SavedRunsDrawer";
@@ -14,6 +17,7 @@ import NetworkBuilderPage from "../pages/NetworkBuilderPage";
 import TrafficConfigurationPage from "../pages/TrafficConfigurationPage";
 import AlgorithmSelectionPage from "../pages/AlgorithmSelectionPage";
 import SimulationStudioPage from "../pages/SimulationStudioPage";
+import OptimizationLabPage from "../pages/OptimizationLabPage";
 import TeacherWorkspacePage from "../pages/TeacherWorkspacePage";
 import StudentWorkspacePage from "../pages/StudentWorkspacePage";
 import ChallengeWorkspacePage from "../pages/ChallengeWorkspacePage";
@@ -25,6 +29,12 @@ import { DEMO_STUDENTS } from "../utils/demoUsers";
 import { loadAssignedWorks, saveAssignedWorks, loadCurrentStudentId, saveCurrentStudentId } from "../utils/classroomStorage";
 import { exportAssignmentPdf } from "../utils/pdfExport";
 import { simulateNetwork, listSavedRuns, getSavedRun, deleteSavedRun, listAssignments, saveAssignment, getAssignment, gradeAttempt } from "../api/simulationApi";
+import { runOptimization } from "../api/optimizationApi";
+import { OptimizationHistoryEntry, OptimizationLabMode, OptimizationRunRecord } from "../types/optimization";
+import { projectOptimizationResult } from "../utils/optimizationProjection";
+import { buildOptimizationHighlightEvent } from "../utils/optimizationHighlight";
+import { resolveVisualizationOwner } from "../utils/optimizationVisualState";
+import { OptimizationSettings } from "../utils/optimizationSettings";
 import { triangleTemplate } from "../utils/topologyTemplates";
 import { applyAutoLayout } from "../utils/generatedTopologies";
 import {
@@ -44,6 +54,10 @@ import {
 } from "../utils/assignmentJson";
 import { gradeChallenge } from "../utils/challengeGrading";
 import { resolveHints } from "../utils/challengeHints";
+import { deriveSegmentRoutingDisplayState } from "../utils/segmentRoutingTrace";
+import { deriveDownLinkIdsAtStep } from "../utils/failureReplay";
+import { buildComparison, ComparisonMode, LinkComparisonEntry } from "../utils/comparison";
+import { buildCustomDistributionsFromResult } from "../utils/trafficDistribution";
 import { EXAMPLE_CHALLENGES } from "../utils/exampleChallenges";
 import {
   ensureDemoClassroomData, resetDemoClassroomData,
@@ -71,12 +85,15 @@ import {
   NetworkInput,
   NodeInput,
   SavedSimulationSummary,
+  SegmentRoutingPolicy,
   SimulationResult,
   TopologyType,
   TrafficDemandInput,
+  TrafficDistributionMode,
+  TrafficEngineeringPolicy,
 } from "../types/network";
 
-export type WorkflowStep = 0 | 1 | 2 | 3 | 4;
+export type WorkflowStep = 0 | 1 | 2 | 3 | 4 | 5;
 
 const defaultAlgorithmConfig: AlgorithmConfig = {
   selectedAlgorithm: "ECMP",
@@ -113,6 +130,54 @@ const WorkflowManager: React.FC = () => {
   const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
 
+  // ── Before/After comparison (PR 6, Part 2) ─────────────────────────────────
+  // `baselineResult` is set automatically on the FIRST successful run and
+  // never overwritten automatically afterward — only an explicit "Set
+  // current as baseline" click (or a structural edit that invalidates it,
+  // see the handlers below) changes it. `simulationResult` above doubles as
+  // "current" throughout; comparison is available whenever both are set and
+  // distinct (see ComparisonPanel).
+  const [baselineResult, setBaselineResult] = useState<SimulationResult | null>(null);
+  const [comparisonMode, setComparisonMode] = useState<ComparisonMode>("after");
+
+  // ── Optimization Lab (Sprint 2, PR5, extended PR6) ──────────────────────
+  // Results are transient (PR5 §12): cached in memory only, keyed per mode
+  // so each of the four optimizers is launched independently and its own
+  // result survives switching between cards — never persisted, never part
+  // of topology JSON, cleared whenever a recommendation is actually applied
+  // (see handleApplyOptimization) since the network they were computed
+  // against no longer matches. PR6: each cached entry also keeps the
+  // OptimizationSettings that actually produced it (budget/weight-range/
+  // timeout), distinct from whatever the settings panel currently reads —
+  // needed so a card can honestly report "weight range used: 1-7" even
+  // after a student changes the panel to 1-5 without re-running.
+  const [optimizationRunRecords, setOptimizationRunRecords] = useState<
+    Partial<Record<Exclude<OptimizationLabMode, "CURRENT">, OptimizationRunRecord>>
+  >({});
+  const [optimizationRunning, setOptimizationRunning] = useState<Set<Exclude<OptimizationLabMode, "CURRENT">>>(
+    () => new Set()
+  );
+  // PR6 §15 — session-only experiment history (never persisted to MongoDB
+  // or anywhere else; cleared on every full page reload, same as every
+  // other piece of Optimization Lab state).
+  const [optimizationHistory, setOptimizationHistory] = useState<OptimizationHistoryEntry[]>([]);
+  // Which card currently drives the canvas ("View on graph") — highlights
+  // that mode's recommended waypoints/weight-changes/paths via the same
+  // trace-event highlighting mechanism trace replay already uses (see
+  // utils/optimizationHighlight.ts). null outside the lab or when nothing
+  // is selected.
+  const [selectedOptimizationMode, setSelectedOptimizationMode] = useState<OptimizationLabMode | null>(null);
+  // Which card is being compared against the current simulation result —
+  // independent of `selectedOptimizationMode` (a student can view one
+  // mode's paths while comparing a different mode's numbers). PR6 §18: this
+  // taking precedence over `selectedOptimizationMode` for canvas ownership
+  // is now an explicit, named rule — see utils/optimizationVisualState.ts.
+  const [comparingOptimizationMode, setComparingOptimizationMode] = useState<OptimizationLabMode | null>(null);
+  // The Lab's own before/after/difference toggle — deliberately separate
+  // from the step-4 `comparisonMode` above (switching one must never
+  // silently change the other's saved position).
+  const [optComparisonMode, setOptComparisonMode] = useState<ComparisonMode>("after");
+
   // ── Trace playback ────────────────────────────────────────────────────────
   const [isTraceMode, setIsTraceMode] = useState(false);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
@@ -132,6 +197,36 @@ const WorkflowManager: React.FC = () => {
   const [connectSourceId, setConnectSourceId] = useState<string | null>(null);
   const [centerNodeRequest, setCenterNodeRequest] = useState<{ id: string; nonce: number } | null>(null);
   const [prefillDemandSource, setPrefillDemandSource] = useState<string | null>(null);
+
+  // ── Segment Routing waypoint-selection mode ──────────────────────────────
+  // Mutually exclusive with connect mode (see handleStartConnect /
+  // handleStartWaypointSelect below) and with normal node/link selection.
+  const [waypointSelectDemandId, setWaypointSelectDemandId] = useState<string | null>(null);
+
+  // ── ECMP traffic distribution mode ────────────────────────────────────────
+  // UI-only toggle. "EQUAL" keeps algorithmConfig.trafficDistributions empty
+  // (byte-identical to plain ECMP). "CUSTOM" is only materialized into real
+  // per-path shares once a fresh ECMP result is available to discover paths
+  // from — see handleDistributionModeChange.
+  const [distributionMode, setDistributionMode] = useState<TrafficDistributionMode>("EQUAL");
+
+  // ── Traffic Engineering policy draft ──────────────────────────────────────
+  // Mutually exclusive with connect mode and waypoint-select mode (each
+  // cancels the others on entry). `teDraft` is the in-progress "Add policy"
+  // form; `teIsSelecting` is whether a graph click is currently expected to
+  // fill its link/node target.
+  const [teDraft, setTeDraft] = useState<TEPolicyDraft | null>(null);
+  const [teIsSelecting, setTeIsSelecting] = useState(false);
+
+  // ── Traffic Engineering quick-add flow (graph-first) ──────────────────────
+  // An additional, more direct way to create a link policy: "Select on
+  // Graph" enters link-selection mode with no type chosen yet
+  // (`teQuickSelectActive`); once a link is clicked, `teQuickPopupLinkId`
+  // holds its id and a floating popup on the canvas offers Prefer/Avoid/
+  // Forbid. Mutually exclusive with everything else, including the dropdown
+  // draft flow above.
+  const [teQuickSelectActive, setTeQuickSelectActive] = useState(false);
+  const [teQuickPopupLinkId, setTeQuickPopupLinkId] = useState<string | null>(null);
 
   // ── Lecture mode ──────────────────────────────────────────────────────────
   const [lectureInsight, setLectureInsight] = useState<string | null>(null);
@@ -178,15 +273,115 @@ const WorkflowManager: React.FC = () => {
   const [currentStudentId, setCurrentStudentId] = useState<string | null>(() => loadCurrentStudentId());
 
   // ── Derived ───────────────────────────────────────────────────────────────
-  const traceEvents = simulationResult?.traceEvents ?? [];
-  const currentTraceEvent = isTraceMode ? (traceEvents[activeStepIndex] ?? null) : null;
-  const linkResults = simulationResult?.linkResults ?? [];
-  const pathResults = simulationResult?.pathResults ?? [];
+  // Comparison mode (PR 6, Part 2) decides which result the canvas/trace
+  // reads from: "before" shows the baseline, "after" and "difference" both
+  // show current (difference just recolors current's links by comparison
+  // status — see ComparisonPanel/NetworkEdge — it doesn't need a second
+  // dataset). Reuses the existing single replay system: "before" replays
+  // the baseline's own trace, exactly like "after" replays current's.
+  const baseDisplayedResult = comparisonMode === "before" && baselineResult ? baselineResult : simulationResult;
+
+  // ── Optimization Lab (PR5, overlay conflict fixed PR6 §18) — canvas data
+  //    sourcing ────────────────────────────────────────────────────────
+  // Reuses the exact same `linkResults`/`pathResults`/`currentTraceEvent`/
+  // `comparisonByLink` props ReactFlowCanvas already consumes for every
+  // other step (PR5 §9: "never create another graph viewer") — only *which*
+  // SimulationResult-shaped object feeds them changes while the lab is open.
+  // `resolveVisualizationOwner` is the single, explicit source of truth for
+  // "does the selected card's highlight, or the compared card's difference
+  // heatmap, own the canvas right now" — the two can no longer both apply
+  // at once (PR5's own documented known limitation).
+  const visualizationOwner = currentStep === 5
+    ? resolveVisualizationOwner(selectedOptimizationMode, comparingOptimizationMode)
+    : "none";
+  const isOptLabView = visualizationOwner === "selected";
+  const isOptComparingView = visualizationOwner === "comparison";
+
+  const optSelectedResult =
+    selectedOptimizationMode && selectedOptimizationMode !== "CURRENT"
+      ? optimizationRunRecords[selectedOptimizationMode]?.result ?? null
+      : null;
+  const optProjection = React.useMemo(() => {
+    if (!optSelectedResult) return null;
+    return projectOptimizationResult(optSelectedResult, network, algorithmConfig.congestionThreshold);
+  }, [optSelectedResult, network, algorithmConfig.congestionThreshold]);
+  const optHighlightEvent = React.useMemo(() => {
+    if (!optSelectedResult) return null;
+    return buildOptimizationHighlightEvent(optSelectedResult);
+  }, [optSelectedResult]);
+
+  const optComparingResult =
+    comparingOptimizationMode && comparingOptimizationMode !== "CURRENT"
+      ? optimizationRunRecords[comparingOptimizationMode]?.result ?? null
+      : null;
+  const optComparingProjection = React.useMemo(() => {
+    if (!optComparingResult) return null;
+    return projectOptimizationResult(optComparingResult, network, algorithmConfig.congestionThreshold);
+  }, [optComparingResult, network, algorithmConfig.congestionThreshold]);
+  const optComparison = React.useMemo(() => {
+    if (!simulationResult || !optComparingProjection) return null;
+    return buildComparison(simulationResult, optComparingProjection);
+  }, [simulationResult, optComparingProjection]);
+
+  const displayedResult = isOptComparingView
+    ? (optComparisonMode === "before" ? simulationResult : optComparingProjection)
+    : isOptLabView
+    ? (selectedOptimizationMode === "CURRENT" ? simulationResult : optProjection)
+    : baseDisplayedResult;
+
+  const traceEvents = currentStep === 5 ? [] : displayedResult?.traceEvents ?? [];
+  // Comparison owns the canvas => no highlight overlay at all, even if a
+  // card is also selected (PR6 §18's chosen precedence, documented in
+  // utils/optimizationVisualState.ts).
+  const currentTraceEvent = isOptComparingView
+    ? null
+    : isOptLabView
+    ? optHighlightEvent
+    : isTraceMode
+    ? traceEvents[activeStepIndex] ?? null
+    : null;
+  const canvasIsTraceMode = (isOptLabView || isOptComparingView) ? !!currentTraceEvent : isTraceMode;
+  const linkResults = displayedResult?.linkResults ?? [];
+  const pathResults = displayedResult?.pathResults ?? [];
+
+  const baseComparison = React.useMemo(() => {
+    if (!baselineResult || !simulationResult || baselineResult === simulationResult) return null;
+    return buildComparison(baselineResult, simulationResult);
+  }, [baselineResult, simulationResult]);
+
+  const comparison = isOptComparingView ? optComparison : baseComparison;
+  const activeComparisonMode = isOptComparingView ? optComparisonMode : comparisonMode;
+
+  // Always computed when a comparison exists — NetworkEdge itself gates use
+  // on comparisonMode === "difference"; LinkDetailPanel below reads it in
+  // any mode (comparison details are useful in the inspector regardless of
+  // which mode the canvas is currently painted in).
+  const comparisonByLink = React.useMemo(() => {
+    if (!comparison) return null;
+    return new Map(comparison.linkDeltas.map((d) => [d.linkId, d]));
+  }, [comparison]);
 
   const activeTableRowKeys = React.useMemo(() => {
     if (!currentTraceEvent?.activeTableRowIds) return [];
     return currentTraceEvent.activeTableRowIds;
   }, [currentTraceEvent]);
+
+  // Segment Routing replay state — frontend-only derivation from the trace
+  // events PR 1 already emits (stepType/segmentList/activeSegmentIndex).
+  // null for every other algorithm and outside trace mode.
+  const srDisplayState = React.useMemo(() => {
+    if (!isTraceMode || displayedResult?.algorithm !== "SEGMENT_ROUTING") return null;
+    return deriveSegmentRoutingDisplayState(traceEvents, activeStepIndex, network);
+  }, [isTraceMode, displayedResult, traceEvents, activeStepIndex, network]);
+
+  // Mid-simulation failure replay (PR 6) — which links are DOWN as of the
+  // current replay step, overriding the persistent network.links[].
+  // operationalStatus while replaying so stepping backward past a scheduled
+  // failure correctly shows the link UP again. null outside trace mode.
+  const replayDownLinkIds = React.useMemo(() => {
+    if (!isTraceMode) return null;
+    return deriveDownLinkIdsAtStep(traceEvents, activeStepIndex);
+  }, [isTraceMode, traceEvents, activeStepIndex]);
 
   // ── Locked fields — all-open in lab/teacher, assignment-driven in student/challenge ──
   const ALL_OPEN: LockedFields = {
@@ -256,6 +451,7 @@ const WorkflowManager: React.FC = () => {
     setSelectedType(null);
     setSelectedId(null);
     setSimulationResult(null);
+    setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — node delete
   }, [toast]);
 
   const handleDeleteLink = useCallback((id: string) => {
@@ -264,6 +460,7 @@ const WorkflowManager: React.FC = () => {
     setSelectedType(null);
     setSelectedId(null);
     setSimulationResult(null);
+    setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — permanent link delete
   }, [toast]);
 
   const handleAddLink = useCallback((source: string, target: string) => {
@@ -279,6 +476,7 @@ const WorkflowManager: React.FC = () => {
       links: [...prev.links, { id: makeId("link"), source, target, weight: 1, capacity: 10 }],
     }));
     setSimulationResult(null);
+    setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — permanent link add
   }, [network.links, network.isDirected, toast]);
 
   const handleUpdateNode = useCallback((id: string, update: Partial<NodeInput>) => {
@@ -315,25 +513,59 @@ const WorkflowManager: React.FC = () => {
       demands: [...prev.demands, { ...partial, id: makeId("demand") }],
     }));
     setSimulationResult(null);
+    setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — demand add
   }, [toast]);
 
   const handleDeleteDemand = useCallback((id: string) => {
     if (!lockedFieldsRef.current.canEditDemands) { toast("Traffic demands are locked by the teacher.", "info"); return; }
     setNetwork((prev) => ({ ...prev, demands: prev.demands.filter((d) => d.id !== id) }));
+    setAlgorithmConfig((prev) => ({
+      ...prev,
+      segmentRoutingPolicies: prev.segmentRoutingPolicies?.some((p) => p.demandId === id)
+        ? prev.segmentRoutingPolicies.filter((p) => p.demandId !== id)
+        : prev.segmentRoutingPolicies,
+      trafficDistributions: prev.trafficDistributions?.some((d) => d.demandId === id)
+        ? prev.trafficDistributions.filter((d) => d.demandId !== id)
+        : prev.trafficDistributions,
+      // A demand-scoped policy (demandId === id) is pruned; a global one
+      // (demandId === null) is untouched — it still applies to every
+      // remaining demand.
+      tePolicies: prev.tePolicies?.some((p) => p.demandId === id)
+        ? prev.tePolicies.filter((p) => p.demandId !== id)
+        : prev.tePolicies,
+    }));
     setSimulationResult(null);
+    setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — demand delete
   }, [toast]);
 
   const handleGenerateTopology = useCallback((net: NetworkInput) => {
     setNetwork(net);
     setSimulationResult(null);
+    setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — topology regeneration
     setSelectedType(null);
     setSelectedId(null);
+    // A new topology invalidates any node/link ids referenced by per-demand
+    // config from the old one — clear rather than risk a stale waypoint,
+    // path-share, or policy reference the backend would (correctly) reject.
+    setAlgorithmConfig((prev) => ({ ...prev, segmentRoutingPolicies: [], trafficDistributions: [], tePolicies: [], failureSchedule: [] }));
+    setDistributionMode("EQUAL");
+    setTeDraft(null);
+    setTeIsSelecting(false);
+    setTeQuickSelectActive(false);
+    setTeQuickPopupLinkId(null);
   }, []);
 
   const handleResetNetwork = useCallback(() => {
     setNetwork(triangleTemplate);
     setAlgorithmConfig(defaultAlgorithmConfig);
+    setDistributionMode("EQUAL");
+    setTeDraft(null);
+    setTeIsSelecting(false);
+    setTeQuickSelectActive(false);
+    setTeQuickPopupLinkId(null);
     setSimulationResult(null);
+    setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit
+    setComparisonMode("after");
     setSelectedType(null);
     setSelectedId(null);
     setActiveStepIndex(0);
@@ -347,6 +579,9 @@ const WorkflowManager: React.FC = () => {
     setCurrentStep(0);
     setNetwork({ nodes: [], links: [], demands: [], topologyType: "custom", isDirected: false });
     setSimulationResult(null);
+    setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit
+    setOptimizationHistory([]); // full session reset — see handleLogout for the same treatment
+    setComparisonMode("after");
     setLectureInsight(null);
     setSelectedType(null);
     setSelectedId(null);
@@ -374,6 +609,8 @@ const WorkflowManager: React.FC = () => {
     setAppMode("lab");
     setNetwork({ nodes: [], links: [], demands: [], topologyType: "custom", isDirected: false });
     setSimulationResult(null);
+    setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null);
+    setOptimizationHistory([]); // session-only (PR6 §15) — a fresh session starts with a clean log
     setLectureInsight(null);
     setSelectedType(null);
     setSelectedId(null);
@@ -450,6 +687,10 @@ const WorkflowManager: React.FC = () => {
   // ── Connect mode ──────────────────────────────────────────────────────────
 
   const handleStartConnect = useCallback((id: string) => {
+    setWaypointSelectDemandId(null); // connect mode, waypoint-select, and TE-policy-select are mutually exclusive
+    setTeIsSelecting(false);
+    setTeQuickSelectActive(false);
+    setTeQuickPopupLinkId(null);
     setConnectSourceId(id);
     setSelectedType(null);
     setSelectedId(null);
@@ -465,6 +706,87 @@ const WorkflowManager: React.FC = () => {
     setConnectSourceId(null);
   }, [connectSourceId, handleAddLink]);
 
+  // ── Segment Routing waypoint selection ───────────────────────────────────
+
+  const handleStartWaypointSelect = useCallback((demandId: string) => {
+    setConnectSourceId(null); // waypoint-select, connect mode, and TE-policy-select are mutually exclusive
+    setTeIsSelecting(false);
+    setTeQuickSelectActive(false);
+    setTeQuickPopupLinkId(null);
+    setSelectedType(null);
+    setSelectedId(null);
+    setWaypointSelectDemandId(demandId);
+  }, []);
+
+  const handleStopWaypointSelect = useCallback(() => {
+    setWaypointSelectDemandId(null);
+  }, []);
+
+  const handleAddWaypoint = useCallback((demandId: string, nodeId: string) => {
+    setAlgorithmConfig((prev) => {
+      const policies = prev.segmentRoutingPolicies ?? [];
+      const existing = policies.find((p) => p.demandId === demandId);
+      const segments = existing?.segments ?? [];
+      const updatedSegments = [...segments, nodeId];
+      const updatedPolicies: SegmentRoutingPolicy[] = existing
+        ? policies.map((p) => (p.demandId === demandId ? { ...p, segments: updatedSegments } : p))
+        : [...policies, { demandId, segments: updatedSegments }];
+      return { ...prev, segmentRoutingPolicies: updatedPolicies };
+    });
+    setSimulationResult(null);
+  }, []);
+
+  // Same validation for both the graph-click flow and the dropdown fallback
+  // in SegmentRoutingEditor — a node clicked on the canvas goes through this
+  // before reaching handleAddWaypoint; the dropdown already excludes invalid
+  // options structurally, so this mainly guards the graph-click path.
+  const handleSelectWaypointNodeFromCanvas = useCallback((nodeId: string) => {
+    if (!waypointSelectDemandId) return;
+    const demand = network.demands.find((d) => d.id === waypointSelectDemandId);
+    if (!demand) { setWaypointSelectDemandId(null); return; }
+    if (nodeId === demand.source) {
+      toast("Source doesn't need to be added as a waypoint.", "info");
+      return;
+    }
+    if (nodeId === demand.target) {
+      toast("Destination is already the final stop — no need to add it.", "info");
+      return;
+    }
+    const existing = (algorithmConfig.segmentRoutingPolicies ?? []).find((p) => p.demandId === waypointSelectDemandId);
+    const lastWaypoint = existing?.segments[existing.segments.length - 1];
+    if (nodeId === lastWaypoint) {
+      toast("That node is already the last waypoint.", "info");
+      return;
+    }
+    handleAddWaypoint(waypointSelectDemandId, nodeId);
+    // Stay in selection mode so the student can click several waypoints in a row.
+  }, [waypointSelectDemandId, network.demands, algorithmConfig.segmentRoutingPolicies, handleAddWaypoint, toast]);
+
+  const handleRemoveWaypoint = useCallback((demandId: string, index: number) => {
+    setAlgorithmConfig((prev) => ({
+      ...prev,
+      segmentRoutingPolicies: (prev.segmentRoutingPolicies ?? []).map((p) =>
+        p.demandId === demandId ? { ...p, segments: p.segments.filter((_, i) => i !== index) } : p
+      ),
+    }));
+    setSimulationResult(null);
+  }, []);
+
+  const handleMoveWaypoint = useCallback((demandId: string, index: number, direction: "up" | "down") => {
+    setAlgorithmConfig((prev) => ({
+      ...prev,
+      segmentRoutingPolicies: (prev.segmentRoutingPolicies ?? []).map((p) => {
+        if (p.demandId !== demandId) return p;
+        const swapWith = direction === "up" ? index - 1 : index + 1;
+        if (swapWith < 0 || swapWith >= p.segments.length) return p;
+        const segments = [...p.segments];
+        [segments[index], segments[swapWith]] = [segments[swapWith], segments[index]];
+        return { ...p, segments };
+      }),
+    }));
+    setSimulationResult(null);
+  }, []);
+
   const handleCenterNode = useCallback((id: string) => {
     setCenterNodeRequest((prev) => ({ id, nonce: (prev?.nonce ?? 0) + 1 }));
   }, []);
@@ -476,6 +798,236 @@ const WorkflowManager: React.FC = () => {
     setCurrentStep(2);
   }, []);
 
+  // ── ECMP traffic distribution ─────────────────────────────────────────────
+
+  const handleDistributionModeChange = useCallback((mode: "EQUAL" | "CUSTOM") => {
+    setDistributionMode(mode);
+    if (mode === "EQUAL") {
+      setAlgorithmConfig((prev) => ({ ...prev, trafficDistributions: [] }));
+      return;
+    }
+    // CUSTOM: only materialize real per-path shares once a fresh ECMP result
+    // is available to discover paths from — otherwise leave the array empty
+    // (still safe: an empty trafficDistributions list is equal-split by
+    // definition, so there is no way to submit a half-configured request).
+    if (simulationResult?.algorithm === "ECMP") {
+      setAlgorithmConfig((prev) => ({
+        ...prev,
+        trafficDistributions: buildCustomDistributionsFromResult(network.demands, simulationResult.pathResults),
+      }));
+    }
+  }, [simulationResult, network.demands]);
+
+  const handleDistributionShareChange = useCallback((demandId: string, pathId: string, sharePercent: number) => {
+    setAlgorithmConfig((prev) => ({
+      ...prev,
+      trafficDistributions: (prev.trafficDistributions ?? []).map((d) =>
+        d.demandId === demandId
+          ? { ...d, paths: d.paths.map((p) => (p.pathId === pathId ? { ...p, share: sharePercent / 100 } : p)) }
+          : d
+      ),
+    }));
+  }, []);
+
+  // ── Traffic Engineering policies ──────────────────────────────────────────
+  // A policy change can change which paths ECMP discovers for a demand, so
+  // any custom traffic distribution becomes potentially stale the moment a
+  // policy is added or removed — same safety pattern as topology regeneration
+  // in PR 3 (the backend would also correctly reject a genuinely stale
+  // distribution, but clearing it here avoids a confusing error for a change
+  // the student didn't realize was related).
+  const clearStaleDistributions = useCallback(() => {
+    setDistributionMode("EQUAL");
+    setAlgorithmConfig((prev) => (prev.trafficDistributions?.length ? { ...prev, trafficDistributions: [] } : prev));
+  }, []);
+
+  // Shared by both the dropdown draft flow and the graph-first quick-add
+  // flow below — one place that checks for a pointless duplicate, appends
+  // the policy, and invalidates any now-possibly-stale custom distribution.
+  const addTEPolicy = useCallback((policy: Omit<TrafficEngineeringPolicy, "policyId">): boolean => {
+    const duplicate = (algorithmConfig.tePolicies ?? []).some((p) =>
+      p.type === policy.type &&
+      (p.demandId ?? null) === (policy.demandId ?? null) &&
+      (p.linkId ?? null) === (policy.linkId ?? null) &&
+      (p.nodeId ?? null) === (policy.nodeId ?? null)
+    );
+    if (duplicate) {
+      toast("An identical policy already exists.", "info");
+      return false;
+    }
+    const newPolicy: TrafficEngineeringPolicy = { policyId: makeId("tepolicy"), ...policy };
+    setAlgorithmConfig((prev) => ({ ...prev, tePolicies: [...(prev.tePolicies ?? []), newPolicy] }));
+    clearStaleDistributions();
+    setSimulationResult(null);
+    return true;
+  }, [algorithmConfig.tePolicies, clearStaleDistributions, toast]);
+
+  const handleOpenTEDraft = useCallback(() => {
+    setTeQuickSelectActive(false); // dropdown draft and quick-add are mutually exclusive
+    setTeQuickPopupLinkId(null);
+    setTeDraft({ type: "AVOID_LINK", demandId: null, linkId: null, nodeId: null });
+  }, []);
+
+  const handleCancelTEDraft = useCallback(() => {
+    setTeDraft(null);
+    setTeIsSelecting(false);
+  }, []);
+
+  const handleUpdateTEDraft = useCallback((patch: Partial<TEPolicyDraft>) => {
+    setTeDraft((prev) => (prev ? { ...prev, ...patch } : prev));
+  }, []);
+
+  const handleStartTEGraphSelect = useCallback(() => {
+    // Dropdown-flow "Pick on graph" — mutually exclusive with connect mode,
+    // waypoint-select, and the quick-add flow below.
+    setConnectSourceId(null);
+    setWaypointSelectDemandId(null);
+    setTeQuickSelectActive(false);
+    setTeQuickPopupLinkId(null);
+    setSelectedType(null);
+    setSelectedId(null);
+    setTeIsSelecting(true);
+  }, []);
+
+  const handleStopTEGraphSelect = useCallback(() => {
+    setTeIsSelecting(false);
+  }, []);
+
+  const handleSelectTEPolicyTargetFromCanvas = useCallback((kind: "node" | "link", id: string) => {
+    if (teQuickSelectActive) {
+      // Quick-add flow: a link click hands off to the floating popup instead
+      // of a form field — REQUIRE_WAYPOINT (node-based) isn't part of this
+      // flow, so `kind` is always "link" here by construction.
+      if (kind !== "link") return;
+      setTeQuickSelectActive(false);
+      setTeQuickPopupLinkId(id);
+      return;
+    }
+    if (!teDraft) return;
+    const expectsNode = teDraft.type === "REQUIRE_WAYPOINT";
+    if ((expectsNode && kind !== "node") || (!expectsNode && kind !== "link")) {
+      toast(`Click a ${expectsNode ? "node" : "link"} for this policy type.`, "info");
+      return;
+    }
+    setTeDraft((prev) => (prev ? { ...prev, linkId: expectsNode ? null : id, nodeId: expectsNode ? id : null } : prev));
+    setTeIsSelecting(false);
+  }, [teQuickSelectActive, teDraft, toast]);
+
+  const handleCommitTEDraft = useCallback(() => {
+    if (!teDraft) return;
+    const isWaypoint = teDraft.type === "REQUIRE_WAYPOINT";
+    const targetId = isWaypoint ? teDraft.nodeId : teDraft.linkId;
+    if (!targetId) return;
+    const added = addTEPolicy({
+      type: teDraft.type,
+      demandId: teDraft.demandId,
+      linkId: isWaypoint ? null : teDraft.linkId,
+      nodeId: isWaypoint ? teDraft.nodeId : null,
+      priority: 0,
+    });
+    if (added) {
+      setTeDraft(null);
+      setTeIsSelecting(false);
+    }
+  }, [teDraft, addTEPolicy]);
+
+  const handleRemoveTEPolicy = useCallback((policyId: string) => {
+    setAlgorithmConfig((prev) => ({
+      ...prev,
+      tePolicies: (prev.tePolicies ?? []).filter((p) => p.policyId !== policyId),
+    }));
+    clearStaleDistributions();
+    setSimulationResult(null);
+  }, [clearStaleDistributions]);
+
+  // ── Scheduled mid-simulation failures (PR 6, Part 1) ──────────────────────
+  // Same invalidation pattern as TE policies above: a scheduled failure can
+  // change which paths a demand ends up on partway through the run, so any
+  // stale custom ECMP distribution (computed for the pre-schedule path set)
+  // is cleared rather than risking a mismatch the backend would otherwise
+  // reject. Unlike the Link Inspector's Fail/Restore control (PR 5, applies
+  // immediately to the persistent topology), this only takes effect on the
+  // *next* simulation run — it schedules an event inside that run's trace.
+  const handleAddFailureEvent = useCallback((linkId: string, triggerValue: number) => {
+    setAlgorithmConfig((prev) => ({
+      ...prev,
+      failureSchedule: [
+        ...(prev.failureSchedule ?? []),
+        { eventId: makeId("failure"), linkId, triggerType: "TRACE_STEP", triggerValue },
+      ],
+    }));
+    clearStaleDistributions();
+    setSimulationResult(null);
+  }, [clearStaleDistributions]);
+
+  const handleRemoveFailureEvent = useCallback((eventId: string) => {
+    setAlgorithmConfig((prev) => ({
+      ...prev,
+      failureSchedule: (prev.failureSchedule ?? []).filter((f) => f.eventId !== eventId),
+    }));
+    clearStaleDistributions();
+    setSimulationResult(null);
+  }, [clearStaleDistributions]);
+
+  // ── Link failure (PR 5) ─────────────────────────────────────────────────
+  // Failure/restore is global topology state, gated on the same
+  // canEditLinks lock as delete/add link (no new LockedFields field — a
+  // student who can't touch links at all shouldn't be able to fail one
+  // either). Toggling changes which paths exist, so — same safety pattern
+  // as TE policy add/remove above — it invalidates the current result and
+  // any custom ECMP distribution rather than risk stale shares being sent
+  // to the backend for a path set that may no longer exist. Algorithm
+  // selection, demands, and TE policies are all left untouched: a policy on
+  // a now-DOWN link simply has no effect until the link is restored.
+  const handleToggleLinkOperationalStatus = useCallback((id: string) => {
+    if (!lockedFieldsRef.current.canEditLinks) { toast("Link editing is locked by the teacher.", "info"); return; }
+    const link = network.links.find((l) => l.id === id);
+    if (!link) return;
+    const goingDown = (link.operationalStatus ?? "UP") === "UP";
+    setNetwork((prev) => ({
+      ...prev,
+      links: prev.links.map((l) =>
+        l.id === id ? { ...l, operationalStatus: goingDown ? "DOWN" : "UP" } : l
+      ),
+    }));
+    clearStaleDistributions();
+    setSimulationResult(null);
+    toast(
+      goingDown
+        ? `Link ${id} marked down. Rerun the simulation to see rerouting.`
+        : `Link ${id} restored. Rerun the simulation to see routing recompute.`,
+      "info"
+    );
+  }, [network.links, clearStaleDistributions, toast]);
+
+  // ── TE policy — graph-first quick-add flow ────────────────────────────────
+  // "Select on Graph" from the editor enters link-selection mode immediately
+  // (no policy type chosen yet); once a link is clicked, a floating popup
+  // anchored to it lets the student pick Prefer/Avoid/Forbid in one more
+  // click. Additional to, not a replacement for, the dropdown draft above.
+
+  const handleStartTEQuickLinkSelect = useCallback(() => {
+    setConnectSourceId(null);
+    setWaypointSelectDemandId(null);
+    setTeDraft(null);
+    setTeIsSelecting(false);
+    setSelectedType(null);
+    setSelectedId(null);
+    setTeQuickPopupLinkId(null);
+    setTeQuickSelectActive(true);
+  }, []);
+
+  const handleCancelTEQuickFlow = useCallback(() => {
+    setTeQuickSelectActive(false);
+    setTeQuickPopupLinkId(null);
+  }, []);
+
+  const handleChooseTEQuickPolicy = useCallback((type: TEQuickLinkPolicyType) => {
+    if (!teQuickPopupLinkId) return;
+    addTEPolicy({ type, demandId: null, linkId: teQuickPopupLinkId, nodeId: null, priority: 0 });
+    setTeQuickPopupLinkId(null);
+  }, [teQuickPopupLinkId, addTEPolicy]);
+
   // ── Simulation ────────────────────────────────────────────────────────────
 
   const handleSimulate = useCallback(async () => {
@@ -486,6 +1038,12 @@ const WorkflowManager: React.FC = () => {
     try {
       const result = await simulateNetwork({ network, algorithmConfig });
       setSimulationResult(result);
+      // First successful run ever becomes the baseline automatically; every
+      // run after that only updates "current" — comparison needs something
+      // stable to compare against, and silently moving the baseline on
+      // every run would make that impossible. See ComparisonPanel's
+      // "Set as baseline" for the explicit override.
+      setBaselineResult((prev) => prev ?? result);
       setActiveStepIndex(0);
       setCurrentStep(4);
       refreshSavedRuns();
@@ -502,6 +1060,129 @@ const WorkflowManager: React.FC = () => {
       setIsRunning(false);
     }
   }, [network, algorithmConfig, toast]);
+
+  // Switching TO difference mode while a trace is being replayed would mean
+  // replaying a trace that's simultaneously being recolored by comparison
+  // status — confusing, and not something the spec asks for ("replay may
+  // be disabled or automatically switch to After"). Exiting trace mode is
+  // the safest of those two options: the student sees the static heatmap
+  // immediately instead of a disabled-looking replay control.
+  const handleComparisonModeChange = useCallback((mode: ComparisonMode) => {
+    setComparisonMode(mode);
+    if (mode === "difference" && isTraceMode) {
+      setIsTraceMode(false);
+      setIsPlaying(false);
+    }
+  }, [isTraceMode]);
+
+  // Explicit override (PR 6) — "Set current as baseline" in ComparisonPanel.
+  // The only other way baselineResult changes is automatically, on the
+  // first successful run (see handleSimulate above) or a structural edit
+  // that invalidates it (see the delete/regenerate handlers above).
+  const handleSetBaseline = useCallback(() => {
+    if (!simulationResult) return;
+    setBaselineResult(simulationResult);
+    toast("Current result set as baseline.", "info");
+  }, [simulationResult, toast]);
+
+  // ── Optimization Lab (Sprint 2, PR5, extended PR6) ──────────────────────
+  // Each mode is launched independently, on its own explicit "Run" click —
+  // never auto-executed (PR5 §2). No fake data: every card's numbers come
+  // straight from a real POST /optimize call (PR5 §11). PR6: `settings`
+  // (search budget, weight range, timeout — see OptimizationSettingsPanel)
+  // is threaded straight into the request, and every completed run appends
+  // one row to the session-only experiment history (PR6 §15).
+  const handleRunOptimization = useCallback(async (
+    mode: Exclude<OptimizationLabMode, "CURRENT">,
+    settings: OptimizationSettings,
+  ) => {
+    setOptimizationRunning((prev) => new Set(prev).add(mode));
+    try {
+      const result = await runOptimization({
+        network, algorithmConfig, mode,
+        maxExactCombinations: settings.maxExactCombinations,
+        minWeight: settings.minWeight,
+        maxWeight: settings.maxWeight,
+        timeLimitSeconds: settings.timeLimitSeconds,
+      });
+      setOptimizationRunRecords((prev) => ({ ...prev, [mode]: { result, settings } }));
+      setOptimizationHistory((prev) => [
+        ...prev,
+        {
+          id: makeId("opt-history"),
+          mode,
+          budget: settings.maxExactCombinations,
+          searchMethod: result.searchMethod ?? null,
+          runtimeMs: result.solverRuntime,
+          mlu: result.mlu,
+          provenOptimal: result.provenOptimal ?? null,
+          status: result.status,
+          timestamp: Date.now(),
+        },
+      ]);
+      setSelectedOptimizationMode(mode);
+      const ok = result.status === "OPTIMAL" || result.status === "FEASIBLE" || result.status === "TIME_LIMIT";
+      toast(
+        ok ? `${mode} finished — MLU ${(result.mlu * 100).toFixed(1)}%.` : result.message,
+        result.status === "OPTIMAL" || result.status === "FEASIBLE" ? "success" : ok ? "info" : "error"
+      );
+    } catch (err) {
+      toast((err as Error).message, "error");
+    } finally {
+      setOptimizationRunning((prev) => {
+        const next = new Set(prev);
+        next.delete(mode);
+        return next;
+      });
+    }
+  }, [network, algorithmConfig, toast]);
+
+  // Applying a recommendation updates the real network configuration —
+  // gated behind OptimizationCard's own explicit "click to confirm" step
+  // (PR5 §5: "nothing should be silently overwritten"). WPO/JOINT
+  // recommendations only have any effect under Segment Routing (their own
+  // routing model — see docs/research/sprint2-mip-architecture-analysis.md
+  // §11), so applying one also switches the active algorithm; LWO's weights
+  // only matter under ECMP, so applying it switches back. Structural edit,
+  // same invalidation pattern as every other network mutation in this file.
+  const handleApplyOptimization = useCallback((mode: Exclude<OptimizationLabMode, "CURRENT">) => {
+    const result = optimizationRunRecords[mode]?.result;
+    if (!result) return;
+
+    const weights = (mode === "LWO" || mode === "JOINT") ? result.recommendedWeights : null;
+    if (weights) {
+      setNetwork((prev) => ({
+        ...prev,
+        links: prev.links.map((l) => (weights[l.id] !== undefined ? { ...l, weight: weights[l.id] } : l)),
+      }));
+    }
+
+    const waypoints = (mode === "WPO" || mode === "JOINT") ? result.recommendedWaypoints : null;
+    setAlgorithmConfig((prev) => {
+      let next = prev;
+      if (waypoints) {
+        const touchedDemandIds = new Set(waypoints.map((w) => w.demandId));
+        const untouchedPolicies = (prev.segmentRoutingPolicies ?? []).filter((p) => !touchedDemandIds.has(p.demandId));
+        const newPolicies: SegmentRoutingPolicy[] = waypoints
+          .filter((w) => w.waypointNodeId !== null)
+          .map((w) => ({ demandId: w.demandId, segments: [w.waypointNodeId as string] }));
+        next = { ...next, segmentRoutingPolicies: [...untouchedPolicies, ...newPolicies] };
+      }
+      if (mode === "WPO" || mode === "JOINT") next = { ...next, selectedAlgorithm: "SEGMENT_ROUTING" };
+      else if (mode === "LWO") next = { ...next, selectedAlgorithm: "ECMP" };
+      return next;
+    });
+
+    // The network the cached recommendations were computed against no
+    // longer matches — clear rather than risk showing a stale card as if
+    // it still described the current configuration.
+    setSimulationResult(null);
+    setBaselineResult(null);
+    setOptimizationRunRecords({});
+    setSelectedOptimizationMode(null);
+    setComparingOptimizationMode(null);
+    toast(`Applied the ${mode} recommendation. Rerun the simulation to see the effect.`, "success");
+  }, [optimizationRunRecords, toast]);
 
   // ── Saved runs ────────────────────────────────────────────────────────────
 
@@ -721,6 +1402,11 @@ const WorkflowManager: React.FC = () => {
       setNetwork(run.network);
       setAlgorithmConfig(run.algorithmConfig);
       setSimulationResult(run.simulationResult);
+      // A freshly loaded run has no comparison history of its own yet — it
+      // becomes its own baseline (PR 6), same as the first run of a session.
+      setBaselineResult(run.simulationResult);
+      setComparisonMode("after");
+      setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null);
       setActiveStepIndex(0);
       setIsPlaying(false);
       setIsTraceMode(false);
@@ -897,15 +1583,68 @@ const WorkflowManager: React.FC = () => {
         <AlgorithmSelectionPage
           algorithmConfig={algorithmConfig}
           isRunning={isRunning}
-          onAlgorithmChange={(a: AlgorithmName) =>
-            setAlgorithmConfig((p) => ({ ...p, selectedAlgorithm: a }))
-          }
+          onAlgorithmChange={(a: AlgorithmName) => {
+            setAlgorithmConfig((p) => ({ ...p, selectedAlgorithm: a }));
+            // Comparing results from two different algorithms isn't a
+            // meaningful before/after (PR 6) — not the same "scenario"
+            // changing, a different routing model entirely.
+            setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit
+          }}
           onThresholdChange={(v) =>
             setAlgorithmConfig((p) => ({ ...p, congestionThreshold: v }))
           }
-          onBack={() => setCurrentStep(2)}
+          onBack={() => { handleStopWaypointSelect(); setCurrentStep(2); }}
           onStartSimulation={handleSimulate}
+          onOpenOptimizationLab={() => setCurrentStep(5)}
           canChooseAlgorithm={effectiveLockedFields.canChooseAlgorithm}
+          demands={network.demands}
+          nodes={network.nodes}
+          links={network.links}
+          waypointSelectDemandId={waypointSelectDemandId}
+          onStartWaypointSelect={handleStartWaypointSelect}
+          onStopWaypointSelect={handleStopWaypointSelect}
+          onAddWaypoint={handleAddWaypoint}
+          onRemoveWaypoint={handleRemoveWaypoint}
+          onMoveWaypoint={handleMoveWaypoint}
+          simulationResult={simulationResult}
+          distributionMode={distributionMode}
+          onDistributionModeChange={handleDistributionModeChange}
+          onDistributionShareChange={handleDistributionShareChange}
+          tePolicies={algorithmConfig.tePolicies ?? []}
+          teDraft={teDraft}
+          teIsSelecting={teIsSelecting}
+          onOpenTEDraft={handleOpenTEDraft}
+          onCancelTEDraft={handleCancelTEDraft}
+          onUpdateTEDraft={handleUpdateTEDraft}
+          onStartTEGraphSelect={handleStartTEGraphSelect}
+          onStopTEGraphSelect={handleStopTEGraphSelect}
+          onCommitTEDraft={handleCommitTEDraft}
+          onRemoveTEPolicy={handleRemoveTEPolicy}
+          teQuickSelectActive={teQuickSelectActive}
+          onStartTEQuickLinkSelect={handleStartTEQuickLinkSelect}
+          failureSchedule={algorithmConfig.failureSchedule ?? []}
+          onAddFailureEvent={handleAddFailureEvent}
+          onRemoveFailureEvent={handleRemoveFailureEvent}
+        />
+      );
+    if (currentStep === 5)
+      return (
+        <OptimizationLabPage
+          network={network}
+          algorithmConfig={algorithmConfig}
+          currentSimulationResult={simulationResult}
+          runRecords={optimizationRunRecords}
+          runningModes={optimizationRunning}
+          selectedMode={selectedOptimizationMode}
+          comparingMode={comparingOptimizationMode}
+          comparisonMode={optComparisonMode}
+          history={optimizationHistory}
+          onComparisonModeChange={setOptComparisonMode}
+          onBack={() => setCurrentStep(3)}
+          onRun={handleRunOptimization}
+          onSelectForView={setSelectedOptimizationMode}
+          onCompare={setComparingOptimizationMode}
+          onApply={handleApplyOptimization}
         />
       );
     return (
@@ -915,10 +1654,24 @@ const WorkflowManager: React.FC = () => {
         currentTraceEvent={currentTraceEvent}
         activeStepIndex={activeStepIndex}
         totalSteps={traceEvents.length}
-        onEnableTrace={() => { setIsTraceMode(true); setActiveStepIndex(0); setShowRoutingTable(false); }}
+        onEnableTrace={() => {
+          // Difference mode is a static heatmap, not a replay (spec: "do
+          // not build a third replay system") — entering trace mode from
+          // it falls back to replaying the current ("after") result, the
+          // same safe default as a fresh run.
+          if (comparisonMode === "difference") setComparisonMode("after");
+          setIsTraceMode(true);
+          setActiveStepIndex(0);
+          setShowRoutingTable(false);
+        }}
         onDisableTrace={() => { setIsTraceMode(false); setIsPlaying(false); setShowRoutingTable(false); }}
         onBack={() => setCurrentStep(3)}
         lectureInsight={lectureInsight}
+        baselineResult={baselineResult}
+        comparison={comparison}
+        comparisonMode={comparisonMode}
+        onComparisonModeChange={handleComparisonModeChange}
+        onSetBaseline={handleSetBaseline}
       />
     );
   })();
@@ -1065,6 +1818,7 @@ const WorkflowManager: React.FC = () => {
 
   const traceTimelineEl = (
     <>
+      {srDisplayState && <SegmentListPanel srState={srDisplayState} network={network} />}
       <TraceTimeline
         events={traceEvents}
         activeIndex={activeStepIndex}
@@ -1117,9 +1871,20 @@ const WorkflowManager: React.FC = () => {
 
         {appMode === "lab" && currentStep > 0 && (
           <nav className="stage-nav" aria-label="Workflow stages">
+            {/* PR6 §17 fix: the Optimization Lab (step 5) branches off from
+                Algorithm (step 3), not a 5th sequential stage — cluttering
+                the stepper with a literal 5th dot would misrepresent it as
+                a required, linear step. Instead, the stepper itself keeps
+                showing exactly the 4 stages it always has, computed against
+                an *effective* step (5 reads as "still at Algorithm" for
+                done/active purposes — Design/Traffic read done, Algorithm
+                reads active, Result reads neither), and a separate,
+                unambiguous "Optimization Lab" indicator appears alongside
+                it only while step 5 is actually open. */}
             {stages.map(({ step, label, icon: Icon, hint }) => {
-              const isDone   = currentStep > step;
-              const isActive = currentStep === step;
+              const effectiveStep = currentStep === 5 ? 3 : currentStep;
+              const isDone   = effectiveStep > step;
+              const isActive = effectiveStep === step;
               return (
                 <button
                   key={step}
@@ -1135,6 +1900,14 @@ const WorkflowManager: React.FC = () => {
                 </button>
               );
             })}
+            {currentStep === 5 && (
+              <span
+                className="stage-lab-indicator"
+                title="Optimization Lab — branching off from Algorithm. Your Design/Traffic/Algorithm work is unaffected."
+              >
+                <FlaskConical size={12} /> Optimization Lab
+              </span>
+            )}
           </nav>
         )}
 
@@ -1317,13 +2090,37 @@ const WorkflowManager: React.FC = () => {
             </div>
           )}
 
+          {waypointSelectDemandId && (() => {
+            const d = network.demands.find((dm) => dm.id === waypointSelectDemandId);
+            const label = (id: string) => network.nodes.find((n) => n.id === id)?.label ?? id;
+            return (
+              <div className="connect-mode-banner connect-mode-banner--sr">
+                {d ? `Select waypoint for ${label(d.source)} → ${label(d.target)}` : "Select waypoint"} ·{" "}
+                <kbd>Esc</kbd> to stop
+              </div>
+            );
+          })()}
+
+          {teIsSelecting && teDraft && (
+            <div className="connect-mode-banner connect-mode-banner--te">
+              Select a {teDraft.type === "REQUIRE_WAYPOINT" ? "node" : "link"} for this policy ·{" "}
+              <kbd>Esc</kbd> to stop
+            </div>
+          )}
+
+          {teQuickSelectActive && (
+            <div className="connect-mode-banner connect-mode-banner--te">
+              Select a link on the graph · <kbd>Esc</kbd> to stop
+            </div>
+          )}
+
           <ReactFlowCanvas
             network={network}
             currentTraceEvent={currentTraceEvent}
             linkResults={linkResults}
             pathResults={pathResults}
-            isSimulated={!!simulationResult}
-            isTraceMode={isTraceMode}
+            isSimulated={!!displayedResult}
+            isTraceMode={canvasIsTraceMode}
             readonly={currentStep === 0}
             canEditNodes={effectiveLockedFields.canEditNodes}
             canEditLinks={effectiveLockedFields.canEditLinks}
@@ -1332,6 +2129,17 @@ const WorkflowManager: React.FC = () => {
             centerNodeRequest={centerNodeRequest}
             gradingHighlightLinks={challengeGradingResult?.highlightedLinks}
             gradingHighlightNodes={challengeGradingResult?.highlightedNodes}
+            waypointSelectDemandId={waypointSelectDemandId}
+            srDisplayState={srDisplayState}
+            replayDownLinkIds={replayDownLinkIds}
+            comparisonMode={activeComparisonMode}
+            comparisonByLink={comparisonByLink}
+            tePolicySelectMode={
+              teQuickSelectActive ? "link" :
+              teIsSelecting && teDraft ? (teDraft.type === "REQUIRE_WAYPOINT" ? "node" : "link") : null
+            }
+            tePolicies={algorithmConfig.tePolicies ?? []}
+            teQuickPopupLinkId={teQuickPopupLinkId}
             onMoveNode={handleMoveNode}
             onAddLink={handleAddLink}
             onDeleteNode={handleDeleteNode}
@@ -1340,6 +2148,12 @@ const WorkflowManager: React.FC = () => {
             onSelectLink={handleSelectLink}
             onCompleteConnect={handleCompleteConnect}
             onCancelConnect={handleCancelConnect}
+            onSelectWaypointNode={handleSelectWaypointNodeFromCanvas}
+            onCancelWaypointSelect={handleStopWaypointSelect}
+            onSelectTEPolicyTarget={handleSelectTEPolicyTargetFromCanvas}
+            onCancelTEPolicySelect={teQuickSelectActive ? handleCancelTEQuickFlow : handleStopTEGraphSelect}
+            onChooseTEQuickPolicy={handleChooseTEQuickPolicy}
+            onCancelTEQuickPopup={handleCancelTEQuickFlow}
             onAddNodeShortcut={currentStep === 1 ? handleAddNode : undefined}
           />
 
@@ -1355,6 +2169,8 @@ const WorkflowManager: React.FC = () => {
             onDeleteNode={handleDeleteNode}
             onUpdateLink={handleUpdateLink}
             onDeleteLink={handleDeleteLink}
+            onToggleLinkOperationalStatus={handleToggleLinkOperationalStatus}
+            comparisonByLink={comparisonByLink}
             onStartConnect={currentStep === 1 ? handleStartConnect : undefined}
             onAddDemandFrom={handleAddDemandFrom}
             onCenterNode={handleCenterNode}

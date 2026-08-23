@@ -20,6 +20,8 @@
   --success-light: #f0fdf4;
   --purple: #7c3aed;
   --purple-light: #f5f3ff;
+  --sr: #0d7d7a;
+  --sr-light: #e3f3f1;
   --topbar-bg: #0d1117;
   --topbar-h: 54px;
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, .06);
@@ -2337,6 +2339,63 @@ tbody tr:hover {
   border:1px solid #fca5a5
 }
 
+/* Link failure (PR 5) — stone/neutral, deliberately not the danger red used
+   for congestion, so "down" reads as a different kind of state at a glance. */
+.link-status-badge--down {
+  background:#78716c1f;
+  color:#57534e;
+  border:1px solid #78716c40
+}
+
+.li-opstatus {
+  border:1px solid var(--border);
+  border-radius:var(--radius-sm);
+  background:var(--surface-2)
+}
+
+.li-opstatus--down {
+  border-color:#78716c40;
+  background:#78716c14
+}
+
+.li-opstatus-row {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px
+}
+
+.li-opstatus-label {
+  font-weight:700;
+  font-size:.85rem;
+  color:var(--text-1)
+}
+
+.li-opstatus-hint {
+  font-size:.72rem;
+  color:var(--text-3);
+  margin-top:2px;
+  max-width:26ch
+}
+
+.li-opstatus-btn {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  white-space:nowrap;
+  flex-shrink:0
+}
+
+.li-opstatus-btn--fail {
+  color:var(--danger);
+  border-color:#fca5a5
+}
+
+.li-opstatus-btn--restore {
+  color:#16a34a;
+  border-color:#bbf7d0
+}
+
 .param-grid {
   display:grid;
   grid-template-columns:1fr 1fr;
@@ -3188,6 +3247,16 @@ tbody tr:hover {
   color:var(--text-3)
 }
 
+.rf-edge-weight-label--down {
+  background: rgba(120,113,108,0.14);
+  border: 1px solid rgba(120,113,108,0.4);
+  color:#57534e;
+  font-weight:700;
+  letter-spacing:.03em;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
 .rf-edge-util-badge {
   font-size:.7rem;
   font-weight:700;
@@ -3265,6 +3334,22 @@ tbody tr:hover {
   color:var(--text-2);
   line-height:1.55;
   padding:0 .1rem
+}
+
+/* Link failure (PR 5) — compact operational-status note, stone/neutral and
+   deliberately quieter than the congestion hero above it: this reports
+   topology state, not a traffic outcome. */
+.result-network-event {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:.76rem;
+  font-weight:600;
+  color:#57534e;
+  background:#78716c1a;
+  border:1px solid #78716c33;
+  border-radius:var(--radius-sm);
+  padding:6px 10px
 }
 
 .result-metrics {
@@ -10506,4 +10591,1776 @@ html, body, #root {
 
 .rtp-modal-body .routing-row {
   grid-template-columns:1fr 1fr 120px 120px
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Segment Routing — PR 2 (frontend + replay visualization)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Waypoint editor (AlgorithmSelectionPage) ── */
+
+.sr-editor {
+  display:flex;
+  flex-direction:column;
+  gap:.7rem;
+  margin:1rem 0
+}
+
+.sr-editor-empty {
+  font-size:.85rem;
+  color:var(--text-2);
+  background:var(--surface-2);
+  border:1px dashed var(--border-strong);
+  border-radius:var(--radius);
+  padding:.9rem;
+  margin:1rem 0
+}
+
+.sr-editor-heading {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:.78rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--text-3)
+}
+
+.sr-demand-card {
+  background:var(--surface-2);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:.75rem .85rem;
+  display:flex;
+  flex-direction:column;
+  gap:.55rem;
+  transition:border-color var(--fast), box-shadow var(--fast)
+}
+
+.sr-demand-card--selecting {
+  border-color:var(--sr);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--sr) 18%, transparent)
+}
+
+.sr-demand-header {
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:.5rem
+}
+
+.sr-demand-route {
+  font-size:.92rem;
+  font-weight:700;
+  color:var(--text)
+}
+
+.sr-demand-arrow {
+  color:var(--text-3);
+  font-weight:500;
+  margin:0 2px
+}
+
+.sr-demand-amount {
+  font-size:.78rem;
+  font-weight:600;
+  color:var(--text-2)
+}
+
+.sr-chip-chain {
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:4px
+}
+
+.sr-chip-connector {
+  color:var(--text-3);
+  font-size:.85rem
+}
+
+.sr-chip {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:.82rem;
+  font-weight:600;
+  padding:4px 8px;
+  border-radius:999px;
+  line-height:1.2
+}
+
+.sr-chip--endpoint {
+  background:var(--surface-3);
+  color:var(--text-2);
+  border:1px solid var(--border)
+}
+
+.sr-chip--waypoint {
+  background:var(--sr-light);
+  color:var(--sr);
+  border:1px solid color-mix(in srgb, var(--sr) 30%, transparent)
+}
+
+.sr-chip-controls {
+  display:inline-flex;
+  align-items:center;
+  gap:1px;
+  margin-left:2px
+}
+
+.sr-chip-btn {
+  display:grid;
+  place-items:center;
+  width:16px;
+  height:16px;
+  border:none;
+  background:transparent;
+  color:var(--sr);
+  opacity:.75;
+  border-radius:4px;
+  cursor:pointer;
+  transition:opacity var(--fast), background var(--fast)
+}
+
+.sr-chip-btn:hover:not(:disabled) {
+  opacity:1;
+  background:#ffffff80
+}
+
+.sr-chip-btn:disabled {
+  opacity:.25;
+  cursor:default
+}
+
+.sr-chip-btn--danger:hover:not(:disabled) {
+  color:var(--danger)
+}
+
+.sr-empty-hint {
+  font-size:.78rem;
+  color:var(--text-3);
+  font-style:italic;
+  margin:0
+}
+
+.sr-demand-actions {
+  display:flex;
+  align-items:center;
+  gap:.5rem;
+  flex-wrap:wrap
+}
+
+.sr-add-waypoint-btn {
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  font-size:.8rem;
+  font-weight:600;
+  padding:5px 10px;
+  border-radius:var(--radius-sm);
+  border:1px solid var(--sr);
+  background:var(--surface);
+  color:var(--sr);
+  cursor:pointer;
+  transition:background var(--fast), color var(--fast)
+}
+
+.sr-add-waypoint-btn:hover {
+  background:var(--sr-light)
+}
+
+.sr-add-waypoint-btn--active {
+  background:var(--sr);
+  color:#fff
+}
+
+.sr-select-fallback {
+  font-size:.8rem;
+  padding:5px 8px;
+  border-radius:var(--radius-sm);
+  border:1px solid var(--border);
+  background:var(--surface);
+  color:var(--text-2)
+}
+
+.sr-selecting-hint {
+  font-size:.76rem;
+  color:var(--sr);
+  margin:0
+}
+
+/* ── Waypoint-selection canvas banner ── */
+
+.connect-mode-banner--sr {
+  background:var(--sr)
+}
+
+/* ── Active-waypoint node ring (NetworkNode) ── */
+
+@keyframes sr-waypoint-pulse {
+  0%, 100% { box-shadow:0 0 0 3px color-mix(in srgb, var(--sr) 55%, transparent), 0 0 0 6px color-mix(in srgb, var(--sr) 18%, transparent) }
+  50%      { box-shadow:0 0 0 5px color-mix(in srgb, var(--sr) 70%, transparent), 0 0 0 10px color-mix(in srgb, var(--sr) 10%, transparent) }
+}
+
+.rf-node--waypoint-active {
+  border-color:var(--sr) !important;
+  background:var(--sr-light);
+  animation:sr-waypoint-pulse 1.4s ease-in-out infinite
+}
+
+/* ── Packet token (React Flow ViewportPortal overlay) ── */
+
+.rf-packet-token-wrap {
+  position:absolute;
+  top:0;
+  left:0;
+  pointer-events:none;
+  transition:transform 320ms cubic-bezier(.25, .46, .45, .94);
+  z-index:15
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rf-packet-token-wrap { transition:none }
+}
+
+.rf-packet-token {
+  position:absolute;
+  top:-30px;
+  left:-11px;
+  display:grid;
+  place-items:center;
+  min-width:22px;
+  height:22px;
+  padding:0 6px;
+  border-radius:999px;
+  background:var(--sr);
+  color:#fff;
+  font-size:.66rem;
+  font-weight:700;
+  letter-spacing:.02em;
+  box-shadow:0 2px 8px color-mix(in srgb, var(--sr) 45%, transparent), 0 0 0 2px #fff
+}
+
+.rf-packet-token-label {
+  pointer-events:none;
+  white-space:nowrap
+}
+
+/* ── Segment list panel (right rail, during SR trace replay) ── */
+
+.sr-segment-panel {
+  display:flex;
+  flex-direction:column;
+  gap:.55rem
+}
+
+.sr-segment-panel-header {
+  display:flex;
+  align-items:center;
+  gap:6px
+}
+
+.sr-segment-panel-title {
+  font-size:.78rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--sr)
+}
+
+.sr-segment-panel-demand {
+  font-size:.88rem;
+  font-weight:700;
+  color:var(--text)
+}
+
+.sr-segment-track {
+  display:flex;
+  flex-direction:column;
+  gap:2px
+}
+
+.sr-segment-stop {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:4px 2px;
+  font-size:.85rem;
+  color:var(--text-3);
+  transition:color var(--fast)
+}
+
+.sr-segment-dot {
+  display:grid;
+  place-items:center;
+  flex-shrink:0;
+  width:16px;
+  height:16px;
+  border-radius:50%;
+  border:2px solid var(--border-strong);
+  color:#fff;
+  background:var(--surface)
+}
+
+.sr-segment-dot--done {
+  background:var(--success);
+  border-color:var(--success)
+}
+
+.sr-segment-dot--active {
+  border-color:var(--sr);
+  background:var(--sr);
+  box-shadow:0 0 0 3px var(--sr-light)
+}
+
+.sr-segment-dot--next {
+  border-color:var(--sr)
+}
+
+.sr-segment-stop--completed,
+.sr-segment-stop--source {
+  color:var(--text-2)
+}
+
+.sr-segment-stop--active {
+  color:var(--sr);
+  font-weight:700
+}
+
+.sr-segment-stop--next {
+  color:var(--text)
+}
+
+.sr-segment-stop-label {
+  display:inline-flex;
+  align-items:center;
+  gap:5px
+}
+
+.sr-segment-sid-label {
+  font-size:.62rem;
+  font-weight:700;
+  letter-spacing:.05em;
+  color:var(--text-3);
+  border:1px solid var(--border);
+  border-radius:4px;
+  padding:0 4px
+}
+
+.sr-segment-status-badge {
+  margin-left:auto;
+  font-size:.62rem;
+  font-weight:700;
+  letter-spacing:.05em;
+  text-transform:uppercase;
+  color:#fff;
+  background:var(--sr);
+  border-radius:4px;
+  padding:1px 6px
+}
+
+.sr-segment-status-badge--next {
+  background:var(--surface-3);
+  color:var(--text-2)
+}
+
+/* ── Trace step panel — SR badge variant ── */
+
+.tsp-alg-badge--sr {
+  background:var(--sr-light);
+  color:var(--sr)
+}
+
+/* ── Result summary — Segment Routing compact section ── */
+
+.result-sr-section {
+  display:flex;
+  flex-direction:column;
+  gap:.6rem;
+  background:var(--sr-light);
+  border:1px solid color-mix(in srgb, var(--sr) 25%, transparent);
+  border-radius:var(--radius);
+  padding:.8rem .9rem
+}
+
+.result-sr-title {
+  font-size:.78rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--sr)
+}
+
+.result-sr-demand {
+  display:flex;
+  flex-direction:column;
+  gap:2px
+}
+
+.result-sr-demand-route {
+  font-size:.88rem;
+  font-weight:700;
+  color:var(--text)
+}
+
+.result-sr-demand-line {
+  font-size:.82rem;
+  color:var(--text-2)
+}
+
+.result-sr-demand-label {
+  font-weight:600;
+  color:var(--text-3)
+}
+
+/* PR0 (ECMP-within-segments) — a demand can resolve into more than one
+   end-to-end route; each gets its own compact row, same idiom as the ECMP
+   traffic-distribution rows below. */
+.result-sr-route-row {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:.8rem;
+  padding-left:.2rem
+}
+
+.result-sr-route-path {
+  color:var(--text-2);
+  flex:1;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+
+.result-sr-route-pct {
+  font-weight:700;
+  color:var(--accent);
+  font-variant-numeric:tabular-nums
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ECMP configurable traffic distribution — PR 3
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.td-editor {
+  display:flex;
+  flex-direction:column;
+  gap:.7rem;
+  margin:1rem 0
+}
+
+.td-editor-heading {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:.78rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--text-3)
+}
+
+.td-mode-toggle {
+  display:flex;
+  gap:14px
+}
+
+.td-mode-option {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:.86rem;
+  font-weight:600;
+  color:var(--text-2);
+  cursor:pointer
+}
+
+.td-mode-option input[type="radio"] {
+  accent-color:var(--accent)
+}
+
+.td-hint {
+  font-size:.82rem;
+  color:var(--text-2);
+  background:var(--surface-2);
+  border:1px dashed var(--border-strong);
+  border-radius:var(--radius);
+  padding:.7rem .8rem;
+  margin:0
+}
+
+.td-demand-card {
+  background:var(--surface-2);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:.75rem .85rem;
+  display:flex;
+  flex-direction:column;
+  gap:.5rem
+}
+
+.td-demand-header {
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:.5rem
+}
+
+.td-demand-route {
+  font-size:.92rem;
+  font-weight:700;
+  color:var(--text)
+}
+
+.td-demand-arrow {
+  color:var(--text-3);
+  font-weight:500;
+  margin:0 2px
+}
+
+.td-demand-amount {
+  font-size:.78rem;
+  font-weight:600;
+  color:var(--text-2)
+}
+
+.td-path-row {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:4px 0
+}
+
+.td-path-label {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-width:0;
+  flex:1
+}
+
+.td-path-index {
+  flex-shrink:0;
+  font-size:.72rem;
+  font-weight:700;
+  color:var(--accent);
+  background:var(--accent-light);
+  border-radius:999px;
+  padding:2px 8px
+}
+
+.td-path-route {
+  font-size:.82rem;
+  color:var(--text-2);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+
+.td-path-input-wrap {
+  display:flex;
+  align-items:center;
+  gap:3px;
+  flex-shrink:0
+}
+
+.td-path-input {
+  width:52px;
+  font-size:.86rem;
+  font-weight:600;
+  text-align:right;
+  padding:4px 6px;
+  border-radius:var(--radius-sm);
+  border:1px solid var(--border-strong);
+  background:var(--surface);
+  color:var(--text)
+}
+
+.td-path-pct-sign {
+  font-size:.82rem;
+  color:var(--text-3)
+}
+
+.td-total-row {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:.8rem;
+  font-weight:700;
+  padding-top:6px;
+  border-top:1px dashed var(--border)
+}
+
+.td-total-row--ok {
+  color:var(--success)
+}
+
+.td-total-row--invalid {
+  color:var(--danger)
+}
+
+.td-total-value {
+  font-variant-numeric:tabular-nums
+}
+
+.td-total-warning {
+  font-weight:500;
+  font-size:.74rem;
+  color:var(--danger)
+}
+
+/* ── Result summary — ECMP traffic distribution section ── */
+
+.result-td-section {
+  display:flex;
+  flex-direction:column;
+  gap:.6rem;
+  background:var(--accent-light);
+  border:1px solid var(--accent-border);
+  border-radius:var(--radius);
+  padding:.8rem .9rem
+}
+
+.result-td-title {
+  font-size:.78rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--accent)
+}
+
+.result-td-demand {
+  display:flex;
+  flex-direction:column;
+  gap:3px
+}
+
+.result-td-demand + .result-td-demand {
+  margin-top:6px;
+  padding-top:6px;
+  border-top:1px dashed var(--accent-border)
+}
+
+.result-td-mode-badge {
+  align-self:flex-start;
+  font-size:.66rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  border-radius:4px;
+  padding:1px 6px;
+  margin-bottom:2px
+}
+
+.result-td-mode-badge--equal {
+  background:var(--surface-3);
+  color:var(--text-2)
+}
+
+.result-td-mode-badge--custom {
+  background:var(--accent);
+  color:#fff
+}
+
+.result-td-path-row {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:.82rem
+}
+
+.result-td-path-label {
+  font-weight:700;
+  color:var(--text);
+  flex-shrink:0
+}
+
+.result-td-path-route {
+  color:var(--text-2);
+  flex:1;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+
+.result-td-path-pct {
+  font-weight:700;
+  color:var(--accent);
+  font-variant-numeric:tabular-nums
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Traffic Engineering policies — PR 4
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Policy editor (AlgorithmSelectionPage, collapsed by default) ── */
+
+.te-editor {
+  margin:1rem 0
+}
+
+.te-editor-toggle {
+  display:flex;
+  align-items:center;
+  gap:6px
+}
+
+.te-editor-count {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:16px;
+  height:16px;
+  padding:0 4px;
+  border-radius:999px;
+  background:var(--warning);
+  color:#fff;
+  font-size:.66rem;
+  font-weight:700
+}
+
+.te-editor-body {
+  display:flex;
+  flex-direction:column;
+  gap:.6rem;
+  margin-top:.6rem
+}
+
+.te-empty-hint {
+  font-size:.82rem;
+  color:var(--text-2);
+  background:var(--surface-2);
+  border:1px dashed var(--border-strong);
+  border-radius:var(--radius);
+  padding:.7rem .8rem;
+  margin:0
+}
+
+.te-policy-list {
+  list-style:none;
+  display:flex;
+  flex-direction:column;
+  gap:.3rem;
+  margin:0;
+  padding:0
+}
+
+.te-policy-item {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:.4rem .6rem;
+  background:var(--surface-2);
+  border:1px solid var(--border);
+  border-radius:var(--radius-sm);
+  font-size:.82rem
+}
+
+.te-policy-kind-dot {
+  flex-shrink:0;
+  width:7px;
+  height:7px;
+  border-radius:50%
+}
+
+.te-policy-kind-dot--hard { background:var(--danger) }
+.te-policy-kind-dot--soft { background:var(--warning) }
+/* Scheduled failure (PR 6) — same stone/neutral hue used for the DOWN link
+   state elsewhere, deliberately distinct from hard/soft policy colors. */
+.te-policy-kind-dot--down { background:#78716c }
+.te-policy-item--down { border-color:#78716c40 }
+
+.te-policy-text {
+  flex:1;
+  color:var(--text);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+
+.te-policy-scope {
+  flex-shrink:0;
+  font-size:.72rem;
+  color:var(--text-3)
+}
+
+.te-policy-remove {
+  flex-shrink:0
+}
+
+.te-add-btn {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  align-self:flex-start;
+  font-size:.82rem;
+  font-weight:600;
+  padding:6px 12px;
+  border-radius:var(--radius-sm);
+  border:1px solid var(--warning);
+  background:var(--surface);
+  color:var(--warning);
+  cursor:pointer
+}
+
+.te-add-btn:hover {
+  background:var(--warning-light)
+}
+
+.te-draft-form {
+  display:flex;
+  flex-direction:column;
+  gap:.6rem;
+  background:var(--surface-2);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:.7rem .8rem
+}
+
+.te-draft-row {
+  display:flex;
+  gap:.5rem;
+  align-items:flex-end;
+  flex-wrap:wrap
+}
+
+.te-draft-field {
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+  font-size:.76rem;
+  font-weight:600;
+  color:var(--text-2);
+  flex:1;
+  min-width:120px
+}
+
+.te-draft-field--wide {
+  flex:2
+}
+
+.te-graph-select-btn {
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  font-size:.78rem;
+  font-weight:600;
+  padding:6px 10px;
+  border-radius:var(--radius-sm);
+  border:1px solid var(--warning);
+  background:var(--surface);
+  color:var(--warning);
+  cursor:pointer;
+  white-space:nowrap
+}
+
+.te-graph-select-btn--active {
+  background:var(--warning);
+  color:#fff
+}
+
+.te-selecting-hint {
+  font-size:.76rem;
+  color:var(--warning);
+  margin:0
+}
+
+.te-selected-hint {
+  font-size:.78rem;
+  color:var(--text-2);
+  margin:0
+}
+
+.te-draft-actions {
+  display:flex;
+  justify-content:flex-end;
+  gap:.5rem
+}
+
+/* ── Graph banner (TE policy graph-select mode) ── */
+
+.connect-mode-banner--te {
+  background:var(--warning)
+}
+
+/* ── Canvas markers ── */
+
+.rf-edge-policy-badge {
+  display:grid;
+  place-items:center;
+  width:18px;
+  height:18px;
+  border-radius:50%;
+  background:var(--surface);
+  box-shadow:0 1px 4px rgba(0,0,0,.18)
+}
+
+.rf-edge-policy-badge--forbid { color:var(--danger) }
+.rf-edge-policy-badge--avoid  { color:var(--warning) }
+.rf-edge-policy-badge--prefer { color:var(--success) }
+/* Link failure (PR 5) — a deliberately different hue family (stone/neutral,
+   not red/orange/green) so "down" never reads as congestion, a forbid
+   policy, or a grading result at a glance. */
+.rf-edge-policy-badge--down   { color:#78716c }
+
+.rf-node--te-required {
+  box-shadow:0 0 0 2px var(--warning), 0 0 0 4px var(--warning-light)
+}
+
+.rf-node-te-badge {
+  position:absolute;
+  top:-5px;
+  right:-5px;
+  display:grid;
+  place-items:center;
+  width:15px;
+  height:15px;
+  border-radius:50%;
+  background:var(--warning);
+  color:#fff;
+  box-shadow:0 0 0 2px var(--surface)
+}
+
+/* ── Trace step panel — policy rows ── */
+
+.tsp-te-row {
+  font-size:.85rem;
+  padding:4px 8px;
+  border-radius:6px;
+  margin-bottom:3px
+}
+
+.tsp-te-row--forbid {
+  background:var(--danger-light);
+  color:var(--danger)
+}
+
+.tsp-te-row--avoid {
+  background:var(--warning-light);
+  color:var(--warning)
+}
+
+.tsp-te-row--prefer {
+  background:var(--success-light);
+  color:var(--success)
+}
+
+/* Link failure (PR 5) — stone/neutral, distinct from the forbid/avoid/prefer
+   hues above so it never reads as a TE policy outcome. */
+.tsp-te-row--down {
+  background:#78716c1f;
+  color:#57534e
+}
+
+.tsp-te-arrow {
+  color:var(--text-3);
+  margin:0 2px
+}
+
+/* ── Result summary — applied policies section ── */
+
+.result-te-section {
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  background:var(--warning-light);
+  border:1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+  border-radius:var(--radius);
+  padding:.7rem .85rem
+}
+
+.result-te-title {
+  font-size:.78rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--warning);
+  margin-bottom:2px
+}
+
+.result-te-line {
+  font-size:.84rem;
+  color:var(--text)
+}
+
+.result-te-line--forbid  { color:var(--danger) }
+.result-te-line--avoid   { color:var(--warning) }
+.result-te-line--prefer  { color:var(--success) }
+.result-te-line--waypoint{ color:var(--text-2) }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   TE policy quick-add (graph-first flow) — additional to the dropdown editor
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.te-add-row {
+  display:flex;
+  gap:.5rem;
+  flex-wrap:wrap
+}
+
+.te-quick-btn {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:.82rem;
+  font-weight:600;
+  padding:6px 12px;
+  border-radius:var(--radius-sm);
+  border:1px dashed var(--warning);
+  background:var(--surface);
+  color:var(--warning);
+  cursor:pointer
+}
+
+.te-quick-btn:hover:not(:disabled) {
+  background:var(--warning-light)
+}
+
+.te-quick-btn--active {
+  border-style:solid;
+  background:var(--warning);
+  color:#fff;
+  cursor:default
+}
+
+.te-quick-btn:disabled {
+  opacity:.85
+}
+
+/* ── Floating popup on the canvas (React Flow ViewportPortal) ── */
+
+.te-quick-popup {
+  position:absolute;
+  top:0;
+  left:0;
+  z-index:20;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  min-width:190px;
+  background:var(--surface);
+  border:1px solid var(--warning);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow-lg);
+  padding:.5rem;
+  pointer-events:auto
+}
+
+.te-quick-popup-header {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:8px;
+  margin-bottom:4px;
+  padding-bottom:6px;
+  border-bottom:1px solid var(--border)
+}
+
+.te-quick-popup-title {
+  font-size:.72rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+  color:var(--warning)
+}
+
+.te-quick-popup-subtitle {
+  font-size:.78rem;
+  font-weight:600;
+  color:var(--text);
+  margin-top:2px
+}
+
+.te-quick-popup-close {
+  flex-shrink:0;
+  display:grid;
+  place-items:center;
+  width:18px;
+  height:18px;
+  border:none;
+  background:transparent;
+  color:var(--text-3);
+  border-radius:4px;
+  cursor:pointer
+}
+
+.te-quick-popup-close:hover {
+  background:var(--surface-2);
+  color:var(--text)
+}
+
+.te-quick-popup-option {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  width:100%;
+  text-align:left;
+  font-size:.84rem;
+  color:var(--text);
+  background:none;
+  border:none;
+  border-radius:var(--radius-sm);
+  padding:6px 8px;
+  cursor:pointer
+}
+
+.te-quick-popup-option:hover {
+  background:var(--warning-light)
+}
+
+.te-quick-popup-radio {
+  flex-shrink:0;
+  width:11px;
+  height:11px;
+  border-radius:50%;
+  border:2px solid var(--border-strong)
+}
+
+.te-quick-popup-option:hover .te-quick-popup-radio {
+  border-color:var(--warning)
+}
+
+/* ── Before/After comparison (PR 6, Part 2) ─────────────────────────────── */
+
+.comparison-panel {
+  display:flex;
+  flex-direction:column;
+  gap:.7rem;
+  background:var(--surface-2);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:.8rem .9rem;
+  margin-bottom:1rem
+}
+
+.comparison-panel-header {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px
+}
+
+.comparison-panel-title {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-weight:700;
+  font-size:.85rem;
+  color:var(--text)
+}
+
+.comparison-empty-hint {
+  font-size:.8rem;
+  color:var(--text-2);
+  margin:0
+}
+
+.comparison-mode-toggle {
+  display:inline-flex;
+  align-self:flex-start;
+  border:1px solid var(--border-strong);
+  border-radius:var(--radius-sm);
+  overflow:hidden
+}
+
+.comparison-mode-btn {
+  background:var(--surface);
+  border:none;
+  padding:.35rem .8rem;
+  font-size:.78rem;
+  font-weight:600;
+  color:var(--text-2);
+  cursor:pointer
+}
+
+.comparison-mode-btn + .comparison-mode-btn {
+  border-left:1px solid var(--border-strong)
+}
+
+.comparison-mode-btn--active {
+  background:var(--accent, #0071e3);
+  color:#fff
+}
+
+.comparison-summary {
+  display:flex;
+  flex-direction:column;
+  gap:.35rem
+}
+
+.comparison-summary-row {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  font-size:.8rem
+}
+
+.comparison-summary-label {
+  color:var(--text-2)
+}
+
+.comparison-summary-value {
+  font-weight:600;
+  color:var(--text);
+  font-variant-numeric:tabular-nums;
+  display:inline-flex;
+  align-items:center;
+  gap:6px
+}
+
+.comparison-delta {
+  font-size:.72rem;
+  font-weight:700;
+  padding:1px 6px;
+  border-radius:999px;
+  background:var(--surface-3)
+}
+
+.comparison-delta--worse { color:#dc2626; background:#dc262614 }
+.comparison-delta--better { color:#16a34a; background:#16a34a14 }
+
+.comparison-legend {
+  display:flex;
+  flex-wrap:wrap;
+  gap:.5rem .9rem;
+  padding-top:.2rem
+}
+
+.comparison-legend-item {
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  font-size:.74rem;
+  color:var(--text-2)
+}
+
+.comparison-legend-swatch {
+  width:9px;
+  height:9px;
+  border-radius:50%;
+  flex-shrink:0
+}
+
+/* Link Inspector comparison block (PR 6, Part 2) */
+
+.li-comparison-grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:.6rem
+}
+
+.li-comparison-metric {
+  display:flex;
+  flex-direction:column;
+  gap:2px
+}
+
+.li-comparison-metric-label {
+  font-size:.7rem;
+  color:var(--text-3);
+  text-transform:uppercase;
+  letter-spacing:.04em
+}
+
+.li-comparison-metric-value {
+  font-size:.85rem;
+  font-weight:600;
+  color:var(--text);
+  font-variant-numeric:tabular-nums
+}
+
+.li-comparison-change {
+  font-size:.72rem;
+  font-weight:700;
+  width:fit-content
+}
+
+.li-comparison-change--worse { color:#dc2626 }
+.li-comparison-change--better { color:#16a34a }
+
+.li-comparison-status-row {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-top:.5rem
+}
+
+.li-comparison-status-badge {
+  font-size:.74rem;
+  font-weight:700;
+  padding:2px 8px;
+  border-radius:999px
+}
+
+.li-comparison-status-badge--improved { color:#0d9488; background:#0d948814 }
+.li-comparison-status-badge--unchanged { color:#64748b; background:#64748b14 }
+.li-comparison-status-badge--worsened { color:#f97316; background:#f9731614 }
+.li-comparison-status-badge--new_congestion { color:#dc2626; background:#dc262614 }
+.li-comparison-status-badge--resolved_congestion { color:#16a34a; background:#16a34a14 }
+.li-comparison-status-badge--down { color:#57534e; background:#78716c1f }
+
+/* ── Optimization Lab (Sprint 2, PR5) ──────────────────────────────────── */
+
+.spin {
+  animation: spin .8s linear infinite;
+}
+
+.text-success {
+  color: var(--success);
+}
+
+.btn-secondary--active {
+  background: var(--accent-light);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.btn-primary--confirm {
+  background: var(--danger);
+}
+
+.btn-primary--confirm:hover:not(:disabled) {
+  background: var(--danger);
+  filter: brightness(1.08);
+}
+
+.opt-lab {
+  padding: .9rem 1rem 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.opt-lab-header {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+}
+
+.opt-lab-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: .92rem;
+  color: var(--text);
+}
+
+.opt-lab-empty-hint,
+.opt-card-hint {
+  color: var(--text-3);
+  font-size: .82rem;
+  line-height: 1.5;
+}
+
+.opt-lab-congestion-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.opt-lab-congestion-compare {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: .5rem;
+}
+
+.opt-lab-congestion-compare > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.opt-lab-semantics {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  padding: .5rem .1rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: .2rem;
+}
+
+.opt-lab-semantics-row {
+  display: flex;
+  gap: .6rem;
+  font-size: .8rem;
+  line-height: 1.4;
+}
+
+.opt-lab-semantics-row strong {
+  flex: 0 0 52px;
+  color: var(--accent);
+}
+
+.opt-lab-semantics-row span {
+  color: var(--text-2);
+}
+
+.opt-lab-cards {
+  display: flex;
+  flex-direction: column;
+  gap: .65rem;
+}
+
+.opt-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: .75rem .85rem;
+  display: flex;
+  flex-direction: column;
+  gap: .55rem;
+  transition: border-color var(--fast);
+}
+
+.opt-card--selected {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 1px var(--accent-border);
+}
+
+.opt-card--current {
+  background: var(--surface-3);
+}
+
+.opt-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+}
+
+.opt-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-size: .88rem;
+}
+
+.opt-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: .55rem;
+}
+
+.opt-card-body--empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+}
+
+.opt-card-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: .5rem .75rem;
+}
+
+.opt-card-small-value {
+  font-size: .74rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.opt-card-explain {
+  font-size: .8rem;
+  color: var(--text);
+  background: var(--surface-3);
+  border-radius: var(--radius-sm);
+  padding: .5rem .6rem;
+  line-height: 1.45;
+}
+
+.opt-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+
+.opt-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  font-size: .78rem;
+  line-height: 1.5;
+  color: var(--text-3);
+  padding: .1rem .1rem .2rem;
+}
+
+.opt-card-info strong {
+  color: var(--text);
+}
+
+.opt-card-debug {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--warning);
+}
+
+/* ── Sprint 2 PR6 — scientific optimization UX, settings, badges ────────── */
+
+.stage-lab-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: #a855f71f;
+  color: #c084fc;
+  font-size: .78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  margin-left: 6px;
+}
+
+.badge--neutral {
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+
+/* ── Optimization Settings panel ── */
+
+.opt-settings-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.opt-settings-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  width: 100%;
+  padding: .6rem .75rem;
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.opt-settings-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.opt-settings-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: .75rem;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.opt-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: .8rem;
+  padding: 0 .75rem .8rem;
+  border-top: 1px solid var(--border);
+}
+
+.opt-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  padding-top: .6rem;
+}
+
+.opt-settings-field-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.opt-settings-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.opt-preset-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: .75rem;
+  font-weight: 600;
+}
+
+.opt-preset-btn:hover {
+  background: var(--surface-3);
+}
+
+.opt-preset-btn--active {
+  background: var(--accent-light);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.opt-preset-btn-value {
+  font-size: .68rem;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.opt-settings-numeric-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: .78rem;
+  color: var(--text-3);
+}
+
+.opt-settings-numeric-row label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.opt-settings-cap-hint {
+  color: var(--text-3);
+  font-size: .72rem;
+}
+
+.opt-settings-errors {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: .5rem .6rem;
+  border-radius: var(--radius-sm);
+  background: var(--danger-light);
+  color: var(--danger);
+  font-size: .76rem;
+}
+
+/* ── Search-space preview / pre-run warning (inside OptimizationCard) ── */
+
+.opt-card-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: .55rem .65rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  font-size: .78rem;
+}
+
+.opt-card-preview-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-2);
+}
+
+.opt-card-prediction {
+  margin-top: 2px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .02em;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.opt-card-prediction--exact {
+  background: var(--success-light);
+  color: #16a34a;
+}
+
+.opt-card-prediction--heuristic {
+  background: var(--warning-light);
+  color: var(--warning);
+}
+
+.opt-card-prediction-detail {
+  font-weight: 400;
+  font-size: .72rem;
+  color: var(--text-2);
+}
+
+.opt-card-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--warning-light);
+  color: var(--warning);
+  font-size: .72rem;
+  line-height: 1.4;
+}
+
+.opt-card-convergence {
+  font-size: .76rem;
+  color: var(--text-3);
+  font-style: italic;
+}
+
+/* ── Result relationships panel ── */
+
+.opt-lab-relationships-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.opt-lab-relationship-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: .8rem;
+  padding: 3px 0;
+}
+
+.opt-lab-relationship-row strong {
+  min-width: 140px;
+}
+
+/* ── Session-only experiment history table ── */
+
+.opt-lab-history {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.opt-lab-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .78rem;
+}
+
+.opt-lab-history-table th,
+.opt-lab-history-table td {
+  padding: 5px 10px;
+  text-align: left;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.opt-lab-history-table th {
+  color: var(--text-3);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+.opt-lab-history-table tbody tr:nth-child(even) {
+  background: var(--surface-3);
 }

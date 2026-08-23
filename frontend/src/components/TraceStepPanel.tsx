@@ -22,14 +22,57 @@ type StepType =
   | "ecmp_util" | "ecmp_congestion" | "ecmp_final"
   | "dv_init" | "dv_table" | "dv_route" | "dv_traffic"
   | "dv_util" | "dv_congestion" | "dv_final"
+  | "sr_start_demand" | "sr_load_segment_list" | "sr_select_active_segment"
+  | "sr_compute_segment_path" | "sr_segment_ecmp_split" | "sr_advance_to_next_segment"
+  | "sr_final_route_resolved" | "sr_add_traffic_to_link" | "sr_complete_demand"
+  | "te_apply_policy" | "te_waypoint_required"
+  | "link_failure"
   | "generic";
 
 function classifyStep(event: SimulationTraceEvent): StepType {
   const t = event.title.toLowerCase();
+  // Traffic Engineering policy steps (PR 4) are emitted by both ECMP and
+  // Segment Routing with the same stepType/shape — check first, ahead of
+  // either algorithm's own title-matching, so it's not accidentally caught
+  // by a coincidental title substring.
+  if (event.stepType === "APPLY_TE_POLICY") return "te_apply_policy";
+  if (event.stepType === "POLICY_WAYPOINT_REQUIRED") return "te_waypoint_required";
+  // Link failure (PR 5) — emitted once per run, ahead of any per-demand
+  // routing, by all three algorithms with the same shape (see
+  // GraphBuilder.down_link_ids), so it's intercepted here too rather than
+  // duplicated into each algorithm's own title-matching below.
+  if (event.stepType === "LINK_FAILURE") return "link_failure";
+  // Segment Routing carries a machine-readable `stepType` from the backend
+  // (PR 1) — dispatch on that instead of title text, which the other two
+  // algorithms below still rely on for historical reasons this PR leaves
+  // untouched. Utilization/congestion/final-summary steps are structurally
+  // identical to ECMP's, so they intentionally reuse those render blocks
+  // rather than duplicating them.
+  if (event.algorithm === "SEGMENT_ROUTING") {
+    switch (event.stepType) {
+      case "START_DEMAND": return "sr_start_demand";
+      case "LOAD_SEGMENT_LIST": return "sr_load_segment_list";
+      case "SELECT_ACTIVE_SEGMENT": return "sr_select_active_segment";
+      case "COMPUTE_SEGMENT_PATH": return "sr_compute_segment_path";
+      case "SEGMENT_ECMP_SPLIT": return "sr_segment_ecmp_split";
+      case "ADVANCE_TO_NEXT_SEGMENT": return "sr_advance_to_next_segment";
+      case "FINAL_ROUTE_RESOLVED": return "sr_final_route_resolved";
+      case "ADD_TRAFFIC_TO_LINK": return "sr_add_traffic_to_link";
+      case "COMPLETE_DEMAND": return "sr_complete_demand";
+      case "COMPUTE_LINK_UTILIZATION": return "ecmp_util";
+      case "DETECT_CONGESTION": return "ecmp_congestion";
+      case "FINAL_SUMMARY": return "ecmp_final";
+      default: return "generic";
+    }
+  }
   if (event.algorithm === "ECMP" || event.algorithm?.startsWith("ECMP")) {
     if (t.includes("initialize demand")) return "ecmp_init";
     if (t.includes("compute candidate") || t.includes("equal-cost")) return "ecmp_paths";
-    if (t.includes("split demand")) return "ecmp_split";
+    // stepType "PATH_DISTRIBUTION" covers both the original equal-split title
+    // ("Split demand equally", still matched below for safety) and the new
+    // custom-distribution title ("Apply custom traffic distribution") — both
+    // render through the same ecmp_split block below via description/formulaText.
+    if (event.stepType === "PATH_DISTRIBUTION" || t.includes("split demand")) return "ecmp_split";
     if (t.includes("add traffic share")) return "ecmp_traffic";
     if (t.includes("compute link utilization")) return "ecmp_util";
     if (t.includes("detect congestion")) return "ecmp_congestion";
@@ -51,11 +94,11 @@ function classifyStep(event: SimulationTraceEvent): StepType {
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 interface AlgBadgeProps { algorithm: string }
-const AlgBadge: React.FC<AlgBadgeProps> = ({ algorithm }) => (
-  <span className={`tsp-alg-badge tsp-alg-badge--${algorithm === "ECMP" ? "ecmp" : "dv"}`}>
-    {algorithm === "ECMP" ? "ECMP" : "DV"}
-  </span>
-);
+const AlgBadge: React.FC<AlgBadgeProps> = ({ algorithm }) => {
+  const variant = algorithm === "ECMP" ? "ecmp" : algorithm === "SEGMENT_ROUTING" ? "sr" : "dv";
+  const label = algorithm === "ECMP" ? "ECMP" : algorithm === "SEGMENT_ROUTING" ? "SR" : "DV";
+  return <span className={`tsp-alg-badge tsp-alg-badge--${variant}`}>{label}</span>;
+};
 
 interface FormulaCardProps { text: string }
 const FormulaCard: React.FC<FormulaCardProps> = ({ text }) => (
@@ -204,6 +247,91 @@ const TraceStepPanel: React.FC<TraceStepPanelProps> = ({
     </div>
   );
 
+  // ── link_failure ───────────────────────────────────────────────────────────
+  if (stepType === "link_failure") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.highlightedLinks.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Down links (excluded from route search)</div>
+            {event.highlightedLinks.map((linkId) => (
+              <div key={linkId} className="tsp-te-row tsp-te-row--down">{linkId}</div>
+            ))}
+          </div>
+        )}
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
+
+  // ── te_apply_policy ────────────────────────────────────────────────────────
+  if (stepType === "te_apply_policy") {
+    const meta = event.metadata as {
+      excludedLinkIds?: string[];
+      costAdjustments?: { linkId: string; policyType: string; originalWeight: number; effectiveWeight: number }[];
+      requiredWaypointNodeIds?: string[];
+    } | null | undefined;
+    const excluded = meta?.excludedLinkIds ?? [];
+    const adjustments = meta?.costAdjustments ?? [];
+    const waypoints = meta?.requiredWaypointNodeIds ?? [];
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {excluded.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Forbidden links (excluded from route search)</div>
+            {excluded.map((linkId) => (
+              <div key={linkId} className="tsp-te-row tsp-te-row--forbid">{linkId}</div>
+            ))}
+          </div>
+        )}
+        {adjustments.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Effective cost adjustments</div>
+            {adjustments.map((a) => (
+              <div key={a.linkId} className={`tsp-te-row tsp-te-row--${a.policyType === "PREFER_LINK" ? "prefer" : "avoid"}`}>
+                {a.linkId}: physical cost {a.originalWeight} <span className="tsp-te-arrow">→</span> effective cost {a.effectiveWeight}
+              </div>
+            ))}
+          </div>
+        )}
+        {waypoints.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Required waypoints</div>
+            <PathNodes nodeIds={waypoints} network={network} />
+          </div>
+        )}
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
+
+  // ── te_waypoint_required ───────────────────────────────────────────────────
+  if (stepType === "te_waypoint_required") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.highlightedNodes.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Resolved route</div>
+            <PathNodes nodeIds={event.highlightedNodes} network={network} />
+          </div>
+        )}
+        {event.costCalculation && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Route cost</div>
+            <FormulaCard text={event.costCalculation} />
+          </div>
+        )}
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
+
   // ── ecmp_init ──────────────────────────────────────────────────────────────
   if (stepType === "ecmp_init") {
     return (
@@ -343,6 +471,175 @@ const TraceStepPanel: React.FC<TraceStepPanelProps> = ({
 
   // ── ecmp_final ─────────────────────────────────────────────────────────────
   if (stepType === "ecmp_final") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
+
+  // ── sr_start_demand ────────────────────────────────────────────────────────
+  if (stepType === "sr_start_demand") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.activeDemandId && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Active demand</div>
+            <DemandRow demandId={event.activeDemandId} network={network} />
+          </div>
+        )}
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
+
+  // ── sr_load_segment_list ───────────────────────────────────────────────────
+  if (stepType === "sr_load_segment_list") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.segmentList && event.segmentList.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Segment list</div>
+            <PathNodes nodeIds={event.segmentList} network={network} />
+          </div>
+        )}
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
+
+  // ── sr_select_active_segment ───────────────────────────────────────────────
+  if (stepType === "sr_select_active_segment") {
+    const leg = [event.activeNodeId, event.activeDestinationId].filter((n): n is string => !!n);
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {leg.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Next segment</div>
+            <PathNodes nodeIds={leg} network={network} />
+          </div>
+        )}
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
+
+  // ── sr_compute_segment_path ────────────────────────────────────────────────
+  // PR0 (ECMP-within-segments): a segment can now resolve to more than one
+  // equal-cost path, so `costCalculation` is one "route: cost = ..." line
+  // per path (same format ECMP's own candidate-paths step already uses) —
+  // parsed and listed exactly like `ecmp_paths` below, instead of the old
+  // single-path `PathNodes` rendering (which assumed exactly one ordered
+  // route and would garble a union of several branches' nodes).
+  if (stepType === "sr_compute_segment_path") {
+    const lines = event.costCalculation ? parseCostCalcLines(event.costCalculation) : [];
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {lines.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">{lines.length > 1 ? "Equal-cost paths" : "Segment path"}</div>
+            {lines.map((l, i) => (
+              <div key={i} className="tsp-path-line">
+                <div className="tsp-path-route">{l.route}</div>
+                {l.detail && <div className="tsp-path-detail">{l.detail}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── sr_segment_ecmp_split ──────────────────────────────────────────────────
+  if (stepType === "sr_segment_ecmp_split") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.formulaText && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Split calculation</div>
+            <FormulaCard text={event.formulaText} />
+          </div>
+        )}
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
+
+  // ── sr_advance_to_next_segment ─────────────────────────────────────────────
+  if (stepType === "sr_advance_to_next_segment") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
+
+  // ── sr_final_route_resolved ────────────────────────────────────────────────
+  // PR0: a demand can now resolve into several end-to-end routes (one per
+  // combination of each segment's equal-cost paths), so this lists each one
+  // — same "Candidate paths" list styling as `ecmp_paths`/
+  // `sr_compute_segment_path` above — instead of a single `PathNodes` route.
+  if (stepType === "sr_final_route_resolved") {
+    const lines = event.costCalculation ? parseCostCalcLines(event.costCalculation) : [];
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {lines.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">{lines.length > 1 ? "Resolved routes" : "Final route"}</div>
+            {lines.map((l, i) => (
+              <div key={i} className="tsp-path-line">
+                <div className="tsp-path-route">{l.route}</div>
+                {l.detail && <div className="tsp-path-detail">{l.detail}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+        {event.explanationText && <p className="tsp-explain">{event.explanationText}</p>}
+      </div>
+    );
+  }
+
+  // ── sr_add_traffic_to_link ─────────────────────────────────────────────────
+  if (stepType === "sr_add_traffic_to_link") {
+    return (
+      <div className="trace-step-panel">
+        {renderHeader()}
+        <p className="tsp-desc">{event.description}</p>
+        {event.highlightedNodes.length > 0 && (
+          <div className="tsp-section">
+            <div className="tsp-section-title">Route</div>
+            <PathNodes nodeIds={event.highlightedNodes} network={network} />
+          </div>
+        )}
+        {event.linkLoadDelta && event.currentLinkLoads && (
+          <LinkDeltaTable
+            linkLoadDelta={event.linkLoadDelta}
+            currentLinkLoads={event.currentLinkLoads}
+            network={network}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // ── sr_complete_demand ─────────────────────────────────────────────────────
+  if (stepType === "sr_complete_demand") {
     return (
       <div className="trace-step-panel">
         {renderHeader()}

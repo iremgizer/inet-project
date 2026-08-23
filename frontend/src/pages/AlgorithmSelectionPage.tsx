@@ -1,7 +1,22 @@
 import React, { useState } from "react";
-import { ChevronDown, ChevronUp, Zap, GitBranch } from "lucide-react";
-import { AlgorithmConfig, AlgorithmName } from "../types/network";
+import { ChevronDown, ChevronUp, Zap, GitBranch, FlaskConical } from "lucide-react";
+import {
+  AlgorithmConfig,
+  AlgorithmName,
+  LinkInput,
+  NodeInput,
+  SimulationFailureEvent,
+  SimulationResult,
+  TrafficDemandInput,
+  TrafficDistributionMode,
+  TrafficEngineeringPolicy,
+} from "../types/network";
 import TermHint from "../components/TermHint";
+import SegmentRoutingEditor from "../components/SegmentRoutingEditor";
+import TrafficDistributionEditor from "../components/TrafficDistributionEditor";
+import TEPolicyEditor, { TEPolicyDraft } from "../components/TEPolicyEditor";
+import FailureScheduleEditor from "../components/FailureScheduleEditor";
+import { isDistributionValid } from "../utils/trafficDistribution";
 
 interface AlgorithmSelectionPageProps {
   algorithmConfig: AlgorithmConfig;
@@ -10,7 +25,48 @@ interface AlgorithmSelectionPageProps {
   onThresholdChange: (value: number) => void;
   onBack: () => void;
   onStartSimulation: () => void;
+  // Sprint 2 PR5 — an alternative to running a single routing algorithm:
+  // opens the Optimization Lab workflow step instead. Optional so this page
+  // still works standalone (e.g. in a classroom/challenge context where the
+  // Lab isn't offered).
+  onOpenOptimizationLab?: () => void;
   canChooseAlgorithm?: boolean;
+  // Segment Routing configuration — only rendered/used when
+  // selectedAlgorithm === "SEGMENT_ROUTING".
+  demands: TrafficDemandInput[];
+  nodes: NodeInput[];
+  links: LinkInput[];
+  waypointSelectDemandId: string | null;
+  onStartWaypointSelect: (demandId: string) => void;
+  onStopWaypointSelect: () => void;
+  onAddWaypoint: (demandId: string, nodeId: string) => void;
+  onRemoveWaypoint: (demandId: string, index: number) => void;
+  onMoveWaypoint: (demandId: string, index: number, direction: "up" | "down") => void;
+  // ECMP traffic distribution — only rendered/used when
+  // selectedAlgorithm === "ECMP".
+  simulationResult: SimulationResult | null;
+  distributionMode: TrafficDistributionMode;
+  onDistributionModeChange: (mode: TrafficDistributionMode) => void;
+  onDistributionShareChange: (demandId: string, pathId: string, sharePercent: number) => void;
+  // Traffic Engineering policies — rendered for ECMP and Segment Routing
+  // (Distance Vector does not support them; see distance_vector.py).
+  tePolicies: TrafficEngineeringPolicy[];
+  teDraft: TEPolicyDraft | null;
+  teIsSelecting: boolean;
+  onOpenTEDraft: () => void;
+  onCancelTEDraft: () => void;
+  onUpdateTEDraft: (patch: Partial<TEPolicyDraft>) => void;
+  onStartTEGraphSelect: () => void;
+  onStopTEGraphSelect: () => void;
+  onCommitTEDraft: () => void;
+  onRemoveTEPolicy: (policyId: string) => void;
+  teQuickSelectActive: boolean;
+  onStartTEQuickLinkSelect: () => void;
+  // Scheduled mid-simulation failures (PR 6) — rendered for every algorithm
+  // (ECMP, Segment Routing, and Distance Vector all support it).
+  failureSchedule: SimulationFailureEvent[];
+  onAddFailureEvent: (linkId: string, triggerValue: number) => void;
+  onRemoveFailureEvent: (eventId: string) => void;
 }
 
 const algorithms = [
@@ -35,11 +91,11 @@ const algorithms = [
   {
     id: "SEGMENT_ROUTING" as AlgorithmName,
     name: "Segment Routing",
-    fullName: "Segment Routing",
-    level: "Coming soon",
-    tagline: "Route traffic through explicit waypoints.",
-    detail: "Planned extension — allows specifying exact paths through the network.",
-    formula: "–",
+    fullName: "Segment Routing (waypoint-based)",
+    level: "Intermediate",
+    tagline: "Steer traffic through an ordered list of waypoints.",
+    detail: "Each demand can carry an ordered list of waypoint nodes. Between the source and the first waypoint, between each waypoint, and from the last waypoint to the destination, traffic still follows the normal shortest path — a waypoint only decides which nodes are visited, not how the graph is crossed between them. No waypoints means plain shortest-path routing.",
+    formula: "route = shortest(source→seg₁) + shortest(seg₁→seg₂) + … + shortest(segₙ→destination)",
   },
 ];
 
@@ -50,11 +106,43 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
   onThresholdChange,
   onBack,
   onStartSimulation,
+  onOpenOptimizationLab,
   canChooseAlgorithm = true,
+  demands,
+  nodes,
+  links,
+  waypointSelectDemandId,
+  onStartWaypointSelect,
+  onStopWaypointSelect,
+  onAddWaypoint,
+  onRemoveWaypoint,
+  onMoveWaypoint,
+  simulationResult,
+  distributionMode,
+  onDistributionModeChange,
+  onDistributionShareChange,
+  tePolicies,
+  teDraft,
+  teIsSelecting,
+  onOpenTEDraft,
+  onCancelTEDraft,
+  onUpdateTEDraft,
+  onStartTEGraphSelect,
+  onStopTEGraphSelect,
+  onCommitTEDraft,
+  onRemoveTEPolicy,
+  teQuickSelectActive,
+  onStartTEQuickLinkSelect,
+  failureSchedule,
+  onAddFailureEvent,
+  onRemoveFailureEvent,
 }) => {
   const [showTheory, setShowTheory] = useState(false);
   const selected = algorithms.find((a) => a.id === algorithmConfig.selectedAlgorithm) ?? algorithms[0];
-  const isPlaceholder = selected.id === "SEGMENT_ROUTING";
+  const isSegmentRouting = selected.id === "SEGMENT_ROUTING";
+  const isEcmp = selected.id === "ECMP";
+  const supportsTEPolicies = isEcmp || isSegmentRouting;
+  const distributionsInvalid = isEcmp && !isDistributionValid(algorithmConfig.trafficDistributions ?? []);
 
   return (
     <div className="page">
@@ -114,13 +202,66 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
         <div className="theory-box">
           <p>{selected.detail}</p>
           <pre className="formula-block">{selected.formula}</pre>
-          {isPlaceholder && (
-            <div className="notice notice--warning">
-              Segment Routing is a placeholder. Select ECMP or Distance Vector to simulate.
-            </div>
-          )}
         </div>
       )}
+
+      {/* Segment Routing waypoint configuration */}
+      {isSegmentRouting && (
+        <SegmentRoutingEditor
+          demands={demands}
+          nodes={nodes}
+          policies={algorithmConfig.segmentRoutingPolicies ?? []}
+          waypointSelectDemandId={waypointSelectDemandId}
+          onStartWaypointSelect={onStartWaypointSelect}
+          onStopWaypointSelect={onStopWaypointSelect}
+          onAddWaypoint={onAddWaypoint}
+          onRemoveWaypoint={onRemoveWaypoint}
+          onMoveWaypoint={onMoveWaypoint}
+        />
+      )}
+
+      {/* ECMP traffic distribution configuration */}
+      {isEcmp && (
+        <TrafficDistributionEditor
+          demands={demands}
+          nodes={nodes}
+          distributionMode={distributionMode}
+          distributions={algorithmConfig.trafficDistributions ?? []}
+          simulationResult={simulationResult}
+          onModeChange={onDistributionModeChange}
+          onShareChange={onDistributionShareChange}
+        />
+      )}
+
+      {/* Traffic Engineering policies — advanced, collapsed by default */}
+      {supportsTEPolicies && (
+        <TEPolicyEditor
+          policies={tePolicies}
+          demands={demands}
+          links={links}
+          nodes={nodes}
+          draft={teDraft}
+          isSelecting={teIsSelecting}
+          onOpenDraft={onOpenTEDraft}
+          onCancelDraft={onCancelTEDraft}
+          onUpdateDraft={onUpdateTEDraft}
+          onStartGraphSelect={onStartTEGraphSelect}
+          onStopGraphSelect={onStopTEGraphSelect}
+          onCommitDraft={onCommitTEDraft}
+          onRemovePolicy={onRemoveTEPolicy}
+          teQuickSelectActive={teQuickSelectActive}
+          onStartTEQuickLinkSelect={onStartTEQuickLinkSelect}
+        />
+      )}
+
+      {/* Scheduled mid-simulation failures — supported by every algorithm */}
+      <FailureScheduleEditor
+        schedule={failureSchedule}
+        links={links}
+        nodes={nodes}
+        onAdd={onAddFailureEvent}
+        onRemove={onRemoveFailureEvent}
+      />
 
       {/* Congestion threshold */}
       <div className="threshold-row">
@@ -146,10 +287,20 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
 
       <div className="page-actions">
         <button className="btn-secondary btn-sm" onClick={onBack}>Back</button>
+        {onOpenOptimizationLab && (
+          <button
+            className="btn-secondary btn-run"
+            onClick={onOpenOptimizationLab}
+            title="Try automated optimization strategies instead of — or before — running a single algorithm"
+          >
+            <FlaskConical size={14} /> Optimization Lab
+          </button>
+        )}
         <button
           className="btn-primary btn-run"
           onClick={onStartSimulation}
-          disabled={isRunning || isPlaceholder}
+          disabled={isRunning || distributionsInvalid}
+          title={distributionsInvalid ? "Traffic distribution shares must total 100% for every demand" : undefined}
         >
           {isRunning ? (
             <><span className="spinner" /> Running…</>

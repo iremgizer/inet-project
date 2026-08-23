@@ -31,6 +31,8 @@ import "@xyflow/react/dist/style.css";
 import NetworkNode from "./NetworkNode";
 import NetworkEdge, { NetworkEdgeData } from "./NetworkEdge";
 import GraphLegend from "./GraphLegend";
+import PacketToken from "./PacketToken";
+import TEQuickPolicyPopup, { TEQuickLinkPolicyType } from "./TEQuickPolicyPopup";
 import {
   LinkInput,
   LinkResult,
@@ -38,8 +40,11 @@ import {
   NodeInput,
   PathResult,
   SimulationTraceEvent,
+  TrafficEngineeringPolicy,
 } from "../types/network";
 import { buildDemandColorMap } from "../utils/graphVisuals";
+import { SRDisplayState } from "../utils/segmentRoutingTrace";
+import { ComparisonMode, LinkComparisonEntry } from "../utils/comparison";
 
 // ── Simulation overlay context ────────────────────────────────────────────────
 
@@ -60,6 +65,26 @@ export interface SimulationOverlayContextType {
   network: NetworkInput;
   gradingLinkStatus: Map<string, "correct" | "wrong" | "missed">;
   gradingNodeIds: Set<string>;
+  // Segment Routing: which node id is the "active SID" right now (drives the
+  // waypoint-active ring on NetworkNode). null outside SR trace playback.
+  srActiveWaypointId: string | null;
+  // Traffic Engineering policies — visualized pre-simulation as small link/
+  // node badges, kept visually separate from path identity/congestion/grading.
+  tePolicies: TrafficEngineeringPolicy[];
+  // Mid-simulation failure replay (PR 6) — which links are DOWN as of the
+  // current trace step (see utils/failureReplay.ts), overriding the
+  // persistent NetworkInput.links[].operationalStatus while a trace is being
+  // replayed so stepping backward past a scheduled failure correctly shows
+  // the link UP again. null outside trace mode, where the persistent field
+  // is authoritative (PR 5 behavior, unchanged).
+  replayDownLinkIds: Set<string> | null;
+  // Before/After/Difference comparison (PR 6, Part 2) — "difference" is the
+  // only mode NetworkEdge needs to know about explicitly: "before"/"after"
+  // just change which SimulationResult's linkResults/pathResults are fed
+  // into this same context (see WorkflowManager's `displayedResult`), no
+  // separate rendering path. null/empty outside difference mode.
+  comparisonMode: ComparisonMode;
+  comparisonByLink: Map<string, LinkComparisonEntry> | null;
 }
 
 const EMPTY_NETWORK: NetworkInput = { nodes: [], links: [], demands: [], topologyType: "custom", isDirected: false };
@@ -82,6 +107,11 @@ export const SimulationOverlayContext =
     network: EMPTY_NETWORK,
     gradingLinkStatus: new Map(),
     gradingNodeIds: new Set(),
+    srActiveWaypointId: null,
+    tePolicies: [],
+    replayDownLinkIds: null,
+    comparisonMode: "after",
+    comparisonByLink: null,
   });
 
 // ── Converters ────────────────────────────────────────────────────────────────
@@ -100,7 +130,11 @@ function toRFEdge(link: LinkInput, isDirected: boolean): Edge {
     id: link.id,
     source: link.source,
     target: link.target,
-    data: { weight: link.weight, capacity: link.capacity } satisfies NetworkEdgeData,
+    data: {
+      weight: link.weight,
+      capacity: link.capacity,
+      operationalStatus: link.operationalStatus ?? "UP",
+    } satisfies NetworkEdgeData,
     type: "networkEdge",
     markerEnd: isDirected
       ? { type: MarkerType.ArrowClosed, width: 14, height: 14 }
@@ -115,7 +149,7 @@ function networkFingerprint(network: NetworkInput): string {
     .sort()
     .join("|");
   const links = network.links
-    .map((l) => `${l.id}:${l.source}:${l.target}:${l.weight}:${l.capacity}`)
+    .map((l) => `${l.id}:${l.source}:${l.target}:${l.weight}:${l.capacity}:${l.operationalStatus ?? "UP"}`)
     .sort()
     .join("|");
   return `${nodes}$$${links}$$${network.isDirected}`;
@@ -143,6 +177,21 @@ interface ReactFlowCanvasProps {
   centerNodeRequest?: { id: string; nonce: number } | null;
   gradingHighlightLinks?: { linkId: string; status: "correct" | "wrong" | "missed" }[];
   gradingHighlightNodes?: string[];
+  waypointSelectDemandId?: string | null;
+  srDisplayState?: SRDisplayState | null;
+  tePolicySelectMode?: "node" | "link" | null;
+  tePolicies?: TrafficEngineeringPolicy[];
+  // Mid-simulation failure replay (PR 6) — see SimulationOverlayContextType.
+  replayDownLinkIds?: Set<string> | null;
+  // Before/After/Difference comparison (PR 6, Part 2) — see SimulationOverlayContextType.
+  comparisonMode?: ComparisonMode;
+  comparisonByLink?: Map<string, LinkComparisonEntry> | null;
+  // Quick graph-first policy popup — opens once a link is clicked during the
+  // "Select on Graph" quick-add flow (see TEPolicyEditor / WorkflowManager).
+  // Additional to, not a replacement for, the dropdown-based draft flow above.
+  teQuickPopupLinkId?: string | null;
+  onChooseTEQuickPolicy?: (type: TEQuickLinkPolicyType) => void;
+  onCancelTEQuickPopup?: () => void;
   onMoveNode: (id: string, x: number, y: number) => void;
   onAddLink: (source: string, target: string) => void;
   onDeleteNode: (id: string) => void;
@@ -151,6 +200,10 @@ interface ReactFlowCanvasProps {
   onSelectLink: (id: string | null) => void;
   onCompleteConnect?: (targetId: string) => void;
   onCancelConnect?: () => void;
+  onSelectWaypointNode?: (nodeId: string) => void;
+  onCancelWaypointSelect?: () => void;
+  onSelectTEPolicyTarget?: (kind: "node" | "link", id: string) => void;
+  onCancelTEPolicySelect?: () => void;
   onAddNodeShortcut?: () => void;
 }
 
@@ -171,6 +224,16 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
   centerNodeRequest,
   gradingHighlightLinks,
   gradingHighlightNodes,
+  waypointSelectDemandId = null,
+  srDisplayState = null,
+  tePolicySelectMode = null,
+  tePolicies = [],
+  replayDownLinkIds = null,
+  comparisonMode = "after",
+  comparisonByLink = null,
+  teQuickPopupLinkId = null,
+  onChooseTEQuickPolicy,
+  onCancelTEQuickPopup,
   onMoveNode,
   onAddLink,
   onDeleteNode,
@@ -179,6 +242,10 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
   onSelectLink,
   onCompleteConnect,
   onCancelConnect,
+  onSelectWaypointNode,
+  onCancelWaypointSelect,
+  onSelectTEPolicyTarget,
+  onCancelTEPolicySelect,
   onAddNodeShortcut,
 }) => {
   const { fitView } = useReactFlow();
@@ -232,7 +299,13 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
         fitView({ padding: 0.15, duration: 300 });
       }
       if (e.key === "Escape") {
-        if (connectSourceId) {
+        if (teQuickPopupLinkId) {
+          onCancelTEQuickPopup?.();
+        } else if (tePolicySelectMode) {
+          onCancelTEPolicySelect?.();
+        } else if (waypointSelectDemandId) {
+          onCancelWaypointSelect?.();
+        } else if (connectSourceId) {
           onCancelConnect?.();
         } else {
           onSelectNode(null);
@@ -246,7 +319,7 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [fitView, onSelectNode, onSelectLink, onAddNodeShortcut, connectSourceId, onCancelConnect]);
+  }, [fitView, onSelectNode, onSelectLink, onAddNodeShortcut, connectSourceId, onCancelConnect, waypointSelectDemandId, onCancelWaypointSelect, tePolicySelectMode, onCancelTEPolicySelect, teQuickPopupLinkId, onCancelTEQuickPopup]);
 
   // ── Simulation overlay context value ─────────────────────────────────────
 
@@ -263,6 +336,11 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
     const gradingNodeIds = new Set<string>(gradingHighlightNodes ?? []);
 
     const demandColorMap = buildDemandColorMap(pathResults);
+
+    const srActiveWaypointId =
+      srDisplayState && srDisplayState.activeSegmentIndex !== null
+        ? srDisplayState.segmentList[srDisplayState.activeSegmentIndex] ?? null
+        : null;
 
     if (isTraceMode && currentTraceEvent) {
       const activeDemandId = currentTraceEvent.activeDemandId ?? null;
@@ -286,6 +364,11 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
         network,
         gradingLinkStatus,
         gradingNodeIds,
+        srActiveWaypointId,
+        tePolicies,
+        replayDownLinkIds,
+        comparisonMode,
+        comparisonByLink,
       };
     }
     return {
@@ -305,8 +388,13 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
       network,
       gradingLinkStatus,
       gradingNodeIds,
+      srActiveWaypointId,
+      tePolicies,
+      replayDownLinkIds: null,
+      comparisonMode,
+      comparisonByLink,
     };
-  }, [currentTraceEvent, linkResults, pathResults, isSimulated, isTraceMode, hoveredNodeId, stableSetHoveredNodeId, connectSourceId, network, gradingHighlightLinks, gradingHighlightNodes]);
+  }, [currentTraceEvent, linkResults, pathResults, isSimulated, isTraceMode, hoveredNodeId, stableSetHoveredNodeId, connectSourceId, network, gradingHighlightLinks, gradingHighlightNodes, srDisplayState, tePolicies, replayDownLinkIds, comparisonMode, comparisonByLink]);
 
   // ── RF callbacks ──────────────────────────────────────────────────────────
 
@@ -357,6 +445,19 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
 
   const handleNodeClick = useCallback(
     (_event: unknown, node: Node) => {
+      if (teQuickPopupLinkId) {
+        onCancelTEQuickPopup?.(); // first click just dismisses the popup, like a context menu
+        return;
+      }
+      if (tePolicySelectMode) {
+        if (tePolicySelectMode === "node") onSelectTEPolicyTarget?.("node", node.id);
+        else onCancelTEPolicySelect?.(); // wrong element type for this policy — cancel rather than guess
+        return;
+      }
+      if (waypointSelectDemandId) {
+        onSelectWaypointNode?.(node.id);
+        return;
+      }
       if (connectSourceId) {
         if (node.id !== connectSourceId) {
           onCompleteConnect?.(node.id);
@@ -365,28 +466,61 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
       }
       onSelectNode(node.id);
     },
-    [connectSourceId, onCompleteConnect, onSelectNode]
+    [teQuickPopupLinkId, onCancelTEQuickPopup, tePolicySelectMode, onSelectTEPolicyTarget, onCancelTEPolicySelect, waypointSelectDemandId, onSelectWaypointNode, connectSourceId, onCompleteConnect, onSelectNode]
   );
 
   const handleEdgeClick = useCallback(
     (_event: unknown, edge: Edge) => {
+      if (teQuickPopupLinkId) {
+        onCancelTEQuickPopup?.();
+        return;
+      }
+      if (tePolicySelectMode) {
+        if (tePolicySelectMode === "link") onSelectTEPolicyTarget?.("link", edge.id);
+        else onCancelTEPolicySelect?.();
+        return;
+      }
+      if (waypointSelectDemandId) {
+        onCancelWaypointSelect?.();
+        return;
+      }
       if (connectSourceId) {
         onCancelConnect?.();
         return;
       }
       onSelectLink(edge.id);
     },
-    [connectSourceId, onCancelConnect, onSelectLink]
+    [teQuickPopupLinkId, onCancelTEQuickPopup, tePolicySelectMode, onSelectTEPolicyTarget, onCancelTEPolicySelect, waypointSelectDemandId, onCancelWaypointSelect, connectSourceId, onCancelConnect, onSelectLink]
   );
 
   const handlePaneClick = useCallback(() => {
+    if (teQuickPopupLinkId) {
+      onCancelTEQuickPopup?.();
+      return;
+    }
+    if (tePolicySelectMode) {
+      onCancelTEPolicySelect?.();
+      return;
+    }
+    if (waypointSelectDemandId) {
+      onCancelWaypointSelect?.();
+      return;
+    }
     if (connectSourceId) {
       onCancelConnect?.();
       return;
     }
     onSelectNode(null);
     onSelectLink(null);
-  }, [connectSourceId, onCancelConnect, onSelectNode, onSelectLink]);
+  }, [teQuickPopupLinkId, onCancelTEQuickPopup, tePolicySelectMode, onCancelTEPolicySelect, waypointSelectDemandId, onCancelWaypointSelect, connectSourceId, onCancelConnect, onSelectNode, onSelectLink]);
+
+  const tokenNode = srDisplayState?.tokenNodeId
+    ? network.nodes.find((n) => n.id === srDisplayState.tokenNodeId)
+    : undefined;
+
+  const teQuickPopupLink = teQuickPopupLinkId
+    ? network.links.find((l) => l.id === teQuickPopupLinkId)
+    : undefined;
 
   return (
     <SimulationOverlayContext.Provider value={overlay}>
@@ -432,6 +566,15 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
         <Panel position="bottom-left">
           <GraphLegend />
         </Panel>
+        {tokenNode && <PacketToken node={tokenNode} label={srDisplayState?.demandId ?? ""} />}
+        {teQuickPopupLink && onChooseTEQuickPolicy && onCancelTEQuickPopup && (
+          <TEQuickPolicyPopup
+            link={teQuickPopupLink}
+            nodes={network.nodes}
+            onChoose={onChooseTEQuickPolicy}
+            onCancel={onCancelTEQuickPopup}
+          />
+        )}
       </ReactFlow>
     </SimulationOverlayContext.Provider>
   );

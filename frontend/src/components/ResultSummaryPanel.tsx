@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ChevronDown, ChevronUp, AlertTriangle, CheckCircle2, PlayCircle } from "lucide-react";
+import { ChevronDown, ChevronUp, AlertTriangle, CheckCircle2, PlayCircle, PowerOff } from "lucide-react";
 import { SimulationResult } from "../types/network";
 import TermHint from "./TermHint";
 
@@ -19,6 +19,12 @@ function buildNarrative(result: SimulationResult): string {
 
   if (algo === "ECMP") {
     const multiPathDemands = result.pathResults.filter((pr) => pr.paths.length > 1).length;
+    const customDemands = result.traceEvents.filter(
+      (e) => e.stepType === "PATH_DISTRIBUTION" && e.metadata?.mode === "CUSTOM"
+    ).length;
+    if (customDemands > 0) {
+      return `ECMP found equal-cost paths and applied a custom traffic distribution on ${customDemands} demand${customDemands > 1 ? "s" : ""}, splitting the rest equally.`;
+    }
     if (multiPathDemands > 0) {
       return `ECMP found equal-cost paths and split traffic across ${totalPaths} routes — ${multiPathDemands} demand${multiPathDemands > 1 ? "s" : ""} used multiple paths simultaneously.`;
     }
@@ -29,7 +35,166 @@ function buildNarrative(result: SimulationResult): string {
     return `Distance Vector ran Bellman-Ford on each node to build routing tables, then forwarded ${totalDemands} demand${totalDemands > 1 ? "s" : ""} via minimum-cost next hops.`;
   }
 
+  if (algo === "SEGMENT_ROUTING") {
+    const withWaypoints = result.traceEvents.filter(
+      (e) => e.stepType === "LOAD_SEGMENT_LIST" && (e.segmentList?.length ?? 0) > 1
+    ).length;
+    if (withWaypoints > 0) {
+      return `Segment Routing steered ${withWaypoints} of ${totalDemands} demand${totalDemands > 1 ? "s" : ""} through explicit waypoints — the rest routed via plain shortest path.`;
+    }
+    return `Segment Routing routed ${totalDemands} demand${totalDemands > 1 ? "s" : ""} via plain shortest path — no waypoints configured.`;
+  }
+
   return `${algo} routed ${totalDemands} demand${totalDemands > 1 ? "s" : ""} through the network.`;
+}
+
+// ── Segment Routing compact section ───────────────────────────────────────────
+
+interface SRResolvedRoute {
+  nodes: string[];
+  percent: number;
+}
+
+interface SRDemandSummary {
+  demandId: string;
+  sourceLabel: string;
+  targetLabel: string;
+  waypointLabels: string[];
+  /** One entry per resolved end-to-end route (PR0: more than one when any
+   * segment leg had an equal-cost tie — see `segment_routing.py`'s module
+   * docstring). Always at least one entry when `pathResults` has any paths
+   * at all. */
+  resolvedRoutes: SRResolvedRoute[];
+}
+
+// ResultSummaryPanel only receives `result` (no `network`), consistent with
+// the existing "Show paths" list below, which also renders raw node ids
+// rather than resolved labels.
+function buildSRDemandSummaries(result: SimulationResult): SRDemandSummary[] {
+  const loadEvents = result.traceEvents.filter((e) => e.stepType === "LOAD_SEGMENT_LIST" && e.activeDemandId);
+  return result.pathResults
+    .filter((pr) => pr.paths.length > 0)
+    .map((pr) => {
+      const loadEvent = loadEvents.find((e) => e.activeDemandId === pr.demandId);
+      const stops = loadEvent?.segmentList ?? [];
+      const waypoints = stops.slice(0, -1); // last stop is always the destination
+      const demandTotal = pr.paths.reduce((sum, p) => sum + p.trafficShare, 0);
+      return {
+        demandId: pr.demandId,
+        sourceLabel: pr.source,
+        targetLabel: pr.target,
+        waypointLabels: waypoints,
+        resolvedRoutes: pr.paths.map((p) => ({
+          nodes: p.nodes,
+          percent: demandTotal > 0 ? (p.trafficShare / demandTotal) * 100 : 0,
+        })),
+      };
+    });
+}
+
+// ── ECMP traffic distribution section ─────────────────────────────────────────
+
+interface ECMPPathShareSummary {
+  pathId: string;
+  pathLabel: string;
+  route: string;
+  percent: number;
+}
+
+interface ECMPDistributionSummary {
+  demandId: string;
+  mode: "EQUAL" | "CUSTOM";
+  paths: ECMPPathShareSummary[];
+}
+
+// Self-contained like buildSRDemandSummaries above: percentages are derived
+// from each path's own share of its demand's *delivered* traffic, so no
+// `network` prop is needed to know the original demand amount.
+function buildDistributionSummaries(result: SimulationResult): ECMPDistributionSummary[] {
+  const distEvents = result.traceEvents.filter((e) => e.stepType === "PATH_DISTRIBUTION" && e.activeDemandId);
+  return result.pathResults
+    .filter((pr) => pr.paths.length > 1)
+    .map((pr) => {
+      const demandTotal = pr.paths.reduce((sum, p) => sum + p.trafficShare, 0);
+      const distEvent = distEvents.find((e) => e.activeDemandId === pr.demandId);
+      const mode: "EQUAL" | "CUSTOM" = distEvent?.metadata?.mode === "CUSTOM" ? "CUSTOM" : "EQUAL";
+      return {
+        demandId: pr.demandId,
+        mode,
+        paths: pr.paths.map((p, i) => ({
+          pathId: p.pathId ?? `path-${i + 1}`,
+          pathLabel: `Path ${i + 1}`,
+          route: p.nodes.join(" → "),
+          percent: demandTotal > 0 ? (p.trafficShare / demandTotal) * 100 : 0,
+        })),
+      };
+    });
+}
+
+// ── Link failure compact indicator (PR 5) ─────────────────────────────────────
+// Deliberately self-contained — derived only from THIS result's own
+// LINK_FAILURE trace event (see GraphBuilder.down_link_ids), with no
+// `previousResult` prop and no before/after comparison. That fuller
+// diff/heatmap treatment is PR 6's job; here a student just needs to see,
+// at a glance, that the run they're looking at included a down link.
+
+interface DownLinkSummary {
+  linkId: string;
+  source: string;
+  target: string;
+}
+
+function buildDownLinksSummary(result: SimulationResult): DownLinkSummary[] {
+  const failureEvent = result.traceEvents.find((e) => e.stepType === "LINK_FAILURE");
+  if (!failureEvent) return [];
+  return failureEvent.highlightedLinks.map((linkId) => {
+    const lr = result.linkResults.find((l) => l.linkId === linkId);
+    return { linkId, source: lr?.source ?? "?", target: lr?.target ?? "?" };
+  });
+}
+
+// ── Traffic Engineering policy section ────────────────────────────────────────
+
+interface TEPolicySummaryLine {
+  key: string;
+  kind: "forbid" | "avoid" | "prefer" | "waypoint";
+  text: string;
+}
+
+// Derived from APPLY_TE_POLICY trace events (what was actually applied),
+// not from the request's tePolicies list — a policy that referenced an
+// unknown link/node id was ignored, and this reflects that reality.
+function buildAppliedPolicySummary(result: SimulationResult): TEPolicySummaryLine[] {
+  const events = result.traceEvents.filter((e) => e.stepType === "APPLY_TE_POLICY");
+  if (events.length === 0) return [];
+
+  const forbidden = new Set<string>();
+  const adjustments = new Map<string, TEPolicySummaryLine>();
+  const waypoints = new Set<string>();
+
+  for (const e of events) {
+    const meta = e.metadata as {
+      excludedLinkIds?: string[];
+      costAdjustments?: { linkId: string; policyType: string; originalWeight: number; effectiveWeight: number }[];
+      requiredWaypointNodeIds?: string[];
+    } | null | undefined;
+    (meta?.excludedLinkIds ?? []).forEach((id) => forbidden.add(id));
+    (meta?.costAdjustments ?? []).forEach((a) => {
+      const kind: "avoid" | "prefer" = a.policyType === "PREFER_LINK" ? "prefer" : "avoid";
+      adjustments.set(`${a.linkId}-${kind}`, {
+        key: `${a.linkId}-${kind}`,
+        kind,
+        text: `${kind === "avoid" ? "Avoid" : "Prefer"} link ${a.linkId} (${a.originalWeight} → ${a.effectiveWeight})`,
+      });
+    });
+    (meta?.requiredWaypointNodeIds ?? []).forEach((id) => waypoints.add(id));
+  }
+
+  const lines: TEPolicySummaryLine[] = [];
+  forbidden.forEach((id) => lines.push({ key: `forbid-${id}`, kind: "forbid", text: `Forbid link ${id}` }));
+  lines.push(...adjustments.values());
+  waypoints.forEach((id) => lines.push({ key: `wp-${id}`, kind: "waypoint", text: `Require waypoint ${id}` }));
+  return lines;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -46,6 +211,12 @@ const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowT
     : "result-util--ok";
 
   const totalPaths = result.pathResults.reduce((acc, pr) => acc + pr.paths.length, 0);
+  const isSegmentRouting = result.algorithm === "SEGMENT_ROUTING";
+  const srDemandSummaries = isSegmentRouting ? buildSRDemandSummaries(result) : [];
+  const isEcmp = result.algorithm === "ECMP";
+  const distributionSummaries = isEcmp ? buildDistributionSummaries(result) : [];
+  const policySummary = buildAppliedPolicySummary(result);
+  const downLinks = buildDownLinksSummary(result);
 
   return (
     <div className="result-summary">
@@ -66,6 +237,19 @@ const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowT
           <div className="result-hero-sub">{result.algorithm} · max {maxUtilPct}% utilization</div>
         </div>
       </div>
+
+      {/* Network event — compact operational-status note (PR 5). Distinct
+          from the congestion hero above: this reports topology state, not
+          a traffic outcome. */}
+      {downLinks.length > 0 && (
+        <div className="result-network-event">
+          <PowerOff size={13} />
+          <span>
+            Network event: {downLinks.map((d) => `${d.source}-${d.target}`).join(", ")}{" "}
+            link{downLinks.length > 1 ? "s" : ""} down
+          </span>
+        </div>
+      )}
 
       {/* Narrative */}
       <p className="result-narrative">{narrative}</p>
@@ -111,6 +295,70 @@ const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowT
                 </span>
               </div>
             ))}
+        </div>
+      )}
+
+      {/* Traffic Engineering policies applied */}
+      {policySummary.length > 0 && (
+        <div className="result-te-section">
+          <div className="result-te-title">Applied policies</div>
+          {policySummary.map((line) => (
+            <div key={line.key} className={`result-te-line result-te-line--${line.kind}`}>
+              {line.text}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Segment Routing compact section */}
+      {isSegmentRouting && srDemandSummaries.length > 0 && (
+        <div className="result-sr-section">
+          <div className="result-sr-title">Segment Routing</div>
+          {srDemandSummaries.map((s) => (
+            <div key={s.demandId} className="result-sr-demand">
+              <div className="result-sr-demand-route">
+                Demand {s.sourceLabel} → {s.targetLabel}
+              </div>
+              <div className="result-sr-demand-line">
+                <span className="result-sr-demand-label">Segments:</span>{" "}
+                {s.waypointLabels.length > 0 ? s.waypointLabels.join(" → ") : "(none — shortest path)"}
+              </div>
+              <div className="result-sr-demand-line">
+                <span className="result-sr-demand-label">
+                  {s.resolvedRoutes.length > 1 ? "Resolved routes:" : "Resolved path:"}
+                </span>
+              </div>
+              {s.resolvedRoutes.map((route, i) => (
+                <div key={i} className="result-sr-route-row">
+                  <span className="result-sr-route-path">{route.nodes.join(" → ")}</span>
+                  {s.resolvedRoutes.length > 1 && (
+                    <span className="result-sr-route-pct">{route.percent.toFixed(0)}%</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ECMP traffic distribution section */}
+      {isEcmp && distributionSummaries.length > 0 && (
+        <div className="result-td-section">
+          <div className="result-td-title">Traffic Distribution</div>
+          {distributionSummaries.map((s) => (
+            <div key={s.demandId} className="result-td-demand">
+              <span className={`result-td-mode-badge result-td-mode-badge--${s.mode.toLowerCase()}`}>
+                {s.mode === "CUSTOM" ? "Custom split" : "Equal split"}
+              </span>
+              {s.paths.map((p) => (
+                <div key={p.pathId} className="result-td-path-row">
+                  <span className="result-td-path-label">{p.pathLabel}</span>
+                  <span className="result-td-path-route">{p.route}</span>
+                  <span className="result-td-path-pct">{p.percent.toFixed(0)}%</span>
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
       )}
 
