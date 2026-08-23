@@ -11901,3 +11901,202 @@ html, body, #root {
 .li-comparison-status-badge--new_congestion { color:#dc2626; background:#dc262614 }
 .li-comparison-status-badge--resolved_congestion { color:#16a34a; background:#16a34a14 }
 .li-comparison-status-badge--down { color:#57534e; background:#78716c1f }
+
+/* ── Optimization Lab (Sprint 2, PR5) ──────────────────────────────────── */
+
+.spin {
+  animation: spin .8s linear infinite;
+}
+
+.text-success {
+  color: var(--success);
+}
+
+.btn-secondary--active {
+  background: var(--accent-light);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.btn-primary--confirm {
+  background: var(--danger);
+}
+
+.btn-primary--confirm:hover:not(:disabled) {
+  background: var(--danger);
+  filter: brightness(1.08);
+}
+
+.opt-lab {
+  padding: .9rem 1rem 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.opt-lab-header {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+}
+
+.opt-lab-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: .92rem;
+  color: var(--text);
+}
+
+.opt-lab-empty-hint,
+.opt-card-hint {
+  color: var(--text-3);
+  font-size: .82rem;
+  line-height: 1.5;
+}
+
+.opt-lab-congestion-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.opt-lab-congestion-compare {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: .5rem;
+}
+
+.opt-lab-congestion-compare > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.opt-lab-semantics {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  padding: .5rem .1rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: .2rem;
+}
+
+.opt-lab-semantics-row {
+  display: flex;
+  gap: .6rem;
+  font-size: .8rem;
+  line-height: 1.4;
+}
+
+.opt-lab-semantics-row strong {
+  flex: 0 0 52px;
+  color: var(--accent);
+}
+
+.opt-lab-semantics-row span {
+  color: var(--text-2);
+}
+
+.opt-lab-cards {
+  display: flex;
+  flex-direction: column;
+  gap: .65rem;
+}
+
+.opt-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: .75rem .85rem;
+  display: flex;
+  flex-direction: column;
+  gap: .55rem;
+  transition: border-color var(--fast);
+}
+
+.opt-card--selected {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 1px var(--accent-border);
+}
+
+.opt-card--current {
+  background: var(--surface-3);
+}
+
+.opt-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+}
+
+.opt-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-size: .88rem;
+}
+
+.opt-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: .55rem;
+}
+
+.opt-card-body--empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+}
+
+.opt-card-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: .5rem .75rem;
+}
+
+.opt-card-small-value {
+  font-size: .74rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.opt-card-explain {
+  font-size: .8rem;
+  color: var(--text);
+  background: var(--surface-3);
+  border-radius: var(--radius-sm);
+  padding: .5rem .6rem;
+  line-height: 1.45;
+}
+
+.opt-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+
+.opt-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  font-size: .78rem;
+  line-height: 1.5;
+  color: var(--text-3);
+  padding: .1rem .1rem .2rem;
+}
+
+.opt-card-info strong {
+  color: var(--text);
+}
+
+.opt-card-debug {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--warning);
+}

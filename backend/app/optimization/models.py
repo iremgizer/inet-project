@@ -22,6 +22,8 @@ from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from app.models import AlgorithmConfig, NetworkInput
+
 OptimizationStatus = Literal["OPTIMAL", "FEASIBLE", "INFEASIBLE", "TIME_LIMIT", "ERROR"]
 
 # PR1 produces "OPT" only. PR2 added "WAYPOINT_OPTIMIZATION". PR3 added
@@ -145,3 +147,36 @@ class OptimizationResult(BaseModel):
     # a fixed "Exhaustive search over the combined candidate space
     # completed." for EXACT_JOINT_ENUMERATION, which does not iterate.
     convergenceReason: Optional[str] = None
+
+
+# ── PR5: request contract for the new POST /optimize route ────────────────
+# The one and only place any of PR1-4's optimizers are exposed over HTTP —
+# a thin, additive request wrapper, not a new algorithm. `mode` selects
+# which of the four already-existing entry points
+# (solve_unrestricted_optimum / optimize_waypoints / optimize_link_weights /
+# optimize_joint) `optimization_service.run_optimization` dispatches to; the
+# per-mode tuning parameters below are simply that function's own keyword
+# arguments, given real (non-mode-specific) defaults so a minimal request
+# (just `network` + `algorithmConfig` + `mode`) always works.
+OptimizeMode = Literal["OPT", "WPO", "LWO", "JOINT"]
+
+
+class OptimizeRequest(BaseModel):
+    network: NetworkInput
+    # Reused as-is from the simulation request contract — only
+    # `tePolicies`/`congestionThreshold` are actually consumed by any
+    # optimizer; `selectedAlgorithm` and the rest are simply ignored (a
+    # frontend that already holds a full AlgorithmConfig for the current
+    # simulation can pass it straight through with no reshaping).
+    algorithmConfig: AlgorithmConfig
+    mode: OptimizeMode
+    # WPO only.
+    maxWaypointsPerDemand: int = 1
+    # LWO/JOINT only.
+    minWeight: int = 1
+    maxWeight: int = 5
+    # WPO/LWO/JOINT — each mode's own exact-vs-heuristic search-space guard.
+    maxExactCombinations: int = 50_000
+    # JOINT only.
+    maxIterations: int = 10
+    epsilon: float = 1e-6

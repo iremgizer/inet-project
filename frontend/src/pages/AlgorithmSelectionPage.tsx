@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ChevronDown, ChevronUp, Zap, GitBranch } from "lucide-react";
+import { ChevronDown, ChevronUp, Zap, GitBranch, FlaskConical } from "lucide-react";
 import {
   AlgorithmConfig,
   AlgorithmName,
@@ -25,6 +25,11 @@ interface AlgorithmSelectionPageProps {
   onThresholdChange: (value: number) => void;
   onBack: () => void;
   onStartSimulation: () => void;
+  // Sprint 2 PR5 — an alternative to running a single routing algorithm:
+  // opens the Optimization Lab workflow step instead. Optional so this page
+  // still works standalone (e.g. in a classroom/challenge context where the
+  // Lab isn't offered).
+  onOpenOptimizationLab?: () => void;
   canChooseAlgorithm?: boolean;
   // Segment Routing configuration — only rendered/used when
   // selectedAlgorithm === "SEGMENT_ROUTING".
@@ -101,6 +106,7 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
   onThresholdChange,
   onBack,
   onStartSimulation,
+  onOpenOptimizationLab,
   canChooseAlgorithm = true,
   demands,
   nodes,
@@ -281,6 +287,15 @@ const AlgorithmSelectionPage: React.FC<AlgorithmSelectionPageProps> = ({
 
       <div className="page-actions">
         <button className="btn-secondary btn-sm" onClick={onBack}>Back</button>
+        {onOpenOptimizationLab && (
+          <button
+            className="btn-secondary btn-run"
+            onClick={onOpenOptimizationLab}
+            title="Try automated optimization strategies instead of — or before — running a single algorithm"
+          >
+            <FlaskConical size={14} /> Optimization Lab
+          </button>
+        )}
         <button
           className="btn-primary btn-run"
           onClick={onStartSimulation}
