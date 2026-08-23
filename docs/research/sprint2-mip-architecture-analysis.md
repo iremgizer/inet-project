@@ -501,6 +501,123 @@ Both Sprint 1's `resolve_segment_route` and [Le21]'s `f_ik(e)`/`f_kj(e)` precomp
 
 **Known limitations, left for later PRs:** (1) the workflow step-nav bar's `isDone`/`isActive` indicators were not extended for step 5 (all four numbered stages read as "done" while the Lab is open) — cosmetic only, does not affect any data path; (2) if a student both selects a card for viewing *and* compares a different card at the same time, the canvas shows the compared card's difference heatmap while still overlaying the selected card's waypoint/weight highlights — an intentional simplification (documented here, not silently allowed to confuse), not a crash or data error; (3) `totalDeliveredTraffic` in the `SimulationResult` projection is the sum of every demand's own amount (an honest, clearly-scoped approximation — `OptimizationResult` has no structured per-demand delivered-traffic field, only free-text `debugInfo` notes for an unreachable demand); (4) no automated frontend test coverage exists for any of this PR's new UI code, matching this project's existing, pre-PR5 limitation.
 
+**Known limitations 1 and 2 above are resolved by PR6 — see §17.**
+
+---
+
+## 17. Addendum — PR6 implemented Scientific Optimization UX, Scalability Controls & Final Polish (Sprint 2 complete)
+
+**This is Sprint 2's final PR. No optimizer's mathematical/routing semantics were touched — every OPT/WPO/LWO/Joint number in this addendum is produced by exactly the same functions PR1-4 implemented and PR1-4's own test suites already verify. This addendum records controls, safety, UX, metadata, and documentation work only, plus the two explicit PR5 limitation fixes noted above.**
+
+### 17.1 User-configurable exact search budget (§1/§2)
+
+`maxExactCombinations`'s default (50,000) is unchanged from PR2/PR3/PR4. What's new is that a student can now change it per run, from the Optimization Lab's own **Optimization Settings** panel (`components/OptimizationSettingsPanel.tsx`) — collapsed by default, expanding to three named presets (**Fast** 10,000 / **Default** 50,000 / **Deep** 250,000) plus a **Custom** numeric field that always shows the actual value in force, never just a preset label. The setting is threaded straight into `OptimizeRequest.maxExactCombinations` (already an existing field since PR5) with no backend algorithm change — `optimize_waypoints`/`optimize_link_weights`/`optimize_joint` already accepted this exact parameter.
+
+### 17.2 Search-space preview (§3)
+
+New backend capability, additive only: `estimate_waypoint_search_space`/`estimate_link_weight_search_space`/`estimate_joint_search_space` (one new function per optimizer module) compute a candidate-space size **without running any search** — each one reuses the exact same candidate-generation code (`_candidate_waypoints_for_demand`, the optimizable-link/weight-domain computation) the real optimizer itself uses via a shared `_prepare_*_search` context object, so the preview can never drift from what a real run would actually search. Exposed over a new route, `POST /optimize/search-space` (`app/services/optimization_service.py`'s `estimate_search_space`), and consumed by the frontend's `estimateSearchSpace` (`api/optimizationApi.ts`), fetched automatically (debounced 350ms) whenever the network, TE policies, or weight range change, and shown inside each WPO/LWO/Joint card *before* it's ever run — `EXACT SEARCH AVAILABLE` or `HEURISTIC MODE WILL BE USED`, plus (when heuristic) exactly how much the budget would need to grow to permit exact enumeration (`utils/optimizationSettings.ts`'s `predictSearchMethod`, a pure function). Per this PR's own explicit instruction, the prediction only ever claims whether exact search *fits* the budget — never that it will be *fast* (§17.6 below reports actual measured runtimes instead of a promise).
+
+### 17.3 OPT mode — no search-budget controls (§4)
+
+OPT is a linear program (PuLP/CBC), not a combinatorial search — it never had a `searchMethod`/`searchSpaceSize`/`evaluatedCandidates`/`provenOptimal` field to begin with (confirmed unchanged by `test_h4_opt_result_has_no_search_metadata` in this PR's own test suite) and the search-space preview endpoint returns `searchSpaceSize=None` with an explicit `error` for `mode="OPT"` rather than a number (`test_g4_http_search_space_endpoint_opt_not_applicable`). The Optimization Lab's own OPT card never shows the budget/weight-range/exact-vs-heuristic controls the other three cards do — instead a fixed, always-accurate three-line summary: *Method: Linear Programming · Solver: CBC · Search combinations: Not applicable*.
+
+### 17.4 WPO/LWO/Joint scientific metadata (§5/§6/§8/§12)
+
+Every WPO/LWO/Joint card now consistently shows: search method, search-space size, candidates evaluated, runtime, solver, and (LWO/Joint only) the weight range *actually used* for that run — tracked client-side alongside each cached result (`OptimizationRunRecord` in `types/optimization.ts`, `{result, settings}`) specifically so a later change to the settings panel doesn't retroactively misdescribe an already-completed run. Joint additionally shows `iterations` and `convergenceReason` when its search method is `JOINT_ALTERNATING` (both already existed on `OptimizationResult` since PR4; PR6 only added the UI that surfaces them). No mode ever shows a field that doesn't apply to it (§12: OPT never shows search fields at all; WPO never shows a weight range).
+
+### 17.5 Wall-clock timeout (§9/§10)
+
+New, additive `time_limit_s: Optional[float] = None` parameter on all four `solve_unrestricted_optimum`/`optimize_waypoints`/`optimize_link_weights`/`optimize_joint` (OPT already had this since PR1, forwarded to the CBC solver; WPO/LWO/Joint are new). `app/optimization/deadline.py` is the one shared helper (`compute_deadline`/`deadline_passed`) every search loop checks against — once per candidate evaluation for the exact-enumeration searches, once per (link,value) trial for `HEURISTIC_LWO`, once per candidate waypoint for `GREEDY_WPO`, and once per round (plus forwarded into each round's own sub-search) for `JOINT_ALTERNATING`. **`None` (the default) means unlimited and is completely unchanged from PR1-5** — every existing test in `test_unrestricted_optimizer.py`/`test_waypoint_optimization.py`/`test_lwo_optimization.py`/`test_joint_optimization.py` omits this parameter and passed unmodified after this PR (243 pre-existing tests, zero regressions). A deadline is only ever set by the HTTP route, which now always supplies one (`OptimizeRequest.timeLimitSeconds`, default 30s, validated to `[1, 300]` seconds — chosen from §17.6's own measurements: comfortably above every teaching-scale runtime observed, while still bounding a single request).
+
+An interrupted search never returns `OPTIMAL`/plain `FEASIBLE` — it returns **`status="TIME_LIMIT"`**, `provenOptimal=False`, and the best candidate found before the deadline (at least one candidate is always evaluated first, regardless of how small the deadline is, so a result always exists to return — verified by `test_e_timeout_wpo_reports_time_limit`/`test_e2_.../test_e3_...` in this PR's test suite, using `time_limit_s=0.0` as a deterministic way to force an immediate deadline). No optimality gap is ever fabricated for a `TIME_LIMIT` result — WPO/LWO/Joint have no branch-and-bound machinery to produce one from (Part K's own "never fake a gap the method can't provide" rule, reaffirmed here for the first time it's actually reachable in this codebase).
+
+### 17.6 Safety cap (§11) — measured, not guessed
+
+`app/services/optimization_service.py`'s `DEFAULT_MAX_EXACT_COMBINATIONS_CAP = 2,000,000`, environment-configurable via `OPTIMIZATION_MAX_EXACT_COMBINATIONS_CAP`, rejects (`400`) any `maxExactCombinations` above it — independent of, and always enforced regardless of, whatever the frontend's own settings panel happens to allow the student to type. Chosen from a direct measurement on this project's own development machine (macOS, Apple Silicon, arm64, Python 3.13.2 — reported here so the numbers are never presented as universal), not picked blindly:
+
+| Budget | Weight range (6 links) | Search space | Method | Evaluated | Wall-clock |
+|---|---|---|---|---|---|
+| 10,000 | 1-5 | 15,625 | `HEURISTIC_LWO` | 25 | 0.001s |
+| 50,000 | 1-6 | 46,656 | `EXACT_ENUMERATION` | 46,656 | 0.834s |
+| 250,000 | 1-7 | 117,649 | `EXACT_ENUMERATION` | 117,649 | 2.086s |
+
+≈18µs/candidate on this hardware. At that rate, the 2,000,000-candidate safety cap's own worst case is a bounded ~35-40s search — the same order of magnitude as the default 30s `timeLimitSeconds`, which independently guarantees no single request can run away regardless of the cap's own value. A WPO run (7 nodes, 2 demands) and a Joint run (same topology) were also measured for comparison — WPO's own search space stayed tiny (36 combinations) regardless of budget in this fixture, and Joint's combined space (14,062,500) exceeded every tested budget, always falling to `JOINT_ALTERNATING` (138 evaluations, 2 iterations, ~5ms) — illustrating directly why Joint's combined space "grows faster than either alone" (§8's own instruction), a concrete number rather than an assertion. These are the only performance claims this addendum makes; they are not a general benchmark.
+
+### 17.7 Weight-range controls (§7)
+
+`minWeight`/`maxWeight` were already `OptimizeRequest` fields since PR5 (LWO/Joint already accepted them since PR3/PR4) — PR6 adds the UI (the settings panel's Min/Max inputs) and validates the range both client-side (`utils/optimizationSettings.ts`'s `validateOptimizationSettings`, immediate feedback) and, authoritatively, server-side (`optimization_service.py`'s `_validate_weight_range`: `minWeight <= maxWeight`, both within `[1, 1000]`). Changing the range live re-fetches the search-space preview (§17.2), so a student can directly observe, e.g., 6 links at range 1-5 (`5^6=15,625`) growing to range 1-10 (`10^6=1,000,000`) — exactly the example this PR's own spec gives, reproduced here from `test_f_custom_weight_range_changes_search_space`'s own assertions (4 links: `5^4=625` vs `10^4=10,000`), not invented separately for this doc.
+
+### 17.8 Exact/heuristic/proven-optimal UX (§13/§14)
+
+`utils/optimizationBadges.ts`'s `getResultBadges` returns two independent badge slots per result — an **outcome** badge (`PROVEN OPTIMAL` / `BEST FOUND` / `TIME LIMIT`) and a **method** badge (`EXACT SEARCH` / `HEURISTIC`) — both rendered as text labels (not color alone, per §13's own "understandable without relying only on color" instruction), each carrying a `title` tooltip with the exact explanation text §14 specifies verbatim (including LWO's own required addition, *"...within the selected weight range"*). `provenOptimal` is never set to `true` by the frontend independent of what the backend actually reports; the badge logic only ever reads the field, never infers or overrides it.
+
+### 17.9 Complexity/runtime learning UX (§15)
+
+A session-only experiment history (`OptimizationHistoryEntry[]`, `WorkflowManager`'s own state, never persisted to MongoDB or anywhere else — cleared only on `handleGoHome`/`handleLogout`, i.e. a full session reset) appends one row per completed run: mode, budget, method, runtime, MLU, proven-optimal — exactly this PR's own worked example shape. Every value is the real, measured result of that specific run; nothing here is a theoretical runtime prediction (§15's own explicit constraint). Shown as a small collapsible table at the bottom of the Lab (`OptimizationLabPage.tsx`), letting a student directly compare, e.g., a 10k/Fast run against a 50k/Default run on the same topology.
+
+### 17.10 Step navigation fix (§17 of the task spec, "PR5 known limitation #1")
+
+The stepper (`WorkflowManager.tsx`'s `stage-nav`) still shows exactly the same 4 stages it always has (Design/Traffic/Algorithm/Result) — no 5th dot was added, per this PR's own "do not clutter the stepper" instruction. While `currentStep === 5` (the Lab), the stepper computes `isDone`/`isActive` against an *effective* step of `3` (Design/Traffic read done, Algorithm reads active, Result reads neither) — since the Lab branches off from Algorithm, not a step beyond Result — and a separate, unambiguous `Optimization Lab` pill appears alongside the stepper only while step 5 is open. A student can always tell, at a glance, that they're in the Lab without the stepper implying it's a 5th sequential stage.
+
+### 17.11 Visualization overlay conflict fix ("PR5 known limitation #2", §18)
+
+`utils/optimizationVisualState.ts`'s `resolveVisualizationOwner(selectedMode, comparingMode)` is now the single, explicit, named source of truth for which context owns the canvas: **comparison active → comparison owns it** (the difference heatmap only, no highlight overlay from a separately-selected card); **else, a selected card owns it** (its own waypoint/weight-change highlight, no comparison heatmap); **neither → nothing optimization-specific**. `WorkflowManager`'s own `currentTraceEvent`/`displayedResult`/`comparison` derivations all consult this one function instead of independently combining the two booleans the way PR5 implicitly did — the exact bug class (both layers visible at once) is now structurally impossible, not just less likely. Verified deterministically (`resolveVisualizationOwner("WPO", "JOINT") === "comparison"`, etc. — see this PR's own `npx tsx` utility validation, §17.14).
+
+### 17.12 `totalDeliveredTraffic` audit (§19)
+
+Audited, not changed: `OptimizationResult` has no structured per-demand "delivered" figure for WPO/LWO/Joint (only free-text `debugInfo` notes an unreachable demand, if any) — deriving an exact value would require either parsing that free text (fragile; `debugInfo` is documented as human-readable, not a machine contract, across every optimizer since PR1) or a genuinely new structured field on every optimizer's response (out of this PR's "controls/UX/polish only, no algorithm change" scope, and not requested). Kept as the same honest sum-of-demand-amounts approximation PR5 used — but the audit additionally confirmed this field is **never actually rendered anywhere in the Optimization Lab UI** (only the ordinary Simulation Studio's `MetricsPanel`/`ResultSummaryPanel` read it, and neither is reachable from step 5), so the "false precision" risk this section asks about does not arise in practice. Documented in `utils/optimizationProjection.ts`'s own comment, not just here.
+
+### 17.13 Congestion-free wording, result relationships (§21/§22)
+
+§21's three-way distinction is now stated explicitly and separately in the Lab's own Congestion-free analysis panel: `OPT.mlu <= 1` → *"theoretically possible"*; `OPT.mlu > 1` → *"structurally unavoidable... only added capacity or reduced demand can fix this, not a smarter routing algorithm"*; a solver-level `INFEASIBLE` → its own distinct branch (*"No valid routing exists for this configuration... a different condition from congestion, which assumes a routing exists at all"*), never folded into either congestion case. §22's result relationships (`utils/optimizationRelationships.ts`'s `computeResultRelationships`) show `OPT ≤ WPO`/`OPT ≤ LWO`/`OPT ≤ Joint`/`Joint ≤ min(WPO, LWO)` only once every result the comparison needs actually exists in the Lab's own cache, computed directly from each result's real `.mlu` — a relationship that happened to fail (a heuristic finding something worse than a bound would suggest is even theoretically possible, though this cannot happen for the `OPT ≤ X` bounds specifically, since OPT is a true lower bound by construction) would render as "does not hold" (✗) rather than being hidden or asserted anyway — verified directly with a contrived counter-example in this PR's own `npx tsx` validation script.
+
+### 17.14 Frontend testing (§25)
+
+No test runner was introduced (this project still has none, and PR6 does not change that). Every new computational utility this PR added is a pure function with no React/network dependency — `utils/optimizationSettings.ts` (presets, validation, search-space prediction, warning threshold), `utils/optimizationVisualState.ts` (the overlay-precedence rule), `utils/optimizationBadges.ts`, `utils/optimizationRelationships.ts` — and each was validated deterministically via `npx tsx` (already available in this environment) against a standalone assertion script exercising every branch (preset matching, out-of-range budgets/timeouts/weights, exact-vs-heuristic prediction at and past the boundary, the warning threshold's budget-capping behavior, all three `resolveVisualizationOwner` branches, a genuine relationship failure, and every badge combination including `TIME_LIMIT`) — 35 assertions total, all passing, run and discarded (no new file left in the repo, matching "do not expand scope merely to add a framework").
+
+### 17.15 Demo / teaching scenarios (§23) — reused, not invented
+
+Every scenario this PR's own spec asks for maps directly onto an existing, already-verified test fixture — no new numbers were hand-derived for this table:
+
+| Scenario | Fixture | Result |
+|---|---|---|
+| A. OPT: congestion structurally unavoidable | `test_unrestricted_optimizer.py::test_k_known_congestion_example_opt_above_one` | Single link, cap 5, demand 8 → `OPT.mlu = 1.6 > 1` |
+| B. OPT: congestion-free possible, but plain ECMP congests | `test_lwo_optimization.py`'s `_direct_vs_detour_topology()` | Baseline (cheapest-path) ECMP → 1.6; OPT's own arbitrary split on the same topology → 0.533 ≤ 1 |
+| C. WPO improves congestion | `test_waypoint_optimization.py::test_b_single_demand_beneficial_waypoint` | Baseline 1.6 → WPO 0.8 |
+| D. LWO improves congestion | `test_lwo_optimization.py::test_a_single_demand_known_congestion_improves` | Baseline 1.6 → LWO 0.8 |
+| E. Joint improves beyond WPO *and* LWO alone | `test_joint_optimization.py::test_e_joint_le_wpo` / `test_f_joint_le_lwo` | WPO-limited topology: baseline 6.667 → WPO 3.333 → Joint 1.0. Asymmetric multi-demand topology: LWO 0.8 → Joint/WPO 0.667 |
+| F. Search budget below search space → heuristic | `test_optimization_scientific_ux.py::test_c_http_budget_below_search_space_uses_heuristic` | `maxExactCombinations=1` → `HEURISTIC_LWO` |
+| G. Raise the budget → exact search | `test_optimization_scientific_ux.py::test_c2_http_budget_above_search_space_uses_exact` | `maxExactCombinations=1,000,000` on the same topology → `EXACT_ENUMERATION` |
+| H. Heuristic returns a worse result than exact, on a known case | `test_lwo_optimization.py::test_d2_heuristic_can_get_stuck_where_exact_succeeds` | Heuristic stuck at baseline 1.6; exact search (same topology) finds 0.8 |
+
+### 17.16 Documentation (§24)
+
+This section, plus `README.md` (new "Sprint 2 — Optimization Lab" section summarizing OPT/WPO/LWO/Joint, exact vs. heuristic, search budget, timeouts, weight range, `provenOptimal`, and how to interpret a result scientifically, aimed at a student/instructor reading the repo for the first time — implementation detail lives here, in the architecture doc, not there). No earlier section of either document was rewritten.
+
+### 17.17 Backend tests added (§26)
+
+26 new tests, `backend/tests/test_optimization_scientific_ux.py`: custom exact-search budget for WPO/LWO/Joint (direct calls), default-50,000 behavior explicitly re-confirmed unchanged, budget-below/above-search-space dispatch via HTTP, safety-cap rejection (over the cap, at the boundary, and zero/negative), timeout behavior for all of WPO/LWO/Joint (including a generous timeout provably *not* triggering), HTTP-level timeout range validation, custom weight range changing the search space as expected, invalid weight range rejected over HTTP, search-space-preview-matches-a-real-run for all three modes (both via direct call and via the new HTTP endpoint, including OPT's own "not applicable" response), full result-metadata-field presence per mode (and explicit absence for OPT), and a no-regression check across all four modes' defaults together with `OPT ≤ {WPO, LWO, Joint}`. Plus 9 pre-existing `test_optimize_endpoint.py` tests, re-run and still passing unmodified (confirming the new `timeLimitSeconds` default of 30s and the new validation layer don't break any existing HTTP-level scenario).
+
+### 17.18 Total backend test count
+
+**269 passed** (243 pre-existing across PR1-5 + 26 new in this PR), zero regressions, zero skips.
+
+### 17.19 Frontend validation
+
+`npx tsc --noEmit` — clean. `npm run build` — clean (the same pre-existing chunk-size warning every prior PR's build has reported, unrelated to this PR). No sample-JSON validation script exists in this repo (confirmed again, same finding as PR5).
+
+### 17.20 Files changed
+
+Backend: `app/optimization/deadline.py` (new), `app/optimization/{waypoint_optimizer,lwo_optimizer,joint_optimizer}.py` (extended: `time_limit_s` threading, `estimate_*_search_space`, `_prepare_*_search` context extraction — all additive, zero behavior change when the new parameters are omitted), `app/optimization/models.py` (`OptimizeRequest.timeLimitSeconds`, new `SearchSpaceEstimateRequest`/`SearchSpaceEstimate` models), `app/services/optimization_service.py` (safety cap + range validation, `time_limit_s` forwarding, `estimate_search_space`), `app/main.py` (new `POST /optimize/search-space` route), `backend/tests/test_optimization_scientific_ux.py` (new). Frontend: `utils/{optimizationSettings,optimizationVisualState,optimizationBadges,optimizationRelationships}.ts` (new, all pure), `components/OptimizationSettingsPanel.tsx` (new), `types/optimization.ts` (extended), `api/optimizationApi.ts` (extended: `estimateSearchSpace`), `components/OptimizationCard.tsx` (extended: badges, pre-run preview/warning, mode-specific metadata), `pages/OptimizationLabPage.tsx` (extended: settings panel, search-space preview fetching, result relationships, history table), `components/WorkflowManager.tsx` (extended: settings/history state, `OptimizationRunRecord` cache shape, overlay-precedence fix, step-nav fix), `styles/app.css` (one new additive section).
+
+### 17.21 Known limitations, left for future work
+
+(1) The search-space preview's debounce (350ms) is a fixed constant, not itself configurable — reasonable for this project's scale, not tuned further; (2) the experiment history is per-session and in-memory only, exactly as specified — a student who refreshes the page loses it, by design (§15: "do not persist it to MongoDB in PR6"); (3) the safety cap's default (2,000,000) and the 18µs/candidate measurement it's based on are specific to one development machine — a production deployment on different hardware should re-measure and adjust `OPTIMIZATION_MAX_EXACT_COMBINATIONS_CAP` accordingly, which is exactly why it's environment-configurable rather than hardcoded; (4) `JOINT_ALTERNATING`'s own per-round deadline check is coarse-grained (checked at the top of each round in addition to each round's own sub-search independently honoring the same deadline) — a round already substantially in progress when the deadline hits can still take somewhat longer than the configured budget before returning, bounded by whichever sub-search is active at that moment, not instantaneous; (5) no automated frontend test runner was introduced, matching this project's continued, deliberate choice (§25) — every new utility is pure and was validated deterministically instead (§17.14), but that validation script itself was not left in the repository as a permanent regression test.
+
+### 17.22 Sprint 2 status
+
+**Sprint 2 is complete after this PR.** PR0 (Segment Routing ECMP-within-segments) through PR6 (this PR) are all implemented, tested, and documented; no further Sprint 2 work is scoped. Sprint 3 (if any) is out of scope for this document.
+
 ---
 
 ## Deliverable confirmation

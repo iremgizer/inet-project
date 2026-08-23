@@ -1,4 +1,7 @@
-"""Sprint 2 PR2 — Waypoint Optimization (WPO).
+"""Sprint 2 PR2 — Waypoint Optimization (WPO). Extended in PR6 with a
+search-space preview (`estimate_waypoint_search_space`) and an optional
+wall-clock deadline (`time_limit_s`) — both additive, safety/UX-only; the
+routing/optimization semantics documented below are unchanged since PR2.
 
 Finds, for each demand, at most one additional waypoint node to route
 through such that the resulting network-wide Maximum Link Utilization (MLU)
@@ -20,8 +23,8 @@ IFIP/IEEE IM 2021) also studies single-waypoint optimization and supplies a
 complete, exact MILP (`P0`) — but its routing model is single-shortest-path,
 UNSPLITTABLE, which is a different, incompatible semantics from what PR0's
 simulator actually does. This file does not implement [Le21]'s `P0` and does
-not claim to; see §18 of this PR's own spec and the new architecture-doc
-addendum for the explicit, permanent record of this choice. A future
+not claim to; see §18 of PR2's own spec and the architecture-doc addendum
+for the explicit, permanent record of this choice. A future
 `UNSPLITTABLE_SR_MILP` mode remains a documented possibility, not code.
 
 Two search strategies, chosen automatically by the size of the candidate
@@ -34,7 +37,10 @@ space (see `_search_space_size`/`max_exact_combinations`):
   and the best-MLU assignment is kept. Genuinely exhaustive within that
   declared space — `provenOptimal=True` — but never called "MILP": no
   integer program is built or solved here, only direct enumeration + the
-  same routing evaluator every candidate shares.
+  same routing evaluator every candidate shares. If a PR6 `time_limit_s`
+  deadline is reached before enumeration finishes, the search stops with
+  whatever best candidate it has found so far and the result is reported as
+  `TIME_LIMIT`, never `OPTIMAL` — see `optimize_waypoints`'s own docstring.
 - `GREEDY_WPO`: [Parham21]'s Algorithm 3, used automatically once the exact
   search space exceeds `max_exact_combinations` (default 50,000, see that
   constant's own docstring for the reasoning). A polynomial heuristic with
@@ -44,11 +50,13 @@ from __future__ import annotations
 
 import itertools
 import time
+from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
 import networkx as nx
 
 from app.models import AlgorithmConfig, NetworkInput, TrafficDemandInput
+from app.optimization.deadline import compute_deadline, deadline_passed
 from app.optimization.models import OptimizationResult, WaypointAssignmentEntry
 from app.optimization.waypoint_evaluator import (
     WaypointAssignment,
@@ -77,11 +85,119 @@ DEFAULT_MAX_EXACT_COMBINATIONS = 50_000
 _MLU_IMPROVEMENT_EPSILON = 1e-9
 
 
+@dataclass
+class WpoSearchContext:
+    """Everything about a WPO run that does not depend on which search
+    strategy is chosen — shared, unchanged, by `optimize_waypoints` (which
+    actually searches) and `estimate_waypoint_search_space` (PR6, which only
+    reports the candidate-space size a real run would search). Computed
+    once so the estimate can never drift from what a real run would do.
+    """
+    routable_demands: List[TrafficDemandInput]
+    demand_graphs: Dict[str, "nx.Graph"]
+    demand_required_waypoints: Dict[str, List[str]]
+    candidate_lists: Dict[str, List[Optional[str]]]
+    search_space_size: int
+    debug: List[str]
+    link_map: dict = field(default_factory=dict)
+    unknown_node_demand_id: Optional[str] = None
+
+
+def _prepare_wpo_search(network: NetworkInput, config: AlgorithmConfig) -> WpoSearchContext:
+    graph, link_map = GraphBuilder.build_graph(network)
+    node_ids_sorted = sorted(node.id for node in network.nodes)
+    node_id_set = set(node_ids_sorted)
+    debug: List[str] = []
+
+    for demand in network.demands:
+        if demand.source not in node_id_set or demand.target not in node_id_set:
+            return WpoSearchContext(
+                routable_demands=[], demand_graphs={}, demand_required_waypoints={},
+                candidate_lists={}, search_space_size=0, debug=debug, link_map=link_map,
+                unknown_node_demand_id=demand.id,
+            )
+
+    routable_demands: List[TrafficDemandInput] = []
+    for demand in network.demands:
+        if demand.source == demand.target:
+            debug.append(f"Demand {demand.id} source equals target; excluded from optimization")
+            continue
+        routable_demands.append(demand)
+
+    demand_graphs: Dict[str, "nx.Graph"] = {}
+    demand_required_waypoints: Dict[str, List[str]] = {}
+    for demand in routable_demands:
+        policy_result = build_demand_policy_graph(graph, link_map, demand.id, config.tePolicies)
+        demand_graphs[demand.id] = policy_result.graph
+        demand_required_waypoints[demand.id] = sanitize_segments(
+            list(policy_result.required_waypoint_node_ids), demand.source, demand.target
+        )
+
+    candidate_lists: Dict[str, List[Optional[str]]] = {
+        demand.id: _candidate_waypoints_for_demand(
+            demand, demand_graphs[demand.id], demand_required_waypoints[demand.id], node_ids_sorted,
+        )
+        for demand in routable_demands
+    }
+
+    search_space_size = 1
+    for demand in routable_demands:
+        search_space_size *= len(candidate_lists[demand.id])
+
+    return WpoSearchContext(
+        routable_demands=routable_demands,
+        demand_graphs=demand_graphs,
+        demand_required_waypoints=demand_required_waypoints,
+        candidate_lists=candidate_lists,
+        search_space_size=search_space_size,
+        debug=debug,
+        link_map=link_map,
+    )
+
+
+@dataclass
+class WpoSearchSpaceEstimate:
+    """PR6 — a preview of what a real `optimize_waypoints` call would
+    search, without actually running it. `searchSpaceSize` is exactly the
+    number `optimize_waypoints` itself would compute and compare against
+    `max_exact_combinations` to choose EXACT_ENUMERATION vs GREEDY_WPO —
+    computed via the identical candidate-generation code (`_prepare_wpo_search`),
+    so this estimate can never drift from what a real run actually does.
+    """
+    searchSpaceSize: int
+    routableDemandCount: int
+    candidateCountByDemand: Dict[str, int] = field(default_factory=dict)
+    error: Optional[str] = None
+
+
+def estimate_waypoint_search_space(network: NetworkInput, config: AlgorithmConfig) -> WpoSearchSpaceEstimate:
+    """Computes WPO's candidate-space size without running any search — the
+    Optimization Lab's "search-space preview" (PR6 §3) calls this before a
+    student commits to running WPO/Joint, so they can see whether their
+    current search budget will permit exact enumeration before waiting on a
+    real solve.
+    """
+    context = _prepare_wpo_search(network, config)
+    if context.unknown_node_demand_id is not None:
+        return WpoSearchSpaceEstimate(
+            searchSpaceSize=0, routableDemandCount=0,
+            error=f"Demand {context.unknown_node_demand_id} references a node that does not exist in this network.",
+        )
+    return WpoSearchSpaceEstimate(
+        searchSpaceSize=context.search_space_size,
+        routableDemandCount=len(context.routable_demands),
+        candidateCountByDemand={
+            demand_id: len(candidates) for demand_id, candidates in context.candidate_lists.items()
+        },
+    )
+
+
 def optimize_waypoints(
     network: NetworkInput,
     config: AlgorithmConfig,
     max_waypoints_per_demand: int = 1,
     max_exact_combinations: int = DEFAULT_MAX_EXACT_COMBINATIONS,
+    time_limit_s: Optional[float] = None,
 ) -> OptimizationResult:
     """Recommends a waypoint assignment (at most one extra waypoint per
     demand) minimizing network-wide MLU, computed from scratch (ignoring any
@@ -94,6 +210,19 @@ def optimize_waypoints(
     scope) — kept as an explicit parameter, not a hidden constant, so a
     future PR widening this doesn't need to change this function's
     signature, only its body.
+
+    `time_limit_s` (PR6, additive, default `None` = unlimited): a wall-clock
+    budget applied to whichever search strategy is chosen. If reached before
+    `EXACT_ENUMERATION` finishes evaluating every combination, the search
+    stops with the best candidate found so far and `status` is reported as
+    `"TIME_LIMIT"`, never `"OPTIMAL"` — an interrupted exact search has not
+    actually proven anything (Part K's own status/wording table). If reached
+    during `GREEDY_WPO` (already a heuristic with no optimality claim), the
+    result is still reported as `"TIME_LIMIT"` rather than the usual
+    `"FEASIBLE"`, so a caller can distinguish "the heuristic ran to its own
+    natural completion" from "it was cut off before that." Every existing
+    caller (all of PR1-5's test suite) omits this parameter and is
+    completely unaffected.
 
     REQUIRE_WAYPOINT interaction rule (deliberately the simplest option of
     the two considered): a demand with an active hard `REQUIRE_WAYPOINT`
@@ -112,15 +241,10 @@ def optimize_waypoints(
             "(Sprint 2 PR2's declared V1 scope)"
         )
 
-    graph, link_map = GraphBuilder.build_graph(network)
-    node_ids_sorted = sorted(node.id for node in network.nodes)
-    node_id_set = set(node_ids_sorted)
+    context = _prepare_wpo_search(network, config)
+    debug = context.debug
 
-    debug: List[str] = []
-
-    for demand in network.demands:
-        if demand.source in node_id_set and demand.target in node_id_set:
-            continue
+    if context.unknown_node_demand_id is not None:
         return OptimizationResult(
             mode="WAYPOINT_OPTIMIZATION",
             status="ERROR",
@@ -128,31 +252,16 @@ def optimize_waypoints(
             mlu=0.0,
             solverRuntime=round((time.time() - start) * 1000.0, 2),
             solverName="WAYPOINT_OPTIMIZATION",
-            message=f"Demand {demand.id} references a node that does not exist in this network.",
+            message=f"Demand {context.unknown_node_demand_id} references a node that does not exist in this network.",
             debugInfo=debug,
         )
 
-    routable_demands: List[TrafficDemandInput] = []
-    for demand in network.demands:
-        if demand.source == demand.target:
-            debug.append(f"Demand {demand.id} source equals target; excluded from optimization")
-            continue
-        routable_demands.append(demand)
-
-    # ── TE-policy application is static across every candidate this run
-    #    evaluates — computed once here, reused by every evaluation below,
-    #    rather than recomputed per candidate (see waypoint_evaluator.py's
-    #    own docstring). Mirrors ECMP's/Segment Routing's own per-demand
-    #    `build_demand_policy_graph` call, just hoisted out of the search
-    #    loop since the policies themselves never change within one run. ──
-    demand_graphs: Dict[str, "nx.Graph"] = {}
-    demand_required_waypoints: Dict[str, List[str]] = {}
-    for demand in routable_demands:
-        policy_result = build_demand_policy_graph(graph, link_map, demand.id, config.tePolicies)
-        demand_graphs[demand.id] = policy_result.graph
-        demand_required_waypoints[demand.id] = sanitize_segments(
-            list(policy_result.required_waypoint_node_ids), demand.source, demand.target
-        )
+    routable_demands = context.routable_demands
+    demand_graphs = context.demand_graphs
+    demand_required_waypoints = context.demand_required_waypoints
+    candidate_lists = context.candidate_lists
+    search_space_size = context.search_space_size
+    link_map = context.link_map
 
     if not routable_demands:
         runtime_ms = round((time.time() - start) * 1000.0, 2)
@@ -189,23 +298,15 @@ def optimize_waypoints(
             + ", ".join(sorted(baseline_eval.unreachable_demand_ids))
         )
 
-    candidate_lists: Dict[str, List[Optional[str]]] = {
-        demand.id: _candidate_waypoints_for_demand(
-            demand, demand_graphs[demand.id], demand_required_waypoints[demand.id], node_ids_sorted,
-        )
-        for demand in routable_demands
-    }
-
-    search_space_size = 1
-    for demand in routable_demands:
-        search_space_size *= len(candidate_lists[demand.id])
+    deadline = compute_deadline(time_limit_s)
+    deadline_hit: List[bool] = []
 
     if search_space_size <= max_exact_combinations:
         search_method = "EXACT_ENUMERATION"
         best_assignment, best_eval, evaluated = _exact_enumeration(
             routable_demands, demand_graphs, demand_required_waypoints, link_map, candidate_lists, network,
+            deadline=deadline, deadline_hit=deadline_hit,
         )
-        proven_optimal = True
     else:
         search_method = "GREEDY_WPO"
         debug.append(
@@ -215,8 +316,21 @@ def optimize_waypoints(
         )
         best_assignment, best_eval, evaluated = _greedy_wpo(
             routable_demands, demand_graphs, demand_required_waypoints, link_map, candidate_lists, network,
-            baseline_eval,
+            baseline_eval, deadline=deadline, deadline_hit=deadline_hit,
         )
+
+    hit_deadline = bool(deadline_hit)
+    if hit_deadline:
+        status = "TIME_LIMIT"
+        proven_optimal = False
+        debug.append(
+            f"Optimization stopped at the {time_limit_s:g}s time limit — reporting the best assignment found so far."
+        )
+    elif search_method == "EXACT_ENUMERATION":
+        status = "OPTIMAL"
+        proven_optimal = True
+    else:
+        status = "FEASIBLE"
         proven_optimal = False
 
     if best_eval.unreachable_demand_ids:
@@ -231,15 +345,16 @@ def optimize_waypoints(
     ]
 
     runtime_ms = round((time.time() - start) * 1000.0, 2)
-    message = (
-        "Optimal waypoint assignment within the configured candidate space."
-        if proven_optimal else
-        "Heuristic waypoint assignment (GreedyWPO) — not proven optimal."
-    )
+    if hit_deadline:
+        message = "Time limit reached — best waypoint assignment found so far. Not proven optimal."
+    elif proven_optimal:
+        message = "Optimal waypoint assignment within the configured candidate space."
+    else:
+        message = "Heuristic waypoint assignment (GreedyWPO) — not proven optimal."
 
     return OptimizationResult(
         mode="WAYPOINT_OPTIMIZATION",
-        status="OPTIMAL" if proven_optimal else "FEASIBLE",
+        status=status,
         objectiveValue=round(best_eval.mlu, 6),
         mlu=round(best_eval.mlu, 6),
         linkLoads={k: round(v, 6) for k, v in best_eval.link_loads.items()},
@@ -299,6 +414,8 @@ def _exact_enumeration(
     candidate_lists: Dict[str, List[Optional[str]]],
     network: NetworkInput,
     evaluate_fn: Optional[Callable[[WaypointAssignment], WaypointEvaluationResult]] = None,
+    deadline: Optional[float] = None,
+    deadline_hit: Optional[List[bool]] = None,
 ) -> Tuple[WaypointAssignment, WaypointEvaluationResult, int]:
     """Genuinely exhaustive search over the Cartesian product of every
     demand's own candidate list. Deterministic: `itertools.product` iterates
@@ -318,6 +435,15 @@ def _exact_enumeration(
     network's own original weights (see `joint_optimizer.py`). Every existing
     caller omits it and gets byte-identical behavior to before this
     parameter existed.
+
+    `deadline`/`deadline_hit` (PR6, both optional, default `None`): if
+    `deadline` is given and is reached, the loop stops after whichever
+    candidate was in flight and appends `True` to `deadline_hit` (a mutable
+    out-parameter, so this function's own return signature — depended on by
+    existing callers, including a test that imports and calls this function
+    directly — never changes). At least one candidate is always evaluated
+    first, regardless of the deadline, so `best_assignment`/`best_eval` are
+    never `None` here even under a already-elapsed deadline.
     """
     if evaluate_fn is None:
         def evaluate_fn(assignment: WaypointAssignment) -> WaypointEvaluationResult:
@@ -333,6 +459,10 @@ def _exact_enumeration(
     evaluated = 0
 
     for combo in itertools.product(*candidate_sequences):
+        if evaluated > 0 and deadline_passed(deadline):
+            if deadline_hit is not None:
+                deadline_hit.append(True)
+            break
         assignment: WaypointAssignment = dict(zip(demand_ids, combo))
         result = evaluate_fn(assignment)
         evaluated += 1
@@ -353,6 +483,8 @@ def _greedy_wpo(
     network: NetworkInput,
     baseline_eval: WaypointEvaluationResult,
     evaluate_fn: Optional[Callable[[WaypointAssignment], WaypointEvaluationResult]] = None,
+    deadline: Optional[float] = None,
+    deadline_hit: Optional[List[bool]] = None,
 ) -> Tuple[WaypointAssignment, WaypointEvaluationResult, int]:
     """[Parham21] Algorithm 3 (`GreedyWPO`), followed as written:
 
@@ -374,6 +506,12 @@ def _greedy_wpo(
 
     `evaluate_fn`: see `_exact_enumeration`'s docstring — the same reuse
     seam, used identically by `joint_optimizer.py`.
+
+    `deadline`/`deadline_hit` (PR6): same contract as `_exact_enumeration`
+    — checked once per candidate waypoint tried; if reached, the current
+    demand's already-best-found choice (if any) is kept and the remaining
+    demands are left at their prior assignment (`None` unless already
+    decided in an earlier round of this same call).
     """
     if evaluate_fn is None:
         def evaluate_fn(assignment: WaypointAssignment) -> WaypointEvaluationResult:
@@ -388,7 +526,10 @@ def _greedy_wpo(
     ordered_demands = sorted(demands, key=lambda d: (-d.amount, d.id))
 
     current_eval = baseline_eval
+    stopped_early = False
     for demand in ordered_demands:
+        if stopped_early:
+            break
         best_choice: Optional[str] = None
         best_mlu = current_eval.mlu
         best_eval_for_step = current_eval
@@ -396,6 +537,9 @@ def _greedy_wpo(
         for candidate in candidate_lists[demand.id]:
             if candidate is None:
                 continue  # None is exactly the current baseline — already scored.
+            if deadline_passed(deadline):
+                stopped_early = True
+                break
             trial: WaypointAssignment = dict(assignment)
             trial[demand.id] = candidate
             trial_eval = evaluate_fn(trial)
@@ -407,5 +551,8 @@ def _greedy_wpo(
 
         assignment[demand.id] = best_choice
         current_eval = best_eval_for_step
+
+    if stopped_early and deadline_hit is not None:
+        deadline_hit.append(True)
 
     return assignment, current_eval, evaluated

@@ -337,10 +337,10 @@ Run `node validate.js` inside `sample-json/` to validate all files against the s
 
 - ✅ ECMP — Equal-Cost Multi-Path routing with uniform traffic splitting
 - ✅ Distance Vector — Bellman-Ford shortest-path routing with routing table generation
+- ✅ Segment Routing — ECMP-within-segments routing (Sprint 2, see below)
 
 **Planned**
 
-- Segment Routing
 - Custom traffic splitting
 
 ---
@@ -422,9 +422,38 @@ These are intentional scope decisions for a university course prototype, not bug
 | Locked fields | `lockedFields` are enforced in the UI: locked nodes/links cannot be dragged or deleted; locked weights/capacities are read-only; locked algorithm selection is disabled. Handler-level guards also block keyboard shortcuts. |
 | Attempt integrity | `maxAttempts` is enforced in-memory. A student can bypass it by reloading the page. |
 | Grading | Grading calls `POST /grade` on the backend first; falls back to client-side if the backend is unavailable. Expected answers remain visible in the assignment JSON export — not suitable for high-stakes assessments. |
-| Segment Routing | Stub only — returns empty results. Planned for a future sprint. |
+| Segment Routing | Implemented as ECMP-within-segments (Sprint 2, PR0). Full RSVP-TE / SR-TE style explicit tunnels are out of scope. |
 | Concurrency | The FastAPI backend is single-worker with no connection pooling. Not suitable for classroom-scale simultaneous users. |
 | DV convergence | Distance Vector runs to full convergence synchronously. Async Bellman-Ford with failure simulation is not implemented. |
+
+---
+
+## Sprint 2 — Optimization Lab
+
+Sprint 2 adds a second, opt-in workflow stage — the **Optimization Lab** — reachable from the Choose Algorithm screen after a network and traffic demands are configured. It lets a student run four traffic-engineering optimizers against the same topology and compare them against the network's own already-simulated baseline. Full technical detail lives in [`docs/research/sprint2-mip-architecture-analysis.md`](docs/research/sprint2-mip-architecture-analysis.md); this section is the short, student/instructor-facing summary.
+
+**The four modes**
+
+| Mode | What it does | How it searches |
+|---|---|---|
+| **OPT** | Unrestricted optimum — the theoretical best possible link utilization if traffic could be split arbitrarily, ignoring how any real routing algorithm actually forwards packets | Linear program, solved exactly by the CBC solver (PuLP). Not a combinatorial search — there is no "search space" or "candidates evaluated" for OPT. |
+| **WPO** (Waypoint Optimization) | Finds a single intermediate waypoint node per demand that reduces the maximum link utilization (MLU) versus the baseline | Exact enumeration of all waypoint combinations, or a greedy heuristic when the exact search space exceeds the configured budget |
+| **LWO** (Link Weight Optimization) | Reassigns integer link weights within a configurable range to reduce MLU | Same exact-vs-heuristic split, over all weight assignments in the configured range |
+| **Joint** | Optimizes waypoints and weights together | Exact joint enumeration when small enough, otherwise an alternating WPO/LWO heuristic that iterates until convergence or a round limit |
+
+**Exact search vs. heuristic — and why it matters educationally.** WPO/LWO/Joint each have a true combinatorial search space (e.g., for LWO, `(number of weight values)^(number of optimizable links)`). If that space fits inside the configured search budget, the Lab performs an **exact enumeration** and can prove the result is optimal (`provenOptimal: true`). If it doesn't fit, the Lab automatically falls back to a fast **heuristic** and is explicit that the result is only the best the heuristic found — not proven optimal. This lets a student directly observe the classic combinatorial-explosion trade-off: as a topology grows, the exact search space grows exponentially, and at some point no realistic budget can cover it.
+
+**Search budget.** `maxExactCombinations` controls how large a search space is still solved exactly. It defaults to **50,000** and is user-adjustable in the Lab's Optimization Settings panel via three named presets — **Fast** (10,000), **Default** (50,000), **Deep** (250,000) — or a **Custom** value. A search-space preview is shown before running WPO/LWO/Joint (e.g. "Waypoint search space: 12,500 combinations") together with a prediction of whether the current budget permits exact search, so the trade-off is visible before committing to a run. Raising the budget only ever changes whether a given search *can* be solved exactly — it never speeds anything up on its own, and the Lab never promises an exact search will be fast just because it fits inside the budget. A backend safety cap (default 2,000,000, overridable via the `OPTIMIZATION_MAX_EXACT_COMBINATIONS_CAP` environment variable) rejects unreasonably large exact-search requests regardless of what a student sets in the UI.
+
+**Timeout.** Every optimization run carries a wall-clock time limit (`timeLimitSeconds`, default 30s, adjustable 1-300s in Advanced Settings). If a search is still running when the deadline hits, it returns the best result found so far with a clean `TIME_LIMIT` status — never mislabeled as optimal.
+
+**Weight range.** LWO and Joint search integer link weights within a configurable `[minWeight, maxWeight]` range (default 1-5). Widening the range grows the search space — the preview updates live. A result proven optimal is only optimal *within that configured range*, not over all conceivable real-valued weights; the Lab states this explicitly next to any "Proven optimal" badge for LWO/Joint.
+
+**Reading a result card.** Every result shows Method, Runtime, and (for WPO/LWO/Joint) Search space size, Candidates evaluated, and Proven optimal — plus Solver for OPT, Weight range for LWO/Joint, and Iterations/Convergence reason for Joint's heuristic mode. Two badges summarize a result at a glance without relying on color alone: an outcome badge (**PROVEN OPTIMAL** / **BEST FOUND** / **TIME LIMIT**) and a method badge (**EXACT SEARCH** / **HEURISTIC**).
+
+**Congestion-free interpretation.** OPT's own result is the scientific reference point: `OPT.mlu ≤ 1` means congestion-free routing is theoretically possible on this topology (though a specific algorithm like ECMP may still congest it); `OPT.mlu > 1` means congestion is structurally unavoidable no matter how traffic is routed — only added capacity or reduced demand can fix it. A solver-reported `INFEASIBLE` is a separate condition (no valid routing exists at all) and is never presented as either of the above.
+
+**Session-only experiment history.** The Lab keeps a small, in-memory table of every run this session (mode, budget, method, runtime, MLU, proven-optimal) so a student can compare, e.g., a Fast-budget run against a Deep-budget run on the same topology. It is intentionally not saved anywhere and clears on logout/refresh.
 
 ---
 

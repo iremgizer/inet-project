@@ -84,4 +84,65 @@ export interface OptimizeRequest {
   maxExactCombinations?: number;
   maxIterations?: number;
   epsilon?: number;
+  /** PR6 §9 — wall-clock budget in seconds. Backend default/validated range
+   * is 1-300s; the Lab's own default matches (see optimizationSettings.ts). */
+  timeLimitSeconds?: number;
+}
+
+// ── PR6 — search-space preview (§3) ─────────────────────────────────────────
+
+export interface SearchSpaceEstimateRequest {
+  network: NetworkInput;
+  algorithmConfig: AlgorithmConfig;
+  mode: BackendOptimizeMode;
+  minWeight?: number;
+  maxWeight?: number;
+}
+
+export interface SearchSpaceEstimate {
+  mode: BackendOptimizeMode;
+  searchSpaceSize: number | null;
+  error?: string | null;
+  // WPO
+  routableDemandCount?: number | null;
+  candidateCountByDemand?: Record<string, number> | null;
+  // LWO
+  optimizableLinkCount?: number | null;
+  weightDomainSize?: number | null;
+  minWeight?: number | null;
+  maxWeight?: number | null;
+  // JOINT
+  weightSearchSpace?: number | null;
+  waypointSearchSpace?: number | null;
+}
+
+// ── PR6 §15 — session-only experiment history (never persisted) ────────────
+
+export interface OptimizationHistoryEntry {
+  id: string;
+  mode: BackendOptimizeMode;
+  budget: number;
+  searchMethod: SearchMethod | null;
+  runtimeMs: number;
+  mlu: number;
+  provenOptimal: boolean | null;
+  status: OptimizationStatus;
+  timestamp: number;
+}
+
+// ── PR6 — one cached Optimization Lab run, result + the settings that
+//    actually produced it (see OptimizationCard's "weight range used"). ───
+// `settings` is typed structurally (not imported from
+// utils/optimizationSettings.ts, to avoid a types -> utils dependency
+// direction) but is exactly OptimizationSettings' own shape — the two are
+// interchangeable by TypeScript's structural typing, so there is nothing to
+// keep "in sync": any value satisfying one satisfies the other.
+export interface OptimizationRunRecord {
+  result: OptimizationResult;
+  settings: {
+    maxExactCombinations: number;
+    minWeight: number;
+    maxWeight: number;
+    timeLimitSeconds: number;
+  };
 }

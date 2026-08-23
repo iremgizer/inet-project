@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Network, Waypoints, GitBranch, BarChart3, CheckCircle2, BookOpen, Clock, GraduationCap, Target, ChevronLeft, ChevronRight, LogOut } from "lucide-react";
+import { Network, Waypoints, GitBranch, BarChart3, CheckCircle2, BookOpen, Clock, GraduationCap, Target, ChevronLeft, ChevronRight, LogOut, FlaskConical } from "lucide-react";
 import ReactFlowCanvas from "./ReactFlowCanvas";
 import MetricsPanel from "./MetricsPanel";
 import RoutingTablePanel from "./RoutingTablePanel";
@@ -30,9 +30,11 @@ import { loadAssignedWorks, saveAssignedWorks, loadCurrentStudentId, saveCurrent
 import { exportAssignmentPdf } from "../utils/pdfExport";
 import { simulateNetwork, listSavedRuns, getSavedRun, deleteSavedRun, listAssignments, saveAssignment, getAssignment, gradeAttempt } from "../api/simulationApi";
 import { runOptimization } from "../api/optimizationApi";
-import { OptimizationLabMode, OptimizationResult } from "../types/optimization";
+import { OptimizationHistoryEntry, OptimizationLabMode, OptimizationRunRecord } from "../types/optimization";
 import { projectOptimizationResult } from "../utils/optimizationProjection";
 import { buildOptimizationHighlightEvent } from "../utils/optimizationHighlight";
+import { resolveVisualizationOwner } from "../utils/optimizationVisualState";
+import { OptimizationSettings } from "../utils/optimizationSettings";
 import { triangleTemplate } from "../utils/topologyTemplates";
 import { applyAutoLayout } from "../utils/generatedTopologies";
 import {
@@ -138,19 +140,27 @@ const WorkflowManager: React.FC = () => {
   const [baselineResult, setBaselineResult] = useState<SimulationResult | null>(null);
   const [comparisonMode, setComparisonMode] = useState<ComparisonMode>("after");
 
-  // ── Optimization Lab (Sprint 2, PR5) ────────────────────────────────────
+  // ── Optimization Lab (Sprint 2, PR5, extended PR6) ──────────────────────
   // Results are transient (PR5 §12): cached in memory only, keyed per mode
   // so each of the four optimizers is launched independently and its own
   // result survives switching between cards — never persisted, never part
   // of topology JSON, cleared whenever a recommendation is actually applied
   // (see handleApplyOptimization) since the network they were computed
-  // against no longer matches.
-  const [optimizationResults, setOptimizationResults] = useState<
-    Partial<Record<Exclude<OptimizationLabMode, "CURRENT">, OptimizationResult>>
+  // against no longer matches. PR6: each cached entry also keeps the
+  // OptimizationSettings that actually produced it (budget/weight-range/
+  // timeout), distinct from whatever the settings panel currently reads —
+  // needed so a card can honestly report "weight range used: 1-7" even
+  // after a student changes the panel to 1-5 without re-running.
+  const [optimizationRunRecords, setOptimizationRunRecords] = useState<
+    Partial<Record<Exclude<OptimizationLabMode, "CURRENT">, OptimizationRunRecord>>
   >({});
   const [optimizationRunning, setOptimizationRunning] = useState<Set<Exclude<OptimizationLabMode, "CURRENT">>>(
     () => new Set()
   );
+  // PR6 §15 — session-only experiment history (never persisted to MongoDB
+  // or anywhere else; cleared on every full page reload, same as every
+  // other piece of Optimization Lab state).
+  const [optimizationHistory, setOptimizationHistory] = useState<OptimizationHistoryEntry[]>([]);
   // Which card currently drives the canvas ("View on graph") — highlights
   // that mode's recommended waypoints/weight-changes/paths via the same
   // trace-event highlighting mechanism trace replay already uses (see
@@ -159,7 +169,9 @@ const WorkflowManager: React.FC = () => {
   const [selectedOptimizationMode, setSelectedOptimizationMode] = useState<OptimizationLabMode | null>(null);
   // Which card is being compared against the current simulation result —
   // independent of `selectedOptimizationMode` (a student can view one
-  // mode's paths while comparing a different mode's numbers).
+  // mode's paths while comparing a different mode's numbers). PR6 §18: this
+  // taking precedence over `selectedOptimizationMode` for canvas ownership
+  // is now an explicit, named rule — see utils/optimizationVisualState.ts.
   const [comparingOptimizationMode, setComparingOptimizationMode] = useState<OptimizationLabMode | null>(null);
   // The Lab's own before/after/difference toggle — deliberately separate
   // from the step-4 `comparisonMode` above (switching one must never
@@ -269,16 +281,25 @@ const WorkflowManager: React.FC = () => {
   // the baseline's own trace, exactly like "after" replays current's.
   const baseDisplayedResult = comparisonMode === "before" && baselineResult ? baselineResult : simulationResult;
 
-  // ── Optimization Lab (PR5) — canvas data sourcing ─────────────────────
+  // ── Optimization Lab (PR5, overlay conflict fixed PR6 §18) — canvas data
+  //    sourcing ────────────────────────────────────────────────────────
   // Reuses the exact same `linkResults`/`pathResults`/`currentTraceEvent`/
   // `comparisonByLink` props ReactFlowCanvas already consumes for every
   // other step (PR5 §9: "never create another graph viewer") — only *which*
-  // SimulationResult-shaped object feeds them changes while the lab is open
-  // with a card selected or being compared.
-  const isOptLabView = currentStep === 5 && !!selectedOptimizationMode;
+  // SimulationResult-shaped object feeds them changes while the lab is open.
+  // `resolveVisualizationOwner` is the single, explicit source of truth for
+  // "does the selected card's highlight, or the compared card's difference
+  // heatmap, own the canvas right now" — the two can no longer both apply
+  // at once (PR5's own documented known limitation).
+  const visualizationOwner = currentStep === 5
+    ? resolveVisualizationOwner(selectedOptimizationMode, comparingOptimizationMode)
+    : "none";
+  const isOptLabView = visualizationOwner === "selected";
+  const isOptComparingView = visualizationOwner === "comparison";
+
   const optSelectedResult =
     selectedOptimizationMode && selectedOptimizationMode !== "CURRENT"
-      ? optimizationResults[selectedOptimizationMode] ?? null
+      ? optimizationRunRecords[selectedOptimizationMode]?.result ?? null
       : null;
   const optProjection = React.useMemo(() => {
     if (!optSelectedResult) return null;
@@ -291,7 +312,7 @@ const WorkflowManager: React.FC = () => {
 
   const optComparingResult =
     comparingOptimizationMode && comparingOptimizationMode !== "CURRENT"
-      ? optimizationResults[comparingOptimizationMode] ?? null
+      ? optimizationRunRecords[comparingOptimizationMode]?.result ?? null
       : null;
   const optComparingProjection = React.useMemo(() => {
     if (!optComparingResult) return null;
@@ -302,8 +323,6 @@ const WorkflowManager: React.FC = () => {
     return buildComparison(simulationResult, optComparingProjection);
   }, [simulationResult, optComparingProjection]);
 
-  const isOptComparingView = currentStep === 5 && !!comparingOptimizationMode;
-
   const displayedResult = isOptComparingView
     ? (optComparisonMode === "before" ? simulationResult : optComparingProjection)
     : isOptLabView
@@ -311,12 +330,17 @@ const WorkflowManager: React.FC = () => {
     : baseDisplayedResult;
 
   const traceEvents = currentStep === 5 ? [] : displayedResult?.traceEvents ?? [];
-  const currentTraceEvent = isOptLabView
+  // Comparison owns the canvas => no highlight overlay at all, even if a
+  // card is also selected (PR6 §18's chosen precedence, documented in
+  // utils/optimizationVisualState.ts).
+  const currentTraceEvent = isOptComparingView
+    ? null
+    : isOptLabView
     ? optHighlightEvent
     : isTraceMode
     ? traceEvents[activeStepIndex] ?? null
     : null;
-  const canvasIsTraceMode = isOptLabView ? !!currentTraceEvent : isTraceMode;
+  const canvasIsTraceMode = (isOptLabView || isOptComparingView) ? !!currentTraceEvent : isTraceMode;
   const linkResults = displayedResult?.linkResults ?? [];
   const pathResults = displayedResult?.pathResults ?? [];
 
@@ -427,7 +451,7 @@ const WorkflowManager: React.FC = () => {
     setSelectedType(null);
     setSelectedId(null);
     setSimulationResult(null);
-    setBaselineResult(null); setOptimizationResults({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — node delete
+    setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — node delete
   }, [toast]);
 
   const handleDeleteLink = useCallback((id: string) => {
@@ -436,7 +460,7 @@ const WorkflowManager: React.FC = () => {
     setSelectedType(null);
     setSelectedId(null);
     setSimulationResult(null);
-    setBaselineResult(null); setOptimizationResults({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — permanent link delete
+    setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — permanent link delete
   }, [toast]);
 
   const handleAddLink = useCallback((source: string, target: string) => {
@@ -452,7 +476,7 @@ const WorkflowManager: React.FC = () => {
       links: [...prev.links, { id: makeId("link"), source, target, weight: 1, capacity: 10 }],
     }));
     setSimulationResult(null);
-    setBaselineResult(null); setOptimizationResults({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — permanent link add
+    setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — permanent link add
   }, [network.links, network.isDirected, toast]);
 
   const handleUpdateNode = useCallback((id: string, update: Partial<NodeInput>) => {
@@ -489,7 +513,7 @@ const WorkflowManager: React.FC = () => {
       demands: [...prev.demands, { ...partial, id: makeId("demand") }],
     }));
     setSimulationResult(null);
-    setBaselineResult(null); setOptimizationResults({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — demand add
+    setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — demand add
   }, [toast]);
 
   const handleDeleteDemand = useCallback((id: string) => {
@@ -511,13 +535,13 @@ const WorkflowManager: React.FC = () => {
         : prev.tePolicies,
     }));
     setSimulationResult(null);
-    setBaselineResult(null); setOptimizationResults({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — demand delete
+    setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — demand delete
   }, [toast]);
 
   const handleGenerateTopology = useCallback((net: NetworkInput) => {
     setNetwork(net);
     setSimulationResult(null);
-    setBaselineResult(null); setOptimizationResults({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — topology regeneration
+    setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit // structural edit (PR 6 comparison invalidation) — topology regeneration
     setSelectedType(null);
     setSelectedId(null);
     // A new topology invalidates any node/link ids referenced by per-demand
@@ -540,7 +564,7 @@ const WorkflowManager: React.FC = () => {
     setTeQuickSelectActive(false);
     setTeQuickPopupLinkId(null);
     setSimulationResult(null);
-    setBaselineResult(null); setOptimizationResults({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit
+    setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit
     setComparisonMode("after");
     setSelectedType(null);
     setSelectedId(null);
@@ -555,7 +579,8 @@ const WorkflowManager: React.FC = () => {
     setCurrentStep(0);
     setNetwork({ nodes: [], links: [], demands: [], topologyType: "custom", isDirected: false });
     setSimulationResult(null);
-    setBaselineResult(null); setOptimizationResults({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit
+    setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit
+    setOptimizationHistory([]); // full session reset — see handleLogout for the same treatment
     setComparisonMode("after");
     setLectureInsight(null);
     setSelectedType(null);
@@ -584,7 +609,8 @@ const WorkflowManager: React.FC = () => {
     setAppMode("lab");
     setNetwork({ nodes: [], links: [], demands: [], topologyType: "custom", isDirected: false });
     setSimulationResult(null);
-    setOptimizationResults({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null);
+    setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null);
+    setOptimizationHistory([]); // session-only (PR6 §15) — a fresh session starts with a clean log
     setLectureInsight(null);
     setSelectedType(null);
     setSelectedId(null);
@@ -1059,20 +1085,46 @@ const WorkflowManager: React.FC = () => {
     toast("Current result set as baseline.", "info");
   }, [simulationResult, toast]);
 
-  // ── Optimization Lab (Sprint 2, PR5) ────────────────────────────────────
+  // ── Optimization Lab (Sprint 2, PR5, extended PR6) ──────────────────────
   // Each mode is launched independently, on its own explicit "Run" click —
   // never auto-executed (PR5 §2). No fake data: every card's numbers come
-  // straight from a real POST /optimize call (PR5 §11).
-  const handleRunOptimization = useCallback(async (mode: Exclude<OptimizationLabMode, "CURRENT">) => {
+  // straight from a real POST /optimize call (PR5 §11). PR6: `settings`
+  // (search budget, weight range, timeout — see OptimizationSettingsPanel)
+  // is threaded straight into the request, and every completed run appends
+  // one row to the session-only experiment history (PR6 §15).
+  const handleRunOptimization = useCallback(async (
+    mode: Exclude<OptimizationLabMode, "CURRENT">,
+    settings: OptimizationSettings,
+  ) => {
     setOptimizationRunning((prev) => new Set(prev).add(mode));
     try {
-      const result = await runOptimization({ network, algorithmConfig, mode });
-      setOptimizationResults((prev) => ({ ...prev, [mode]: result }));
+      const result = await runOptimization({
+        network, algorithmConfig, mode,
+        maxExactCombinations: settings.maxExactCombinations,
+        minWeight: settings.minWeight,
+        maxWeight: settings.maxWeight,
+        timeLimitSeconds: settings.timeLimitSeconds,
+      });
+      setOptimizationRunRecords((prev) => ({ ...prev, [mode]: { result, settings } }));
+      setOptimizationHistory((prev) => [
+        ...prev,
+        {
+          id: makeId("opt-history"),
+          mode,
+          budget: settings.maxExactCombinations,
+          searchMethod: result.searchMethod ?? null,
+          runtimeMs: result.solverRuntime,
+          mlu: result.mlu,
+          provenOptimal: result.provenOptimal ?? null,
+          status: result.status,
+          timestamp: Date.now(),
+        },
+      ]);
       setSelectedOptimizationMode(mode);
-      const ok = result.status === "OPTIMAL" || result.status === "FEASIBLE";
+      const ok = result.status === "OPTIMAL" || result.status === "FEASIBLE" || result.status === "TIME_LIMIT";
       toast(
         ok ? `${mode} finished — MLU ${(result.mlu * 100).toFixed(1)}%.` : result.message,
-        ok ? "success" : "error"
+        result.status === "OPTIMAL" || result.status === "FEASIBLE" ? "success" : ok ? "info" : "error"
       );
     } catch (err) {
       toast((err as Error).message, "error");
@@ -1094,7 +1146,7 @@ const WorkflowManager: React.FC = () => {
   // only matter under ECMP, so applying it switches back. Structural edit,
   // same invalidation pattern as every other network mutation in this file.
   const handleApplyOptimization = useCallback((mode: Exclude<OptimizationLabMode, "CURRENT">) => {
-    const result = optimizationResults[mode];
+    const result = optimizationRunRecords[mode]?.result;
     if (!result) return;
 
     const weights = (mode === "LWO" || mode === "JOINT") ? result.recommendedWeights : null;
@@ -1125,12 +1177,12 @@ const WorkflowManager: React.FC = () => {
     // longer matches — clear rather than risk showing a stale card as if
     // it still described the current configuration.
     setSimulationResult(null);
-    setBaselineResult(null); setOptimizationResults({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit
-    setOptimizationResults({});
+    setBaselineResult(null);
+    setOptimizationRunRecords({});
     setSelectedOptimizationMode(null);
     setComparingOptimizationMode(null);
     toast(`Applied the ${mode} recommendation. Rerun the simulation to see the effect.`, "success");
-  }, [optimizationResults, toast]);
+  }, [optimizationRunRecords, toast]);
 
   // ── Saved runs ────────────────────────────────────────────────────────────
 
@@ -1354,7 +1406,7 @@ const WorkflowManager: React.FC = () => {
       // becomes its own baseline (PR 6), same as the first run of a session.
       setBaselineResult(run.simulationResult);
       setComparisonMode("after");
-      setOptimizationResults({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null);
+      setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null);
       setActiveStepIndex(0);
       setIsPlaying(false);
       setIsTraceMode(false);
@@ -1536,7 +1588,7 @@ const WorkflowManager: React.FC = () => {
             // Comparing results from two different algorithms isn't a
             // meaningful before/after (PR 6) — not the same "scenario"
             // changing, a different routing model entirely.
-            setBaselineResult(null); setOptimizationResults({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit
+            setBaselineResult(null); setOptimizationRunRecords({}); setSelectedOptimizationMode(null); setComparingOptimizationMode(null); // PR5: cached optimization results/selection invalidated by the same structural edit
           }}
           onThresholdChange={(v) =>
             setAlgorithmConfig((p) => ({ ...p, congestionThreshold: v }))
@@ -1581,11 +1633,12 @@ const WorkflowManager: React.FC = () => {
           network={network}
           algorithmConfig={algorithmConfig}
           currentSimulationResult={simulationResult}
-          optimizationResults={optimizationResults}
+          runRecords={optimizationRunRecords}
           runningModes={optimizationRunning}
           selectedMode={selectedOptimizationMode}
           comparingMode={comparingOptimizationMode}
           comparisonMode={optComparisonMode}
+          history={optimizationHistory}
           onComparisonModeChange={setOptComparisonMode}
           onBack={() => setCurrentStep(3)}
           onRun={handleRunOptimization}
@@ -1818,9 +1871,20 @@ const WorkflowManager: React.FC = () => {
 
         {appMode === "lab" && currentStep > 0 && (
           <nav className="stage-nav" aria-label="Workflow stages">
+            {/* PR6 §17 fix: the Optimization Lab (step 5) branches off from
+                Algorithm (step 3), not a 5th sequential stage — cluttering
+                the stepper with a literal 5th dot would misrepresent it as
+                a required, linear step. Instead, the stepper itself keeps
+                showing exactly the 4 stages it always has, computed against
+                an *effective* step (5 reads as "still at Algorithm" for
+                done/active purposes — Design/Traffic read done, Algorithm
+                reads active, Result reads neither), and a separate,
+                unambiguous "Optimization Lab" indicator appears alongside
+                it only while step 5 is actually open. */}
             {stages.map(({ step, label, icon: Icon, hint }) => {
-              const isDone   = currentStep > step;
-              const isActive = currentStep === step;
+              const effectiveStep = currentStep === 5 ? 3 : currentStep;
+              const isDone   = effectiveStep > step;
+              const isActive = effectiveStep === step;
               return (
                 <button
                   key={step}
@@ -1836,6 +1900,14 @@ const WorkflowManager: React.FC = () => {
                 </button>
               );
             })}
+            {currentStep === 5 && (
+              <span
+                className="stage-lab-indicator"
+                title="Optimization Lab — branching off from Algorithm. Your Design/Traffic/Algorithm work is unaffected."
+              >
+                <FlaskConical size={12} /> Optimization Lab
+              </span>
+            )}
           </nav>
         )}
 

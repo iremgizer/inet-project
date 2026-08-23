@@ -176,7 +176,61 @@ class OptimizeRequest(BaseModel):
     minWeight: int = 1
     maxWeight: int = 5
     # WPO/LWO/JOINT — each mode's own exact-vs-heuristic search-space guard.
+    # Default matches every optimizer's own DEFAULT_MAX_EXACT_COMBINATIONS
+    # (PR2/PR3/PR4) — see optimization_service.py for the separate, higher
+    # *hard* safety cap this is validated against (PR6 §11).
     maxExactCombinations: int = 50_000
     # JOINT only.
     maxIterations: int = 10
     epsilon: float = 1e-6
+    # PR6 §9 — a wall-clock budget applied to whichever search strategy is
+    # chosen (ignored by OPT's own LP solve in the sense that OPT already
+    # had its own, separate `time_limit_s` support since PR1; this field
+    # covers it too, uniformly). 30s default: comfortably above every
+    # measured teaching-scale runtime in this project's own benchmarks
+    # (docs/research/sprint2-mip-architecture-analysis.md's PR6 addendum)
+    # while still bounding a pathological request. Validated against a
+    # documented sane range in optimization_service.py, not here — Pydantic
+    # field validation runs before any topology-aware context exists to
+    # explain *why* a bound was chosen, so the actionable error message
+    # lives in the service layer instead.
+    timeLimitSeconds: float = 30.0
+
+
+class SearchSpaceEstimateRequest(BaseModel):
+    """PR6 §3 — the Optimization Lab's "search-space preview" request:
+    everything `OptimizeRequest` needs to *compute* a candidate-space size
+    for WPO/LWO/JOINT, without any of the fields that only matter once a
+    search actually runs (`maxExactCombinations`, `maxIterations`,
+    `epsilon`, `timeLimitSeconds`)."""
+    network: NetworkInput
+    algorithmConfig: AlgorithmConfig
+    mode: OptimizeMode
+    minWeight: int = 1
+    maxWeight: int = 5
+
+
+class SearchSpaceEstimate(BaseModel):
+    """Response for `POST /optimize/search-space`. Only the fields relevant
+    to `mode` are populated (PR6 §12: "do not show meaningless fields") —
+    e.g. `weightDomainSize`/`optimizableLinkCount` are `None` for WPO,
+    `candidateCountByDemand` is `None` for LWO. `searchSpaceSize` is `None`
+    only for `mode="OPT"`, which has no combinatorial search space at all
+    (a linear program, not enumeration — PR6 §4) — `error` explains why in
+    that case, matching the same "explain, don't just omit" convention
+    `OptimizationResult.message` already uses.
+    """
+    mode: OptimizeMode
+    searchSpaceSize: Optional[int] = None
+    error: Optional[str] = None
+    # WPO
+    routableDemandCount: Optional[int] = None
+    candidateCountByDemand: Optional[Dict[str, int]] = None
+    # LWO
+    optimizableLinkCount: Optional[int] = None
+    weightDomainSize: Optional[int] = None
+    minWeight: Optional[int] = None
+    maxWeight: Optional[int] = None
+    # JOINT
+    weightSearchSpace: Optional[int] = None
+    waypointSearchSpace: Optional[int] = None

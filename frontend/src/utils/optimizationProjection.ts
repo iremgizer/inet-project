@@ -87,10 +87,19 @@ export function projectOptimizationResult(
   const linkResults = projectLinkResults(result, network, congestionThreshold);
   const pathResults = projectPathResults(result, network);
   const congestedLinkCount = linkResults.filter((l) => l.isCongested).length;
-  // Best-effort, honestly-labeled aggregate: the sum of every demand's own
-  // amount, since OptimizationResult doesn't expose a structured per-demand
-  // "delivered" figure (only the free-text debugInfo notes an unreachable
-  // demand, if any — see each optimizer's own docstring).
+  // PR6 §19 audit: OptimizationResult has no structured per-demand
+  // "delivered" figure — only free-text debugInfo notes an unreachable
+  // demand, if any (see each optimizer's own docstring). Parsing that text
+  // to subtract unreachable demands would be fragile (debugInfo is
+  // documented as human-readable, not a machine contract, across every
+  // optimizer) and not meaningfully more "exact" than this honest
+  // approximation. Kept as sum-of-demand-amounts, unchanged from PR5 —
+  // confirmed this field is never actually rendered anywhere in the
+  // Optimization Lab UI (only the real Simulation Studio's MetricsPanel/
+  // ResultSummaryPanel read `totalDeliveredTraffic`, and neither is reachable
+  // from step 5), so the "false precision" risk PR6 §19 asks about does not
+  // arise in practice — this comment (and the PR6 architecture-doc addendum)
+  // documents the audit conclusion, not just the code.
   const totalDeliveredTraffic = network.demands.reduce((sum, d) => sum + d.amount, 0);
 
   return {

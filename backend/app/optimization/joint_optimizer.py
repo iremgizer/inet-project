@@ -58,9 +58,11 @@ from __future__ import annotations
 
 import itertools
 import time
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from app.models import AlgorithmConfig, NetworkInput, TrafficDemandInput
+from app.optimization.deadline import compute_deadline, deadline_passed
 from app.optimization.joint_evaluator import JointEvaluationResult, evaluate_joint_assignment
 from app.optimization.lwo_evaluator import WeightAssignment
 from app.optimization.lwo_optimizer import (
@@ -68,6 +70,7 @@ from app.optimization.lwo_optimizer import (
     DEFAULT_MIN_WEIGHT,
     _exact_enumeration as _lwo_exact_enumeration,
     _heuristic_lwo,
+    estimate_link_weight_search_space,
 )
 from app.optimization.models import OptimizationResult, WaypointAssignmentEntry
 from app.optimization.waypoint_evaluator import WaypointAssignment
@@ -75,6 +78,7 @@ from app.optimization.waypoint_optimizer import (
     _candidate_waypoints_for_demand,
     _exact_enumeration as _wpo_exact_enumeration,
     _greedy_wpo,
+    estimate_waypoint_search_space,
 )
 from app.utils.graph_builder import GraphBuilder
 from app.utils.routing_helpers import sanitize_segments
@@ -98,6 +102,41 @@ DEFAULT_EPSILON = 1e-6
 _MLU_IMPROVEMENT_EPSILON = 1e-9
 
 
+@dataclass
+class JointSearchSpaceEstimate:
+    """PR6 — a preview of what a real `optimize_joint` call would search,
+    without actually running it: `weightSearchSpace x waypointSearchSpace`,
+    computed via the exact same `estimate_link_weight_search_space`/
+    `estimate_waypoint_search_space` functions the individual LWO/WPO modes
+    use for their own previews — so Joint's own preview can never drift from
+    either half's real computation, and a student can directly see *why*
+    Joint's combined space grows faster than either alone.
+    """
+    searchSpaceSize: int
+    weightSearchSpace: int
+    waypointSearchSpace: int
+    error: Optional[str] = None
+
+
+def estimate_joint_search_space(
+    network: NetworkInput,
+    config: AlgorithmConfig,
+    min_weight: int = DEFAULT_MIN_WEIGHT,
+    max_weight: int = DEFAULT_MAX_WEIGHT,
+) -> JointSearchSpaceEstimate:
+    weight_estimate = estimate_link_weight_search_space(network, min_weight, max_weight)
+    if weight_estimate.error:
+        return JointSearchSpaceEstimate(searchSpaceSize=0, weightSearchSpace=0, waypointSearchSpace=0, error=weight_estimate.error)
+    waypoint_estimate = estimate_waypoint_search_space(network, config)
+    if waypoint_estimate.error:
+        return JointSearchSpaceEstimate(searchSpaceSize=0, weightSearchSpace=0, waypointSearchSpace=0, error=waypoint_estimate.error)
+    return JointSearchSpaceEstimate(
+        searchSpaceSize=weight_estimate.searchSpaceSize * waypoint_estimate.searchSpaceSize,
+        weightSearchSpace=weight_estimate.searchSpaceSize,
+        waypointSearchSpace=waypoint_estimate.searchSpaceSize,
+    )
+
+
 def optimize_joint(
     network: NetworkInput,
     config: AlgorithmConfig,
@@ -106,6 +145,7 @@ def optimize_joint(
     max_exact_combinations: int = DEFAULT_MAX_EXACT_COMBINATIONS,
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
     epsilon: float = DEFAULT_EPSILON,
+    time_limit_s: Optional[float] = None,
 ) -> OptimizationResult:
     """Recommends a joint (link-weight, waypoint) assignment minimizing
     network-wide MLU. Pure function of `network`/`config`: no trace events,
@@ -115,6 +155,16 @@ def optimize_joint(
     network's actual current link weights and no additional waypoints
     (`None` per demand — the same "current configuration" WPO/LWO
     individually start from) — never a random start.
+
+    `time_limit_s` (PR6, additive, default `None` = unlimited): applies to
+    the *entire* search — both `EXACT_JOINT_ENUMERATION`'s own loop and, for
+    `JOINT_ALTERNATING`, checked once per round in addition to each round's
+    own LWO/WPO sub-search independently honoring it (see
+    `waypoint_optimizer`/`lwo_optimizer`'s own docstrings for that per-step
+    contract). An interrupted search — exact or alternating — is reported as
+    `status="TIME_LIMIT"`, never `"OPTIMAL"`/plain `"FEASIBLE"`. Every
+    existing caller (all of PR1-5's test suite) omits this parameter and is
+    completely unaffected.
 
     Never regresses: the best assignment found by whichever search runs is
     always compared against this same starting configuration, and the
@@ -221,15 +271,22 @@ def optimize_joint(
         waypoint_search_space *= len(candidate_lists[demand.id])
     joint_search_space_size = weight_search_space * waypoint_search_space
 
+    deadline = compute_deadline(time_limit_s)
+    deadline_hit: List[bool] = []
+
     iterations: Optional[int] = None
     if joint_search_space_size <= max_exact_combinations:
         search_method = "EXACT_JOINT_ENUMERATION"
         found_weights, found_waypoints, found_eval, evaluated = _exact_joint_enumeration(
             routable_demands, base_graph, link_map, config.tePolicies, network,
             optimizable_link_ids, baseline_weights, weight_domain, candidate_lists,
+            deadline=deadline, deadline_hit=deadline_hit,
         )
-        proven_optimal = True
-        convergence_reason = "Exhaustive search over the combined candidate space completed."
+        convergence_reason = (
+            "Time limit reached before the combined candidate space was fully searched."
+            if deadline_hit else
+            "Exhaustive search over the combined candidate space completed."
+        )
     else:
         search_method = "JOINT_ALTERNATING"
         debug.append(
@@ -246,8 +303,11 @@ def optimize_joint(
             optimizable_link_ids, baseline_weights, weight_domain, candidate_lists,
             demand_graphs, demand_required_waypoints, baseline_eval,
             max_iterations, epsilon, max_exact_combinations,
+            deadline=deadline, deadline_hit=deadline_hit,
         )
-        proven_optimal = False
+
+    hit_deadline = bool(deadline_hit)
+    proven_optimal = (search_method == "EXACT_JOINT_ENUMERATION") and not hit_deadline
 
     if found_eval.unreachable_demand_ids:
         debug.append(
@@ -270,16 +330,25 @@ def optimize_joint(
         for demand in routable_demands
     ]
 
+    if hit_deadline:
+        status = "TIME_LIMIT"
+        debug.append(
+            f"Optimization stopped at the {time_limit_s:g}s time limit — reporting the best joint "
+            "assignment found so far."
+        )
+        message = "Time limit reached — best joint assignment found so far. Not proven optimal."
+    elif proven_optimal:
+        status = "OPTIMAL"
+        message = "Optimal joint assignment within the configured weight range and candidate space."
+    else:
+        status = "FEASIBLE"
+        message = "Heuristic joint assignment (alternating LWO/WPO) — not proven optimal."
+
     runtime_ms = round((time.time() - start) * 1000.0, 2)
-    message = (
-        "Optimal joint assignment within the configured weight range and candidate space."
-        if proven_optimal else
-        "Heuristic joint assignment (alternating LWO/WPO) — not proven optimal."
-    )
 
     return OptimizationResult(
         mode="JOINT_OPTIMIZATION",
-        status="OPTIMAL" if proven_optimal else "FEASIBLE",
+        status=status,
         objectiveValue=round(best_eval.mlu, 6),
         mlu=round(best_eval.mlu, 6),
         linkLoads={k: round(v, 6) for k, v in best_eval.link_loads.items()},
@@ -312,6 +381,8 @@ def _exact_joint_enumeration(
     baseline_weights: WeightAssignment,
     weight_domain: List[int],
     candidate_lists: Dict[str, List[Optional[str]]],
+    deadline: Optional[float] = None,
+    deadline_hit: Optional[List[bool]] = None,
 ) -> Tuple[WeightAssignment, WaypointAssignment, JointEvaluationResult, int]:
     """Genuinely exhaustive search over `weight_combinations x
     waypoint_combinations` simultaneously — the one piece of new (but
@@ -321,6 +392,10 @@ def _exact_joint_enumeration(
     (matching LWO's own convention); waypoint combinations iterate over
     `demands`' own order and each demand's own sorted candidate list
     (matching WPO's own convention). "First encountered wins" on ties.
+
+    `deadline`/`deadline_hit` (PR6): same contract as
+    `waypoint_optimizer._exact_enumeration` — checked once per (weight,
+    waypoint) combination, at least one always evaluated first.
     """
     demand_ids = [d.id for d in demands]
     waypoint_combos = list(itertools.product(*[candidate_lists[did] for did in demand_ids]))
@@ -329,12 +404,18 @@ def _exact_joint_enumeration(
     best_waypoints: Optional[WaypointAssignment] = None
     best_eval: Optional[JointEvaluationResult] = None
     evaluated = 0
+    stopped_early = False
 
     for w_combo in itertools.product(weight_domain, repeat=len(optimizable_link_ids)):
+        if stopped_early:
+            break
         weights: WeightAssignment = dict(baseline_weights)
         weights.update(zip(optimizable_link_ids, w_combo))
 
         for wp_combo in waypoint_combos:
+            if evaluated > 0 and deadline_passed(deadline):
+                stopped_early = True
+                break
             waypoints: WaypointAssignment = dict(zip(demand_ids, wp_combo))
             result = evaluate_joint_assignment(network, demands, base_graph, link_map, te_policies, weights, waypoints)
             evaluated += 1
@@ -342,6 +423,9 @@ def _exact_joint_enumeration(
                 best_eval = result
                 best_weights = weights
                 best_waypoints = waypoints
+
+    if stopped_early and deadline_hit is not None:
+        deadline_hit.append(True)
 
     assert best_weights is not None and best_waypoints is not None and best_eval is not None
     return best_weights, best_waypoints, best_eval, evaluated
@@ -363,6 +447,8 @@ def _joint_alternating(
     max_iterations: int,
     epsilon: float,
     max_exact_combinations: int,
+    deadline: Optional[float] = None,
+    deadline_hit: Optional[List[bool]] = None,
 ) -> Tuple[WeightAssignment, WaypointAssignment, JointEvaluationResult, int, int, str]:
     """Generalizes [Parham21]'s `JOINT-Heur` (Algorithm 2) into an iterate-
     to-convergence loop: each round, first re-optimize weights holding the
@@ -378,6 +464,16 @@ def _joint_alternating(
     search by comparing *its own* sub-space size against
     `max_exact_combinations` — identical logic to `optimize_link_weights`/
     `optimize_waypoints` themselves, just parameterized per call.
+
+    `deadline`/`deadline_hit` (PR6): checked once at the START of each round
+    (coarse-grained — stop before beginning a new round at all once time is
+    up) *and* forwarded into each round's own LWO/WPO sub-search (fine-
+    grained — stop mid-round too). Either one setting `deadline_hit` is
+    enough to report `TIME_LIMIT` to the caller; a round already in
+    progress when the deadline hits still returns its own best-so-far
+    weights/waypoints (never a regression — see each sub-search's own
+    contract), which this loop then keeps as `current_weights`/
+    `current_waypoints` before returning.
     """
     demand_ids = [d.id for d in demands]
     current_weights: WeightAssignment = dict(baseline_weights)
@@ -394,6 +490,11 @@ def _joint_alternating(
     convergence_reason = f"Maximum iterations ({max_iterations}) reached."
 
     for iteration in range(1, max_iterations + 1):
+        if deadline_passed(deadline):
+            convergence_reason = f"Time limit reached after {iteration - 1} completed iteration(s)."
+            if deadline_hit is not None:
+                deadline_hit.append(True)
+            break
         iterations_done = iteration
 
         # ── Step 1: optimize weights, waypoints held fixed at current_waypoints. ──
@@ -402,17 +503,18 @@ def _joint_alternating(
         def lwo_evaluate_fn(weights: WeightAssignment, _fixed=fixed_waypoints) -> JointEvaluationResult:
             return evaluate_joint_assignment(network, demands, base_graph, link_map, te_policies, weights, _fixed)
 
+        step_deadline_hit: List[bool] = []
         if weight_search_space <= max_exact_combinations:
             new_weights, new_weights_eval, n1 = _lwo_exact_enumeration(
                 demands, base_graph, link_map, te_policies, network,
                 optimizable_link_ids, current_weights, weight_domain,
-                evaluate_fn=lwo_evaluate_fn,
+                evaluate_fn=lwo_evaluate_fn, deadline=deadline, deadline_hit=step_deadline_hit,
             )
         else:
             new_weights, new_weights_eval, n1 = _heuristic_lwo(
                 demands, base_graph, link_map, te_policies, network,
                 optimizable_link_ids, current_weights, current_eval, weight_domain,
-                evaluate_fn=lwo_evaluate_fn,
+                evaluate_fn=lwo_evaluate_fn, deadline=deadline, deadline_hit=step_deadline_hit,
             )
         evaluated_total += n1
 
@@ -425,18 +527,24 @@ def _joint_alternating(
         if waypoint_search_space <= max_exact_combinations:
             new_waypoints, new_waypoints_eval, n2 = _wpo_exact_enumeration(
                 demands, demand_graphs, demand_required_waypoints, link_map, candidate_lists, network,
-                evaluate_fn=wpo_evaluate_fn,
+                evaluate_fn=wpo_evaluate_fn, deadline=deadline, deadline_hit=step_deadline_hit,
             )
         else:
             new_waypoints, new_waypoints_eval, n2 = _greedy_wpo(
                 demands, demand_graphs, demand_required_waypoints, link_map, candidate_lists, network,
                 new_weights_eval,
-                evaluate_fn=wpo_evaluate_fn,
+                evaluate_fn=wpo_evaluate_fn, deadline=deadline, deadline_hit=step_deadline_hit,
             )
         evaluated_total += n2
 
         improvement = current_eval.mlu - new_waypoints_eval.mlu
         current_weights, current_waypoints, current_eval = new_weights, new_waypoints, new_waypoints_eval
+
+        if step_deadline_hit:
+            convergence_reason = f"Time limit reached during iteration {iteration}."
+            if deadline_hit is not None:
+                deadline_hit.append(True)
+            break
 
         if improvement < epsilon:
             convergence_reason = (

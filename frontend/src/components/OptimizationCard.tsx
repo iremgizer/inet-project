@@ -1,12 +1,26 @@
 import React, { useState } from "react";
-import { ChevronDown, ChevronUp, Loader2, Play, Eye, GitCompare, CheckCircle2 } from "lucide-react";
-import { OptimizationLabMode, OptimizationResult } from "../types/optimization";
+import { ChevronDown, ChevronUp, Loader2, Play, Eye, GitCompare, CheckCircle2, AlertTriangle } from "lucide-react";
+import { OptimizationLabMode, OptimizationResult, SearchSpaceEstimate } from "../types/optimization";
 import { OPTIMIZATION_MODE_INFO, explainResult } from "../utils/optimizationExplanations";
+import { getResultBadges } from "../utils/optimizationBadges";
+import {
+  OptimizationSettings,
+  formatLargeSearchWarning,
+  predictSearchMethod,
+  shouldWarnLargeSearch,
+} from "../utils/optimizationSettings";
 import TermHint from "./TermHint";
 
 interface OptimizationCardProps {
   mode: Exclude<OptimizationLabMode, "CURRENT">;
   result: OptimizationResult | null;
+  /** The settings actually used to produce `result` — distinct from
+   * `currentSettings` below, which may have changed since (PR6 §6: LWO's
+   * own weight range must be shown as what was *actually* searched, not
+   * whatever the settings panel currently reads). `null` until first run. */
+  settingsUsed: OptimizationSettings | null;
+  currentSettings: OptimizationSettings;
+  searchSpaceEstimate: SearchSpaceEstimate | null;
   isRunning: boolean;
   isSelected: boolean;
   isComparing: boolean;
@@ -34,11 +48,22 @@ const STATUS_BADGE_CLASS: Record<OptimizationResult["status"], string> = {
   ERROR: "badge--danger",
 };
 
+const OUTCOME_BADGE_CLASS: Record<string, string> = {
+  success: "badge--success",
+  warning: "badge--warning",
+  danger: "badge--danger",
+  neutral: "badge--neutral",
+};
+
 /** One card per optimization mode in the Optimization Lab. Each mode is
  * launched independently (its own "Run" button) — never auto-executed, per
- * PR5's own explicit instruction. */
+ * PR5's own explicit instruction. PR6 adds: badges (§13/§14), a pre-run
+ * search-space preview and large-search warning (§3/§16), and mode-specific
+ * scientific metadata (§5/§6/§8/§12) — OPT never shows search/candidate
+ * fields (§4), LWO shows its weight range and optimizable-link count (§6). */
 const OptimizationCard: React.FC<OptimizationCardProps> = ({
-  mode, result, isRunning, isSelected, isComparing, canApply, onRun, onView, onCompare, onApply,
+  mode, result, settingsUsed, currentSettings, searchSpaceEstimate,
+  isRunning, isSelected, isComparing, canApply, onRun, onView, onCompare, onApply,
 }) => {
   const [showExplanation, setShowExplanation] = useState(false);
   const info = OPTIMIZATION_MODE_INFO[mode];
@@ -57,12 +82,26 @@ const OptimizationCard: React.FC<OptimizationCardProps> = ({
     }
   };
 
+  const prediction = mode !== "OPT" && searchSpaceEstimate
+    ? predictSearchMethod(searchSpaceEstimate.searchSpaceSize, currentSettings.maxExactCombinations)
+    : null;
+  const warnLargeSearch = mode !== "OPT" && searchSpaceEstimate?.searchSpaceSize
+    ? shouldWarnLargeSearch(searchSpaceEstimate.searchSpaceSize, currentSettings.maxExactCombinations)
+    : false;
+
+  const badges = result ? getResultBadges(result) : [];
+
   return (
     <div className={`opt-card${isSelected ? " opt-card--selected" : ""}`}>
       <div className="opt-card-header">
         <div className="opt-card-title-row">
           <strong>{info.label}</strong>
           {result && <span className={`badge ${STATUS_BADGE_CLASS[result.status]}`}>{result.status}</span>}
+          {badges.map((b) => (
+            <span key={b.label} className={`badge ${OUTCOME_BADGE_CLASS[b.variant]}`} title={b.explanation}>
+              {b.label}
+            </span>
+          ))}
         </div>
         <TermHint
           term={info.shortLabel}
@@ -74,6 +113,46 @@ const OptimizationCard: React.FC<OptimizationCardProps> = ({
       {!result ? (
         <div className="opt-card-body opt-card-body--empty">
           <p className="opt-card-hint">{info.optimizes}</p>
+
+          {/* ── PR6 §3/§16 — pre-run search-space preview + warning (WPO/LWO/JOINT only) ── */}
+          {mode !== "OPT" && searchSpaceEstimate && (
+            <div className="opt-card-preview">
+              {searchSpaceEstimate.error ? (
+                <p className="opt-card-hint">{searchSpaceEstimate.error}</p>
+              ) : (
+                <>
+                  <div className="opt-card-preview-row">
+                    <span>Estimated search space</span>
+                    <strong>{searchSpaceEstimate.searchSpaceSize?.toLocaleString() ?? "—"}</strong>
+                  </div>
+                  <div className="opt-card-preview-row">
+                    <span>Exact search budget</span>
+                    <strong>{currentSettings.maxExactCombinations.toLocaleString()}</strong>
+                  </div>
+                  {prediction && (
+                    <div className={`opt-card-prediction${prediction.willUseExact ? " opt-card-prediction--exact" : " opt-card-prediction--heuristic"}`}>
+                      {prediction.label}
+                      <span className="opt-card-prediction-detail">{prediction.detail}</span>
+                    </div>
+                  )}
+                  {warnLargeSearch && searchSpaceEstimate.searchSpaceSize && (
+                    <div className="opt-card-warning">
+                      <AlertTriangle size={12} />
+                      {formatLargeSearchWarning(searchSpaceEstimate.searchSpaceSize, currentSettings.maxExactCombinations)}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+          {mode === "OPT" && (
+            <div className="opt-card-preview">
+              <div className="opt-card-preview-row"><span>Method</span><strong>Linear Programming</strong></div>
+              <div className="opt-card-preview-row"><span>Solver</span><strong>CBC</strong></div>
+              <div className="opt-card-preview-row"><span>Search combinations</span><strong>Not applicable</strong></div>
+            </div>
+          )}
+
           <button className="btn-primary btn-sm" onClick={onRun} disabled={isRunning}>
             {isRunning ? <Loader2 size={13} className="spin" /> : <Play size={13} />}
             {isRunning ? "Running…" : "Run"}
@@ -103,22 +182,48 @@ const OptimizationCard: React.FC<OptimizationCardProps> = ({
               <strong>{fmtMs(result.solverRuntime)}</strong>
             </div>
             <div className="metric-cell">
-              <span className="metric-label">Proven optimal</span>
-              <strong>{result.provenOptimal === null || result.provenOptimal === undefined ? "—" : result.provenOptimal ? "Yes" : "No"}</strong>
-            </div>
-            <div className="metric-cell">
-              <span className="metric-label">Search method</span>
-              <strong className="opt-card-small-value">{result.searchMethod ?? "LP solve"}</strong>
-            </div>
-            <div className="metric-cell">
-              <span className="metric-label">Candidates evaluated</span>
-              <strong>{result.evaluatedCandidates ?? "—"}</strong>
-            </div>
-            <div className="metric-cell">
               <span className="metric-label">Solver</span>
               <strong className="opt-card-small-value">{result.solverName}</strong>
             </div>
+
+            {/* Search-method fields — never shown for OPT (PR6 §4/§12: "OPT does not have candidate enumeration"). */}
+            {mode !== "OPT" && (
+              <>
+                <div className="metric-cell">
+                  <span className="metric-label">Search method</span>
+                  <strong className="opt-card-small-value">{result.searchMethod}</strong>
+                </div>
+                <div className="metric-cell">
+                  <span className="metric-label">Search-space size</span>
+                  <strong>{result.searchSpaceSize?.toLocaleString() ?? "—"}</strong>
+                </div>
+                <div className="metric-cell">
+                  <span className="metric-label">Candidates evaluated</span>
+                  <strong>{result.evaluatedCandidates?.toLocaleString() ?? "—"}</strong>
+                </div>
+              </>
+            )}
+
+            {/* LWO/Joint only: weight range + optimizable-link count actually used (PR6 §6). */}
+            {(mode === "LWO" || mode === "JOINT") && settingsUsed && (
+              <div className="metric-cell">
+                <span className="metric-label">Weight range used</span>
+                <strong>{settingsUsed.minWeight}-{settingsUsed.maxWeight}</strong>
+              </div>
+            )}
+
+            {/* Joint only: iterations + convergence reason (PR6 §8). */}
+            {mode === "JOINT" && result.iterations !== null && result.iterations !== undefined && (
+              <div className="metric-cell">
+                <span className="metric-label">Iterations</span>
+                <strong>{result.iterations}</strong>
+              </div>
+            )}
           </div>
+
+          {mode === "JOINT" && result.convergenceReason && (
+            <p className="opt-card-convergence">{result.convergenceReason}</p>
+          )}
 
           <p className="opt-card-explain">{explainResult(result)}</p>
 
@@ -139,7 +244,7 @@ const OptimizationCard: React.FC<OptimizationCardProps> = ({
             >
               <GitCompare size={13} /> Compare vs current
             </button>
-            {canApply && (result.status === "OPTIMAL" || result.status === "FEASIBLE") && (
+            {canApply && (result.status === "OPTIMAL" || result.status === "FEASIBLE" || result.status === "TIME_LIMIT") && (
               <button
                 className={`btn-primary btn-sm${applyConfirm ? " btn-primary--confirm" : ""}`}
                 onClick={handleApplyClick}
