@@ -4,7 +4,31 @@ import {
   Network as NetworkIcon, Zap, ShieldAlert, Gauge, Layers, LucideIcon,
 } from "lucide-react";
 import { DemoScenarioSummary, DemoCategory } from "../types/assignment";
-import { listDemoScenarios, seedDemoScenarios } from "../api/simulationApi";
+import { listDemoScenarios, seedDemoScenarios, ApiError } from "../api/simulationApi";
+
+// ── Error classification ─────────────────────────────────────────────────
+// `fetch()` itself throwing (no ApiError, no HTTP status at all) covers
+// three genuinely indistinguishable-from-JS causes at once — the backend is
+// down, the request never left the browser, or a CORS policy silently
+// blocked the response — the Fetch API deliberately doesn't expose which
+// one, for cross-origin security reasons. Once a real HTTP response comes
+// back (ApiError, with a status), 4xx vs 5xx *is* distinguishable, and is
+// the difference between "the request itself was rejected" (bad input,
+// not-found, ...) and "the backend accepted the request but failed on its
+// own side" (most often: its own MongoDB connection). This intentionally
+// never repeats "Is MongoDB running?" for every failure — only the cases
+// that are actually consistent with that being the cause.
+function describeApiError(err: unknown, context: "load" | "seed"): string {
+  if (err instanceof ApiError) {
+    if (err.status >= 500) {
+      return context === "seed"
+        ? `Backend reached, but seeding failed on its own side (server error, HTTP ${err.status}) — this is consistent with MongoDB being unreachable from the backend. Check the backend's own /health endpoint and logs, not the frontend.`
+        : `Backend reached, but it returned a server error (HTTP ${err.status}) while loading scenarios — check the backend's own logs.`;
+    }
+    return `Backend reached, but rejected the request (HTTP ${err.status}): ${err.message}`;
+  }
+  return "Could not reach the backend at all — it may be down or still starting up, or the request was blocked by CORS (the backend's allowed frontend origin may not match this site's URL). This is not necessarily a MongoDB problem.";
+}
 
 interface DemoScenarioDashboardProps {
   onOpenScenario: (assignmentId: string) => void;
@@ -40,18 +64,28 @@ const DemoScenarioDashboard: React.FC<DemoScenarioDashboardProps> = ({ onOpenSce
     setError(null);
     listDemoScenarios()
       .then(setScenarios)
-      .catch(() => setError("Could not reach the backend. Is it running?"));
+      .catch((err) => setError(describeApiError(err, "load")));
   };
 
   useEffect(load, []);
 
   const handleSeed = async () => {
     setSeeding(true);
+    setError(null);
     try {
-      await seedDemoScenarios();
+      const result = await seedDemoScenarios();
+      if (result.seeded === 0) {
+        // The endpoint itself responded normally (HTTP 200) but reports
+        // nothing was persisted — this is the backend's own explicit
+        // "MongoDB unavailable" signal (see POST /seed-demo-scenarios,
+        // which degrades gracefully rather than erroring), so this really
+        // is the one case where naming MongoDB is accurate.
+        setError(`Backend reached, but MongoDB is unavailable server-side: ${result.message}`);
+        return;
+      }
       load();
-    } catch {
-      setError("Seeding failed. Is MongoDB running? See README's Demo Scenario Pack section.");
+    } catch (err) {
+      setError(describeApiError(err, "seed"));
     } finally {
       setSeeding(false);
     }

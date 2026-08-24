@@ -270,21 +270,27 @@ The service **must** bind `--host 0.0.0.0` (not `127.0.0.1`, which is unreachabl
 
 - `MONGODB_URI` — the Atlas connection string from §4, set as a secret env var.
 - `MONGODB_DATABASE` — `network_visualizer` (or whatever value keeps consistency with local dev).
+- `MONGODB_SERVER_SELECTION_TIMEOUT_MS` — optional; defaults to `5000` (see `backend/app/services/mongo_config.py`). Worth raising if Render's network path to the Atlas cluster proves consistently slower than 5s in practice (check Render's logs for `mongoAvailable: false` against a cluster that's actually healthy).
 - `OPTIMIZATION_MAX_EXACT_COMBINATIONS_CAP` — optional; only needed to override the built-in default of 2,000,000 (see `backend/app/services/optimization_service.py`). Consider a lower value on a shared, modest-CPU Render instance (§10).
 - `PYTHON_VERSION` — recommended (see table above), not read by application code, consumed by Render's build system.
+- `FRONTEND_ORIGIN` (or `FRONTEND_ORIGINS`) — **required** once a frontend is actually deployed; see the CORS section immediately below. Without it, the deployed frontend's every request is rejected by the browser's CORS enforcement even though the backend itself is healthy.
 
-### CORS requirement — a real, precise code change needed at deploy time
+### CORS — implemented, environment-driven (§7 follow-up, now closed)
 
-`backend/app/main.py`'s `origins` list is currently **hardcoded** to four localhost values:
+`backend/app/main.py`'s `origins` list always includes four localhost dev origins (`LOCAL_DEV_ORIGINS`, unconditional — nothing changes for local development), and on top of those, reads `FRONTEND_ORIGIN` (one origin) and/or `FRONTEND_ORIGINS` (comma-separated, e.g. production + a preview deploy) from the environment and appends them — no code edit, no redeploy-from-source needed to point the backend at a new/changed frontend URL, just an env var change in Render's dashboard. Blank entries and trailing slashes are normalized away defensively. `allow_credentials=True` is kept exactly as before, and `allow_origins` is never set to `"*"` — an explicit list only, since a wildcard origin combined with credentials is rejected by browsers outright and was never used here regardless.
 
-```python
-origins = [
-    "http://localhost:5173", "http://127.0.0.1:5173",
-    "http://localhost:3000", "http://127.0.0.1:3000",
-]
+**This was a genuine, confirmed production bug, not a theoretical gap:** after the first real Render deployment, the Demo Scenario Dashboard's "Reseed pack" button failed with a misleading "Is MongoDB running?" message. Direct testing against the live deployed backend confirmed the actual cause — `curl` (server-to-server, bypasses CORS) succeeded and even seeded 16 documents to Atlas directly, while a simulated preflight request with a non-localhost `Origin` header was rejected outright:
+
+```
+$ curl -s -i -X OPTIONS https://inet-project.onrender.com/seed-demo-scenarios \
+    -H "Origin: https://<the-deployed-frontend>" \
+    -H "Access-Control-Request-Method: POST"
+HTTP/2 400
+...
+Disallowed CORS origin
 ```
 
-This will reject requests from a deployed Render Static Site (a different origin, e.g. `https://inet-frontend.onrender.com`) with a CORS error in the browser — `curl`/server-to-server calls would still work, but the actual React app would fail every `fetch()`. **This is a genuine code change the deployment will require** (not merely a config value): either add the deployed frontend's exact origin to the `origins` list, or — better, so it doesn't require a code edit per environment — read it from a new environment variable (e.g. `FRONTEND_ORIGIN`) and append it to the list at startup. This document does not make that change; it is flagged here so the eventual deployment PR knows exactly what to touch and why.
+This confirmed the backend and Atlas were both entirely healthy — only the browser-facing CORS allowlist was misconfigured. Fixed by making `origins` environment-driven; **the fix requires setting `FRONTEND_ORIGIN` (the deployed frontend's exact URL) in Render's backend environment variables and redeploying the backend** — see §16 (Deployed Production Incident) for the full writeup, including the Demo Scenario Dashboard's error-message fix that was needed alongside it.
 
 ---
 
@@ -296,10 +302,11 @@ Every row below was confirmed against actual code (`os.getenv`/`os.environ.get`/
 |---|---|---|---|---|
 | `MONGODB_URI` | Required for persistence (app runs without it, degraded — see §1) | `mongodb+srv://<user>:<password>@<cluster-host>/?retryWrites=true&w=majority` | MongoDB connection string, read by `AssignmentStorageService` and `RunStorageService` | **Yes** — contains a database password |
 | `MONGODB_DATABASE` | Optional (defaults to `network_visualizer` in code) | `network_visualizer` | Database name within the cluster | No |
+| `MONGODB_SERVER_SELECTION_TIMEOUT_MS` | Optional (defaults to `5000` in code, `app/services/mongo_config.py`) | `5000` | How long (ms) the backend waits for a MongoDB connection before falling back to "unavailable" mode. The original hardcoded `500ms` was tuned for local-only dev and proved too tight for Atlas's real network round-trip (DNS/SRV + TLS handshake + replica-set discovery) — see §4's "Atlas migration status" for the live evidence this was based on. Worth raising further (e.g. `10000`+) if a specific deployment's network path to its MongoDB is consistently slower than 5s. | No |
 | `VITE_BACKEND_URL` | Required in any non-local deployment (defaults to `http://localhost:8000` otherwise) | `https://inet-backend.onrender.com` | Frontend's API base URL, inlined at Vite **build time** | No — public, visible in the shipped JS bundle |
 | `OPTIMIZATION_MAX_EXACT_COMBINATIONS_CAP` | Optional (defaults to `2000000` in code) | `500000` | Hard server-side ceiling on the user-controllable exact-search budget (§7) | No |
 | `PYTHON_VERSION` | Recommended, not currently set | `3.13.2` | Pins the backend's Python runtime on Render (build-system only, not read by app code) | No |
-| `FRONTEND_ORIGIN` *(not yet implemented — see §7's CORS note)* | Would become required once implemented | `https://inet-frontend.onrender.com` | Would let the deployed frontend's exact origin into the backend's CORS allowlist without a code edit per environment | No |
+| `FRONTEND_ORIGIN` / `FRONTEND_ORIGINS` | **Required** once a frontend is actually deployed (§7) | `https://inet-frontend.onrender.com` (single) or a comma-separated list for `FRONTEND_ORIGINS` | Adds the deployed frontend's exact origin to the backend's CORS allowlist, on top of the always-allowed localhost dev origins — no code edit per environment | No |
 
 No other environment variables are read anywhere in `backend/app/` or `frontend/src/` (verified by grepping `os.getenv`, `os.environ`, and `import.meta.env` across both trees).
 
@@ -365,8 +372,8 @@ Once the backend and Atlas are both deployed (§5-§7), every student's browser 
 
 ### Render deployment checklist
 - [ ] Backend Web Service: root `backend`, build `pip install -r requirements.txt`, start `uvicorn app.main:app --host 0.0.0.0 --port $PORT` (§7)
-- [ ] Backend env vars set: `MONGODB_URI`, `MONGODB_DATABASE`, optionally `OPTIMIZATION_MAX_EXACT_COMBINATIONS_CAP`, `PYTHON_VERSION` (§8)
-- [ ] (Required code change, not yet made) CORS `origins` updated to include the deployed frontend's exact origin (§7)
+- [ ] Backend env vars set: `MONGODB_URI`, `MONGODB_DATABASE`, optionally `MONGODB_SERVER_SELECTION_TIMEOUT_MS`, `OPTIMIZATION_MAX_EXACT_COMBINATIONS_CAP`, `PYTHON_VERSION` (§8)
+- [ ] `FRONTEND_ORIGIN` (or `FRONTEND_ORIGINS`) set on the backend to the deployed frontend's exact origin, and the backend redeployed/restarted so the new env var takes effect (§7, §16)
 - [ ] Frontend Static Site: root `frontend`, build `npm install && npm run build`, publish `dist` (§6)
 - [ ] Frontend env var set at build time: `VITE_BACKEND_URL` → the backend's public Render URL (§6, §8)
 - [ ] Frontend rebuilt (not just redeployed) after any `VITE_BACKEND_URL` change
@@ -393,13 +400,13 @@ Once the backend and Atlas are both deployed (§5-§7), every student's browser 
 
 ## 14. What This Document Deliberately Does Not Do
 
-Per this task's own scope: no Render services were created, no Atlas cluster was created, no credentials were added anywhere, no production architecture was changed, no Kubernetes was introduced, and no optimization algorithm was modified. Every "code change needed" called out above (§4's `serverSelectionTimeoutMS`, §7's CORS origins) is identified precisely but **not implemented** — they are scoped, ready-to-execute follow-up work for whoever actually performs the deployment.
+Per this task's own scope: no Render services were created, no Atlas cluster was created, no credentials were added anywhere, no production architecture was changed, no Kubernetes was introduced, and no optimization algorithm was modified. §4's `serverSelectionTimeoutMS` fix and §7's CORS `origins` fix have both since been implemented and verified — the CORS fix specifically in response to a real deployed-production incident, see §16.
 
 ## 15. How This Document Was Validated
 
 Every command, path, and environment variable name above was checked against the actual repository on branch `main` before being written:
 
-- `MONGODB_URI`/`MONGODB_DATABASE`/port 27018/timeout 500ms — read directly from `backend/.env.example`, `backend/app/services/assignment_service.py`, `backend/app/services/run_storage_service.py`.
+- `MONGODB_URI`/`MONGODB_DATABASE`/port 27018 and the `MONGODB_SERVER_SELECTION_TIMEOUT_MS` default (`5000`, previously a hardcoded `500`) — read directly from `backend/.env.example`, `backend/app/services/mongo_config.py`, `backend/app/services/assignment_service.py`, `backend/app/services/run_storage_service.py`.
 - No automatic index creation — repo-wide search for `create_index`/`ensure_index`/`.index(` returned no matches under `backend/app/`.
 - `VITE_BACKEND_URL` — read directly from `frontend/src/api/simulationApi.ts`, `optimizationApi.ts`, and `frontend/src/env.d.ts`.
 - Build command/output directory — read directly from `frontend/package.json`'s `scripts.build` and confirmed against this repo's own `npm run build` output (`dist/index.html`, `dist/assets/...`); `vite.config.ts` has no `outDir` override.
@@ -407,6 +414,58 @@ Every command, path, and environment variable name above was checked against the
 - `uvicorn app.main:app` (not `main:app`) — confirmed by `backend/app/main.py`'s actual module path (`backend/app/main.py`, imported as `app.main` per the existing README's own working local command).
 - `OPTIMIZATION_MAX_EXACT_COMBINATIONS_CAP` and its default `2_000_000` — read directly from `backend/app/services/optimization_service.py`.
 - `dnspython` as an unconditional `pymongo` dependency — confirmed via `importlib.metadata.distribution("pymongo").requires` against this project's own `.venv`, cross-checked against `pip freeze` showing `dnspython==2.8.0` already installed despite never being listed in `backend/requirements.txt`.
-- CORS `origins` list content — read directly from `backend/app/main.py`.
+- CORS `origins` list content, and its `FRONTEND_ORIGIN`/`FRONTEND_ORIGINS` env-driven extension — read directly from `backend/app/main.py`, and confirmed live against the real deployed backend (§16): a simulated CORS preflight from a non-localhost origin returned `400 Disallowed CORS origin` before the fix, while direct server-to-server calls (bypassing CORS entirely) succeeded throughout, isolating the failure to the browser-enforced CORS layer specifically.
 - No `runtime.txt`/`.python-version`/`render.yaml`/`Procfile` anywhere in the repo — confirmed by direct `find`.
 - Render's documented build/start commands and Python-version-pinning mechanism, and MongoDB Atlas's documented cluster/user/network-access/connection-string flow — checked against Render's and MongoDB's own current documentation (`render.com/docs/deploy-fastapi`, `render.com/docs/python-version`, `render.com/docs/deploy-create-react-app`, and current MongoDB Atlas setup guidance) rather than assumed from memory.
+
+---
+
+## 16. Deployed Production Incident — CORS blocking the Demo Scenario Dashboard
+
+**Symptom:** after the first real deployment (Render Static Site + Render Web Service + MongoDB Atlas), the deployed frontend loaded and `demo`/`demo` login worked (both entirely client-side, no backend call), but clicking "Reseed pack" on the Demo Scenario Dashboard showed **"Seeding failed. Is MongoDB running?"** — even though MongoDB Atlas was confirmed healthy from the backend directly.
+
+### Root cause
+
+`backend/app/main.py`'s CORS `origins` list was hardcoded to four `localhost`/`127.0.0.1` values only (§7, before this fix). The deployed frontend's real origin (its own `https://*.onrender.com` URL) was never in that list, so every cross-origin browser request from it was rejected by CORS — regardless of whether the backend or MongoDB were healthy.
+
+**Confirmed directly against the live deployed backend, not inferred:**
+
+```bash
+# Server-to-server (bypasses CORS entirely) — both succeeded:
+curl https://inet-project.onrender.com/health
+# {"status":"ok","mongoAvailable":true}
+curl -X POST https://inet-project.onrender.com/seed-demo-scenarios
+# {"seeded":16, ...}  — MongoDB Atlas write confirmed working from the deployed backend
+
+# Simulated browser preflight from a non-localhost origin — rejected:
+curl -i -X OPTIONS https://inet-project.onrender.com/seed-demo-scenarios \
+  -H "Origin: https://<the-deployed-frontend-origin>" \
+  -H "Access-Control-Request-Method: POST"
+# HTTP/2 400
+# Disallowed CORS origin
+```
+
+This isolates the failure precisely: the backend, Atlas, and the seeding logic were all completely healthy — only the CORS allowlist was misconfigured for a browser-originated request from anywhere other than localhost.
+
+### Fix
+
+1. **Backend CORS made environment-driven** (`backend/app/main.py`) — `LOCAL_DEV_ORIGINS` (the original four) are always allowed unconditionally (zero change for local dev); `FRONTEND_ORIGIN` (single) and/or `FRONTEND_ORIGINS` (comma-separated) are read from the environment and appended on top. `allow_origins=["*"]` is never used — an explicit list only, since that combined with this app's existing `allow_credentials=True` is rejected by browsers outright regardless.
+2. **A second, independent hardcoded-`localhost` bug, found during the same audit and fixed alongside it:** the Teacher Dashboard's separate "Seed Demo to MongoDB" button (`WorkflowManager.tsx`'s `handleSeedDemoToMongoDB`) called `fetch("http://localhost:8000/health")` and `fetch("http://localhost:8000/seed-demo", ...)` directly — completely ignoring `VITE_BACKEND_URL`. This would always fail in production (trying to reach the visitor's own browser's `localhost:8000`) independent of the CORS fix above. Replaced with two new `simulationApi.ts` functions (`getBackendHealth()`, `seedDemoAssignments()`), consistent with every other API call in the codebase. Confirmed via repo-wide search that `VITE_BACKEND_URL` (with its documented `http://localhost:8000` local-dev fallback) is now the *only* place any frontend API base URL is determined.
+3. **Demo Scenario Dashboard error messages no longer default to "Is MongoDB running?" for every failure.** `simulationApi.ts` gained a small `ApiError` type carrying the HTTP status when a real response came back, letting `DemoScenarioDashboard.tsx` distinguish three cases the Fetch API's own behavior actually supports distinguishing:
+   - **Backend unreachable** (`fetch()` itself threw — no HTTP response at all, which is what a CORS rejection *also* looks like from JS, by browser design — the Fetch API deliberately doesn't expose *why* a cross-origin request failed) → "Could not reach the backend at all — it may be down or still starting up, or the request was blocked by CORS... This is not necessarily a MongoDB problem."
+   - **Request rejected** (an `ApiError` with a 4xx status) → shows the backend's own rejection reason.
+   - **Server error consistent with Mongo being unavailable** (an `ApiError` with a 5xx status, *or* a 200 response where the seed endpoint's own payload reports `seeded: 0` — its documented graceful-degradation signal, see `app/services/demo_scenario_service.py`) → only *this* case still mentions MongoDB specifically, since it is the one case actually consistent with that being the cause.
+
+### Files changed
+
+- `backend/app/main.py` — CORS `origins` now `LOCAL_DEV_ORIGINS + FRONTEND_ORIGIN/FRONTEND_ORIGINS`.
+- `backend/.env.example` — documents the new variables (no secrets).
+- `frontend/src/api/simulationApi.ts` — new `ApiError`, `getBackendHealth()`, `seedDemoAssignments()`; `listDemoScenarios()`/`seedDemoScenarios()` now throw `ApiError` (status-carrying) instead of a plain `Error`.
+- `frontend/src/components/WorkflowManager.tsx` — `handleSeedDemoToMongoDB` no longer hardcodes `localhost:8000`.
+- `frontend/src/pages/DemoScenarioDashboard.tsx` — `describeApiError()` classification, used by both the initial load and the seed handler.
+
+### Required to actually resolve this in production
+
+- **Render backend environment variable:** `FRONTEND_ORIGIN` set to the deployed frontend's exact origin (scheme + host, no trailing slash) — e.g. `https://inet-project-frontend.onrender.com`, whatever the real Render Static Site URL is. Use `FRONTEND_ORIGINS` instead if more than one origin needs to be allowed (e.g. a preview deploy).
+- **Backend redeploy required** — an env var change on Render does not take effect until the service restarts; trigger a redeploy (or a manual restart) after setting `FRONTEND_ORIGIN`.
+- **Frontend:** no redeploy required for *this specific fix* — `VITE_BACKEND_URL` was already correctly configured (the deployed frontend already reaches the deployed backend's `/health` etc.; only the browser-enforced CORS layer was blocking it). The `WorkflowManager.tsx`/`DemoScenarioDashboard.tsx` code changes above do change the frontend's compiled JS, though, so the frontend **does** need rebuilding/redeploying to actually ship the improved error messages and the hardcoded-`localhost` fix — just not because of the CORS root cause itself.
