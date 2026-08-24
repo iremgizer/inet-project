@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, FlaskConical, Info, History } from "lucide-react";
+import { ArrowLeft, FlaskConical, Info, History, GitCompare, Play } from "lucide-react";
 import { AlgorithmConfig, NetworkInput, SimulationResult } from "../types/network";
 import { OptimizationHistoryEntry, OptimizationLabMode, OptimizationRunRecord, SearchSpaceEstimate } from "../types/optimization";
 import { OPTIMIZATION_MODE_INFO, describeCongestionFreeStatus } from "../utils/optimizationExplanations";
 import { projectOptimizationResult } from "../utils/optimizationProjection";
+import { describeViewOnGraphState } from "../utils/optimizationHighlight";
 import { buildComparison, ComparisonMode } from "../utils/comparison";
 import { computeResultRelationships } from "../utils/optimizationRelationships";
 import { DEFAULT_SETTINGS, OptimizationSettings } from "../utils/optimizationSettings";
@@ -28,6 +29,8 @@ interface OptimizationLabPageProps {
   onComparisonModeChange: (mode: ComparisonMode) => void;
   onBack: () => void;
   onRun: (mode: Exclude<OptimizationLabMode, "CURRENT">, settings: OptimizationSettings) => void;
+  onRunAll: (settings: OptimizationSettings) => void;
+  runAllProgress: { index: number; total: number; mode: Exclude<OptimizationLabMode, "CURRENT"> } | null;
   onSelectForView: (mode: OptimizationLabMode | null) => void;
   onCompare: (mode: OptimizationLabMode | null) => void;
   onApply: (mode: Exclude<OptimizationLabMode, "CURRENT">) => void;
@@ -57,6 +60,8 @@ const OptimizationLabPage: React.FC<OptimizationLabPageProps> = ({
   onComparisonModeChange,
   onBack,
   onRun,
+  onRunAll,
+  runAllProgress,
   onSelectForView,
   onCompare,
   onApply,
@@ -105,6 +110,90 @@ const OptimizationLabPage: React.FC<OptimizationLabPageProps> = ({
     if (!currentSimulationResult || !comparingProjection) return null;
     return buildComparison(currentSimulationResult, comparingProjection);
   }, [currentSimulationResult, comparingProjection]);
+
+  // ── "View on graph" explicit feedback (Part F) — derived from the exact
+  //    same highlight computation the canvas itself uses (see
+  //    optimizationHighlight.ts), so this text can never say something the
+  //    canvas doesn't actually show. ──────────────────────────────────────
+  const selectedResult =
+    selectedMode && selectedMode !== "CURRENT" ? runRecords[selectedMode]?.result ?? null : null;
+  const viewOnGraphSummary = useMemo(
+    () => (selectedResult ? describeViewOnGraphState(selectedResult, network) : null),
+    [selectedResult, network]
+  );
+
+  // ── Optimizer vs optimizer comparison (Part J, secondary priority) — a
+  //    small, self-contained addition: reuses buildComparison/
+  //    projectOptimizationResult exactly as Current-vs-optimizer does
+  //    above, just with both sides projected instead of one. Deliberately
+  //    does NOT touch canvas ownership/visualizationOwner precedence — this
+  //    is a metrics-only comparison, not a new "canvas owner" state, so it
+  //    stays cheap and can't conflict with Part K's precedence rules. ─────
+  const [pairA, setPairA] = useState<Exclude<OptimizationLabMode, "CURRENT"> | "">("");
+  const [pairB, setPairB] = useState<Exclude<OptimizationLabMode, "CURRENT"> | "">("");
+  const pairResultA = pairA ? runRecords[pairA]?.result ?? null : null;
+  const pairResultB = pairB ? runRecords[pairB]?.result ?? null : null;
+  const pairComparison = useMemo(() => {
+    if (!pairResultA || !pairResultB) return null;
+    const projA = projectOptimizationResult(pairResultA, network, algorithmConfig.congestionThreshold);
+    const projB = projectOptimizationResult(pairResultB, network, algorithmConfig.congestionThreshold);
+    return buildComparison(projA, projB);
+  }, [pairResultA, pairResultB, network, algorithmConfig.congestionThreshold]);
+  const availablePairModes = MODES.filter((m) => runRecords[m]?.result);
+
+  // ── Optimization comparison overview (Part I) — Current + every mode
+  //    that has actually been run, real values only (never invented). Each
+  //    mode's congested-link count is derived via the same
+  //    projectOptimizationResult already used for View on graph/Compare —
+  //    one projection function, not a second computation of the same
+  //    thing. ────────────────────────────────────────────────────────────
+  interface OverviewRow {
+    key: OptimizationLabMode;
+    label: string;
+    mlu: number;
+    congestedLinks: number;
+    improvementVsCurrent: number | null;
+    runtimeMs: number | null;
+    searchMethod: string | null;
+    provenOptimal: boolean | null;
+    evaluatedCandidates: number | null;
+    status: string;
+  }
+  const overviewRows = useMemo<OverviewRow[]>(() => {
+    const rows: OverviewRow[] = [];
+    if (currentSimulationResult) {
+      rows.push({
+        key: "CURRENT",
+        label: "Current",
+        mlu: currentSimulationResult.maxUtilization,
+        congestedLinks: currentSimulationResult.congestedLinkCount,
+        improvementVsCurrent: 0,
+        runtimeMs: null,
+        searchMethod: null,
+        provenOptimal: null,
+        evaluatedCandidates: null,
+        status: currentSimulationResult.algorithm,
+      });
+    }
+    for (const mode of MODES) {
+      const result = runRecords[mode]?.result;
+      if (!result) continue;
+      const projection = projectOptimizationResult(result, network, algorithmConfig.congestionThreshold);
+      rows.push({
+        key: mode,
+        label: OPTIMIZATION_MODE_INFO[mode].shortLabel,
+        mlu: result.mlu,
+        congestedLinks: projection.congestedLinkCount,
+        improvementVsCurrent: currentSimulationResult ? currentSimulationResult.maxUtilization - result.mlu : null,
+        runtimeMs: result.solverRuntime,
+        searchMethod: result.searchMethod ?? (mode === "OPT" ? "Linear Programming" : null),
+        provenOptimal: result.provenOptimal ?? (mode === "OPT" && result.status === "OPTIMAL" ? true : null),
+        evaluatedCandidates: result.evaluatedCandidates ?? null,
+        status: result.status,
+      });
+    }
+    return rows;
+  }, [currentSimulationResult, runRecords, network, algorithmConfig.congestionThreshold]);
 
   // ── PR6 §22 — result relationships, from real computed values only ──────
   const relationships = useMemo(
@@ -240,21 +329,43 @@ const OptimizationLabPage: React.FC<OptimizationLabPageProps> = ({
             </div>
           )}
 
-          {/* ── Comparison view (PR5 §4) — reuses ComparisonPanel/
-              buildComparison verbatim; only shown once a mode's result is
-              being actively compared. ── */}
+          {/* ── "View on graph" explicit feedback (Part F) — this is the
+              only textual confirmation of what the button did; the canvas
+              highlight alone (PR5/PR6) is not always obvious, especially
+              when an optimizer found no improvement to show. ── */}
+          {viewOnGraphSummary && (
+            <div className={`opt-view-summary${viewOnGraphSummary.hasNoVisualChange ? " opt-view-summary--empty" : ""}${viewOnGraphSummary.isTheoretical ? " opt-view-summary--theoretical" : ""}`}>
+              <strong>{viewOnGraphSummary.headline}</strong>
+              {viewOnGraphSummary.detailLines.map((line, i) => <p key={i}>{line}</p>)}
+            </div>
+          )}
+
+          {/* ── Comparison mode (Part G) — explicit "Comparing Current vs X"
+              banner + Exit control, so entering comparison is never mistaken
+              for the ordinary utilization view. Reuses ComparisonPanel/
+              buildComparison verbatim — no second comparison engine. ── */}
           {comparingMode && comparingMode !== "CURRENT" && comparingResult && currentSimulationResult && (
-            <ComparisonPanel
-              baseline={currentSimulationResult}
-              current={comparingProjection ?? currentSimulationResult}
-              comparison={comparison}
-              mode={comparisonMode}
-              onModeChange={onComparisonModeChange}
-              // No persistent baseline concept in the Lab's own transient,
-              // per-card comparison (PR5 §12: recommendations are
-              // transient) — this control is inert here by design.
-              onSetBaseline={() => {}}
-            />
+            <>
+              <div className="opt-comparison-banner">
+                <GitCompare size={13} />
+                <span>Comparing <strong>Current</strong> vs <strong>{OPTIMIZATION_MODE_INFO[comparingMode].shortLabel}</strong></span>
+                <button className="btn-secondary btn-sm" onClick={() => onCompare(null)}>Exit comparison</button>
+              </div>
+              {comparison && comparison.linkDeltas.length > 0 && comparison.linkDeltas.every((d) => d.status === "UNCHANGED") && (
+                <p className="opt-card-hint">No link-level difference from the current configuration.</p>
+              )}
+              <ComparisonPanel
+                baseline={currentSimulationResult}
+                current={comparingProjection ?? currentSimulationResult}
+                comparison={comparison}
+                mode={comparisonMode}
+                onModeChange={onComparisonModeChange}
+                // No persistent baseline concept in the Lab's own transient,
+                // per-card comparison (PR5 §12: recommendations are
+                // transient) — this control is inert here by design.
+                onSetBaseline={() => {}}
+              />
+            </>
           )}
           {comparingMode && comparingMode !== "CURRENT" && !currentSimulationResult && (
             <p className="opt-card-hint">Run a simulation first to compare against it.</p>
@@ -274,6 +385,24 @@ const OptimizationLabPage: React.FC<OptimizationLabPageProps> = ({
               ))}
             </div>
           )}
+
+          {/* ── Run All Optimizations (Part H) — sequential, never parallel
+              (see WorkflowManager's handleRunAllOptimizations); a compact
+              row, not a dominant control, per Part L. ── */}
+          <div className="opt-run-all-row">
+            <button
+              className="btn-secondary btn-sm"
+              onClick={() => onRunAll(settings)}
+              disabled={runAllProgress !== null || runningModes.size > 0}
+            >
+              <Play size={13} /> Run All Optimizations
+            </button>
+            {runAllProgress && (
+              <span className="opt-run-all-progress">
+                Running {OPTIMIZATION_MODE_INFO[runAllProgress.mode].shortLabel} — {runAllProgress.index}/{runAllProgress.total}
+              </span>
+            )}
+          </div>
 
           {/* ── Optimization mode cards ── */}
           <div className="opt-lab-cards">
@@ -296,6 +425,103 @@ const OptimizationLabPage: React.FC<OptimizationLabPageProps> = ({
               />
             ))}
           </div>
+
+          {/* ── Optimization comparison overview (Part I) — appears once at
+              least one optimizer has a real result; every row is a real
+              computed value, nothing invented. Rows are selectable: picking
+              one calls the same View on graph / Compare vs current actions
+              the cards above use, without leaving this overview. ── */}
+          {overviewRows.length > 1 && (
+            <div className="panel opt-overview-panel">
+              <h3>Comparison overview</h3>
+              <div className="opt-overview-table-wrap">
+                <table className="opt-overview-table">
+                  <thead>
+                    <tr>
+                      <th>Mode</th><th>MLU</th><th>Congested</th><th>Vs current</th>
+                      <th>Runtime</th><th>Method</th><th>Proven</th><th>Evaluated</th><th>Status</th><th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overviewRows.map((row) => (
+                      <tr
+                        key={row.key}
+                        className={selectedMode === row.key ? "opt-overview-row--selected" : ""}
+                      >
+                        <td><strong>{row.label}</strong></td>
+                        <td className={row.mlu > 1 ? "text-danger" : ""}>{fmtPct(row.mlu)}</td>
+                        <td className={row.congestedLinks > 0 ? "text-danger" : ""}>{row.congestedLinks}</td>
+                        <td>
+                          {row.improvementVsCurrent === null ? "—" :
+                            row.improvementVsCurrent === 0 ? "baseline" :
+                            <span className={row.improvementVsCurrent > 0 ? "text-success" : "text-danger"}>
+                              {row.improvementVsCurrent > 0 ? "−" : "+"}{fmtPct(Math.abs(row.improvementVsCurrent))}
+                            </span>}
+                        </td>
+                        <td>{row.runtimeMs === null ? "—" : row.runtimeMs < 1 ? "<1 ms" : `${row.runtimeMs.toFixed(1)} ms`}</td>
+                        <td className="opt-card-small-value">{row.searchMethod ?? "—"}</td>
+                        <td>{row.provenOptimal === null ? "—" : row.provenOptimal ? "Yes" : "No"}</td>
+                        <td>{row.evaluatedCandidates?.toLocaleString() ?? "—"}</td>
+                        <td>{row.status}</td>
+                        <td className="opt-overview-actions">
+                          <button className="btn-secondary btn-sm" onClick={() => onSelectForView(selectedMode === row.key ? null : row.key)}>
+                            View
+                          </button>
+                          {row.key !== "CURRENT" && (
+                            <button className="btn-secondary btn-sm" onClick={() => onCompare(comparingMode === row.key ? null : row.key)}>
+                              Compare
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ── Optimizer vs optimizer comparison (Part J, secondary) —
+              only shown once at least two optimizers have real results. ── */}
+          {availablePairModes.length >= 2 && (
+            <div className="panel opt-pair-panel">
+              <h3>Compare two optimizers</h3>
+              <div className="opt-pair-selectors">
+                <select className="sr-select-fallback" value={pairA} onChange={(e) => setPairA(e.target.value as typeof pairA)}>
+                  <option value="">Select…</option>
+                  {availablePairModes.map((m) => <option key={m} value={m}>{OPTIMIZATION_MODE_INFO[m].shortLabel}</option>)}
+                </select>
+                <span>vs</span>
+                <select className="sr-select-fallback" value={pairB} onChange={(e) => setPairB(e.target.value as typeof pairB)}>
+                  <option value="">Select…</option>
+                  {availablePairModes.map((m) => <option key={m} value={m}>{OPTIMIZATION_MODE_INFO[m].shortLabel}</option>)}
+                </select>
+              </div>
+              {pairA && pairB && pairA === pairB && (
+                <p className="opt-card-hint">Choose two different modes to compare.</p>
+              )}
+              {pairComparison && pairA !== pairB && (
+                <div className="comparison-summary">
+                  <div className="comparison-summary-row">
+                    <span className="comparison-summary-label">Max utilization</span>
+                    <span className="comparison-summary-value">
+                      {OPTIMIZATION_MODE_INFO[pairA as Exclude<OptimizationLabMode, "CURRENT">].shortLabel} {fmtPct(pairComparison.maxUtilizationBefore)}
+                      {" → "}
+                      {OPTIMIZATION_MODE_INFO[pairB as Exclude<OptimizationLabMode, "CURRENT">].shortLabel} {fmtPct(pairComparison.maxUtilizationAfter)}
+                    </span>
+                  </div>
+                  <div className="comparison-summary-row">
+                    <span className="comparison-summary-label">Congested links</span>
+                    <span className="comparison-summary-value">{pairComparison.congestedLinksBefore} → {pairComparison.congestedLinksAfter}</span>
+                  </div>
+                  <div className="comparison-summary-row">
+                    <span className="comparison-summary-label">Routes changed</span>
+                    <span className="comparison-summary-value">{pairComparison.routeChanges.length}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ── PR6 §15 — session-only experiment history (never persisted). ── */}
           {history.length > 0 && (

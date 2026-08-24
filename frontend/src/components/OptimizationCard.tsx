@@ -10,6 +10,7 @@ import {
   shouldWarnLargeSearch,
 } from "../utils/optimizationSettings";
 import TermHint from "./TermHint";
+import { breakableIdentifier } from "../utils/breakableText";
 
 interface OptimizationCardProps {
   mode: Exclude<OptimizationLabMode, "CURRENT">;
@@ -183,7 +184,7 @@ const OptimizationCard: React.FC<OptimizationCardProps> = ({
             </div>
             <div className="metric-cell">
               <span className="metric-label">Solver</span>
-              <strong className="opt-card-small-value">{result.solverName}</strong>
+              <strong className="opt-card-small-value">{breakableIdentifier(result.solverName)}</strong>
             </div>
 
             {/* Search-method fields — never shown for OPT (PR6 §4/§12: "OPT does not have candidate enumeration"). */}
@@ -191,7 +192,7 @@ const OptimizationCard: React.FC<OptimizationCardProps> = ({
               <>
                 <div className="metric-cell">
                   <span className="metric-label">Search method</span>
-                  <strong className="opt-card-small-value">{result.searchMethod}</strong>
+                  <strong className="opt-card-small-value">{result.searchMethod && breakableIdentifier(result.searchMethod)}</strong>
                 </div>
                 <div className="metric-cell">
                   <span className="metric-label">Search-space size</span>

@@ -1,11 +1,23 @@
 import React, { useState } from "react";
-import { ChevronDown, ChevronUp, AlertTriangle, CheckCircle2, PlayCircle, PowerOff } from "lucide-react";
-import { SimulationResult } from "../types/network";
+import { ChevronDown, ChevronUp, AlertTriangle, CheckCircle2, PlayCircle, PowerOff, Target, X } from "lucide-react";
+import { NetworkInput, SimulationResult } from "../types/network";
 import TermHint from "./TermHint";
+import { buildNodeLabelMap, resolveNodeLabel, formatNodePath, NodeLabelMap } from "../utils/nodeLabels";
+import { pathFocusKey } from "../utils/pathFocus";
 
 interface ResultSummaryPanelProps {
   result: SimulationResult;
   onShowTrace: () => void;
+  /** Node id -> label lookup — the canvas's own network. Optional only so
+   * this component still degrades gracefully (raw ids) if ever rendered
+   * without one; every real call site should pass it. */
+  network?: NetworkInput | null;
+  /** Path-focus (final-polish Part E) — which path (by pathFocusKey) is
+   * currently focused on the canvas, and the setter to focus/clear one.
+   * Optional so this component still renders (as a passive list, PR5/PR6
+   * behavior) if ever used without focus wiring. */
+  focusedPathKey?: string | null;
+  onFocusPath?: (key: string | null, nodes: string[]) => void;
 }
 
 // ── Narrative generator ───────────────────────────────────────────────────────
@@ -67,10 +79,11 @@ interface SRDemandSummary {
   resolvedRoutes: SRResolvedRoute[];
 }
 
-// ResultSummaryPanel only receives `result` (no `network`), consistent with
-// the existing "Show paths" list below, which also renders raw node ids
-// rather than resolved labels.
-function buildSRDemandSummaries(result: SimulationResult): SRDemandSummary[] {
+// Node ids in `result` (demand source/target, segmentList stops, path
+// nodes) are resolved to display labels via the shared nodeLabels utility —
+// the same lookup every other user-facing view goes through — using the
+// `labels` map built once in the component body below.
+function buildSRDemandSummaries(result: SimulationResult, labels: NodeLabelMap): SRDemandSummary[] {
   const loadEvents = result.traceEvents.filter((e) => e.stepType === "LOAD_SEGMENT_LIST" && e.activeDemandId);
   return result.pathResults
     .filter((pr) => pr.paths.length > 0)
@@ -81,9 +94,9 @@ function buildSRDemandSummaries(result: SimulationResult): SRDemandSummary[] {
       const demandTotal = pr.paths.reduce((sum, p) => sum + p.trafficShare, 0);
       return {
         demandId: pr.demandId,
-        sourceLabel: pr.source,
-        targetLabel: pr.target,
-        waypointLabels: waypoints,
+        sourceLabel: resolveNodeLabel(pr.source, labels),
+        targetLabel: resolveNodeLabel(pr.target, labels),
+        waypointLabels: waypoints.map((id) => resolveNodeLabel(id, labels)),
         resolvedRoutes: pr.paths.map((p) => ({
           nodes: p.nodes,
           percent: demandTotal > 0 ? (p.trafficShare / demandTotal) * 100 : 0,
@@ -107,10 +120,9 @@ interface ECMPDistributionSummary {
   paths: ECMPPathShareSummary[];
 }
 
-// Self-contained like buildSRDemandSummaries above: percentages are derived
-// from each path's own share of its demand's *delivered* traffic, so no
-// `network` prop is needed to know the original demand amount.
-function buildDistributionSummaries(result: SimulationResult): ECMPDistributionSummary[] {
+// Percentages are derived from each path's own share of its demand's
+// *delivered* traffic; node ids are resolved to labels via `labels`.
+function buildDistributionSummaries(result: SimulationResult, labels: NodeLabelMap): ECMPDistributionSummary[] {
   const distEvents = result.traceEvents.filter((e) => e.stepType === "PATH_DISTRIBUTION" && e.activeDemandId);
   return result.pathResults
     .filter((pr) => pr.paths.length > 1)
@@ -124,7 +136,7 @@ function buildDistributionSummaries(result: SimulationResult): ECMPDistributionS
         paths: pr.paths.map((p, i) => ({
           pathId: p.pathId ?? `path-${i + 1}`,
           pathLabel: `Path ${i + 1}`,
-          route: p.nodes.join(" → "),
+          route: formatNodePath(p.nodes, labels),
           percent: demandTotal > 0 ? (p.trafficShare / demandTotal) * 100 : 0,
         })),
       };
@@ -144,12 +156,16 @@ interface DownLinkSummary {
   target: string;
 }
 
-function buildDownLinksSummary(result: SimulationResult): DownLinkSummary[] {
+function buildDownLinksSummary(result: SimulationResult, labels: NodeLabelMap): DownLinkSummary[] {
   const failureEvent = result.traceEvents.find((e) => e.stepType === "LINK_FAILURE");
   if (!failureEvent) return [];
   return failureEvent.highlightedLinks.map((linkId) => {
     const lr = result.linkResults.find((l) => l.linkId === linkId);
-    return { linkId, source: lr?.source ?? "?", target: lr?.target ?? "?" };
+    return {
+      linkId,
+      source: lr ? resolveNodeLabel(lr.source, labels) : "?",
+      target: lr ? resolveNodeLabel(lr.target, labels) : "?",
+    };
   });
 }
 
@@ -163,8 +179,10 @@ interface TEPolicySummaryLine {
 
 // Derived from APPLY_TE_POLICY trace events (what was actually applied),
 // not from the request's tePolicies list — a policy that referenced an
-// unknown link/node id was ignored, and this reflects that reality.
-function buildAppliedPolicySummary(result: SimulationResult): TEPolicySummaryLine[] {
+// unknown link/node id was ignored, and this reflects that reality. Link
+// ids are kept as-is (links don't have a separate display label the way
+// nodes do); the waypoint node id is resolved to its label.
+function buildAppliedPolicySummary(result: SimulationResult, labels: NodeLabelMap): TEPolicySummaryLine[] {
   const events = result.traceEvents.filter((e) => e.stepType === "APPLY_TE_POLICY");
   if (events.length === 0) return [];
 
@@ -193,16 +211,21 @@ function buildAppliedPolicySummary(result: SimulationResult): TEPolicySummaryLin
   const lines: TEPolicySummaryLine[] = [];
   forbidden.forEach((id) => lines.push({ key: `forbid-${id}`, kind: "forbid", text: `Forbid link ${id}` }));
   lines.push(...adjustments.values());
-  waypoints.forEach((id) => lines.push({ key: `wp-${id}`, kind: "waypoint", text: `Require waypoint ${id}` }));
+  waypoints.forEach((id) =>
+    lines.push({ key: `wp-${id}`, kind: "waypoint", text: `Require waypoint ${resolveNodeLabel(id, labels)}` })
+  );
   return lines;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowTrace }) => {
+const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({
+  result, onShowTrace, network, focusedPathKey = null, onFocusPath,
+}) => {
   const [showPaths, setShowPaths] = useState(false);
   const hasCongestion = result.congestedLinkCount > 0;
   const narrative     = buildNarrative(result);
+  const labels = buildNodeLabelMap(network);
 
   const maxUtilPct = (result.maxUtilization * 100).toFixed(0);
   const utilClass  =
@@ -212,11 +235,11 @@ const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowT
 
   const totalPaths = result.pathResults.reduce((acc, pr) => acc + pr.paths.length, 0);
   const isSegmentRouting = result.algorithm === "SEGMENT_ROUTING";
-  const srDemandSummaries = isSegmentRouting ? buildSRDemandSummaries(result) : [];
+  const srDemandSummaries = isSegmentRouting ? buildSRDemandSummaries(result, labels) : [];
   const isEcmp = result.algorithm === "ECMP";
-  const distributionSummaries = isEcmp ? buildDistributionSummaries(result) : [];
-  const policySummary = buildAppliedPolicySummary(result);
-  const downLinks = buildDownLinksSummary(result);
+  const distributionSummaries = isEcmp ? buildDistributionSummaries(result, labels) : [];
+  const policySummary = buildAppliedPolicySummary(result, labels);
+  const downLinks = buildDownLinksSummary(result, labels);
 
   return (
     <div className="result-summary">
@@ -330,7 +353,7 @@ const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowT
               </div>
               {s.resolvedRoutes.map((route, i) => (
                 <div key={i} className="result-sr-route-row">
-                  <span className="result-sr-route-path">{route.nodes.join(" → ")}</span>
+                  <span className="result-sr-route-path">{formatNodePath(route.nodes, labels)}</span>
                   {s.resolvedRoutes.length > 1 && (
                     <span className="result-sr-route-pct">{route.percent.toFixed(0)}%</span>
                   )}
@@ -362,21 +385,46 @@ const ResultSummaryPanel: React.FC<ResultSummaryPanelProps> = ({ result, onShowT
         </div>
       )}
 
-      {/* Paths collapsible */}
-      <button className="collapse-toggle" onClick={() => setShowPaths((p) => !p)}>
-        {showPaths ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-        {showPaths ? "Hide" : "Show"} paths ({totalPaths})
-      </button>
+      {/* Paths collapsible — each row is clickable (Part E): selecting one
+          focuses it on the canvas (strong highlight, other paths secondary)
+          via the same trace-event highlight mechanism the Optimization
+          Lab's "View on graph" already uses — see utils/pathFocus.ts and
+          WorkflowManager's currentTraceEvent precedence. Clicking the
+          already-selected path again clears the focus. */}
+      <div className="path-list-header">
+        <button className="collapse-toggle" onClick={() => setShowPaths((p) => !p)}>
+          {showPaths ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          {showPaths ? "Hide" : "Show"} paths ({totalPaths})
+        </button>
+        {focusedPathKey && onFocusPath && (
+          <button className="path-list-clear-focus" onClick={() => onFocusPath(null, [])}>
+            <X size={11} /> Clear path focus
+          </button>
+        )}
+      </div>
 
       {showPaths && (
         <div className="path-list">
           {result.pathResults.map((pr) =>
-            pr.paths.map((share, i) => (
-              <div key={`${pr.demandId}-${i}`} className="path-item">
-                <span className="path-route">{share.nodes.join(" → ")}</span>
-                <span className="path-meta">cost {share.cost} · traffic {share.trafficShare.toFixed(2)}</span>
-              </div>
-            ))
+            pr.paths.map((share, i) => {
+              const key = pathFocusKey(pr.demandId, share.pathId, share.nodes);
+              const isFocused = focusedPathKey === key;
+              const clickable = !!onFocusPath;
+              return (
+                <div
+                  key={`${pr.demandId}-${i}`}
+                  className={`path-item${clickable ? " path-item--clickable" : ""}${isFocused ? " path-item--focused" : ""}`}
+                  role={clickable ? "button" : undefined}
+                  tabIndex={clickable ? 0 : undefined}
+                  onClick={clickable ? () => onFocusPath(isFocused ? null : key, share.nodes) : undefined}
+                  onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onFocusPath(isFocused ? null : key, share.nodes); } } : undefined}
+                >
+                  {clickable && <Target size={11} className="path-item-focus-icon" />}
+                  <span className="path-route">{formatNodePath(share.nodes, labels)}</span>
+                  <span className="path-meta">cost {share.cost} · traffic {share.trafficShare.toFixed(2)}</span>
+                </div>
+              );
+            })
           )}
         </div>
       )}

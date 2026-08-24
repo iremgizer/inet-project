@@ -114,6 +114,37 @@ export function applyAutoLayout(network: NetworkInput): NetworkInput {
   };
 }
 
+/** True when every node occupies a distinct, finite (x, y) position — i.e.
+ * the layout is actually usable on a canvas. False for missing/NaN
+ * coordinates, or when two or more nodes share the exact same position
+ * (including "every node defaults to the same placeholder coordinate",
+ * which is what an externally-produced network with no real layout looks
+ * like — e.g. the backend's Demo Scenario Pack builder, which sets every
+ * node's starter x/y to a fixed placeholder since node position is a
+ * purely visual, frontend-owned concern it deliberately doesn't compute). */
+export function hasUsableNodeLayout(network: NetworkInput): boolean {
+  const { nodes } = network;
+  if (nodes.length <= 1) return true;
+  const seen = new Set<string>();
+  for (const node of nodes) {
+    if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return false;
+    const key = `${node.x},${node.y}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+  }
+  return true;
+}
+
+/** Loads a network from external/stored data (Demo Scenario Pack, a saved
+ * assignment, ...) safely: preserves the stored node positions untouched
+ * when they're already usable, and otherwise falls back to
+ * `applyAutoLayout()` — the same deterministic, non-random circular layout
+ * already used for manually-added nodes and topology templates, not a
+ * second layout system. Never mutates the input. */
+export function ensureUsableNodeLayout(network: NetworkInput): NetworkInput {
+  return hasUsableNodeLayout(network) ? network : applyAutoLayout(network);
+}
+
 // ── Clos Fat-Tree ─────────────────────────────────────────────────────────────
 
 function closFatTree(spineCount: number, leafCount: number, hostsPerLeaf: number, topologyType: TopologyType, weight = 1, capacity = 10): NetworkInput {

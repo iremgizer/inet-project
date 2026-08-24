@@ -534,7 +534,27 @@ kbd {
 .page-actions {
   display:flex;
   gap:.5rem;
-  margin-top:.25rem
+  flex-wrap:wrap;
+  margin-top:.25rem;
+  /* Sticky panel footer (final-polish Part B) — .ws-left is the scrolling
+     ancestor (overflow-y:auto); sticking this to its own bottom edge keeps
+     Back/Optimization Lab/Run reachable at every scroll position and every
+     viewport height, instead of scrolling away below the fold on short
+     viewports (13"-laptop-height a common case). The background+border
+     keep scrolled-past content from showing through underneath it. */
+  position:sticky;
+  bottom:0;
+  z-index:5;
+  background:var(--surface);
+  border-top:1px solid var(--border);
+  /* Cancel .page's own 1.25rem padding so the sticky background spans the
+     full panel width (no gap at the edges revealing scrolled content),
+     then restore the same padding on the inside so the buttons themselves
+     stay aligned with everything else in the panel. */
+  margin-left:-1.25rem;
+  margin-right:-1.25rem;
+  margin-bottom:-1.25rem;
+  padding:.6rem 1.25rem 1.25rem;
 }
 
 .canvas-hint-row {
@@ -1481,6 +1501,61 @@ kbd {
   border:1px solid var(--border);
   border-radius:var(--radius-sm);
   font-size:.78rem
+}
+
+/* ── Clickable path focus (final-polish Part E) ── */
+
+.path-list-header {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px
+}
+
+.path-list-clear-focus {
+  display:flex;
+  align-items:center;
+  gap:4px;
+  font-size:.72rem;
+  font-weight:600;
+  color:var(--accent);
+  background:none;
+  border:none;
+  cursor:pointer;
+  padding:2px 4px
+}
+
+.path-list-clear-focus:hover {
+  text-decoration:underline
+}
+
+.path-item--clickable {
+  display:flex;
+  align-items:flex-start;
+  gap:6px;
+  cursor:pointer;
+  transition:background .12s, border-color .12s
+}
+
+.path-item--clickable:hover {
+  background:var(--accent-light);
+  border-color:var(--accent-border)
+}
+
+.path-item-focus-icon {
+  flex-shrink:0;
+  margin-top:3px;
+  color:var(--text-3)
+}
+
+.path-item--focused {
+  background:var(--accent-light) !important;
+  border-color:var(--accent) !important;
+  box-shadow:0 0 0 1px var(--accent)
+}
+
+.path-item--focused .path-item-focus-icon {
+  color:var(--accent)
 }
 
 .path-route {
@@ -10810,6 +10885,50 @@ html, body, #root {
   animation:sr-waypoint-pulse 1.4s ease-in-out infinite
 }
 
+/* ── Waypoint-selection mode: source / destination / already-chosen ──
+   Deliberately distinct from .rf-node--waypoint-active above (trace
+   playback) — different colors, solid (not pulsing) rings, and a text+icon
+   badge each, so the three states never read as "the same kind of thing"
+   even at a glance. See NetworkNode.tsx / ReactFlowCanvas's
+   srSelectSourceId/srSelectDestinationId/srSelectChosenIds. */
+
+.rf-node--sr-select-source {
+  border-color:var(--accent) !important;
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent)
+}
+
+.rf-node--sr-select-destination {
+  border-color:var(--purple) !important;
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--purple) 30%, transparent)
+}
+
+.rf-node--sr-select-chosen {
+  border-color:var(--success) !important;
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--success) 30%, transparent)
+}
+
+.rf-node-sr-badge {
+  position:absolute;
+  top:-20px;
+  left:50%;
+  transform:translateX(-50%);
+  display:flex;
+  align-items:center;
+  gap:2px;
+  font-size:8px;
+  font-weight:700;
+  letter-spacing:.03em;
+  padding:1px 5px;
+  border-radius:999px;
+  white-space:nowrap;
+  color:#fff;
+  pointer-events:none;
+}
+
+.rf-node-sr-badge--source      { background:var(--accent) }
+.rf-node-sr-badge--destination { background:var(--purple) }
+.rf-node-sr-badge--chosen      { background:var(--success) }
+
 /* ── Packet token (React Flow ViewportPortal overlay) ── */
 
 .rf-packet-token-wrap {
@@ -11964,6 +12083,146 @@ html, body, #root {
   background: var(--surface);
 }
 
+/* ── "View on graph" explicit feedback (Part F) ── */
+
+.opt-view-summary {
+  border: 1px solid var(--accent-border);
+  background: var(--accent-light);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: .82rem;
+}
+
+.opt-view-summary strong {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--text);
+}
+
+.opt-view-summary p {
+  margin: 2px 0 0;
+  color: var(--text-2);
+  line-height: 1.4;
+}
+
+.opt-view-summary--empty {
+  border-color: var(--border-strong);
+  background: var(--surface-3);
+}
+
+.opt-view-summary--theoretical {
+  border-color: var(--purple);
+  background: var(--purple-light);
+}
+
+/* ── Comparison mode banner (Part G) ── */
+
+.opt-comparison-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--warning-light);
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+  font-size: .82rem;
+  color: var(--text);
+}
+
+.opt-comparison-banner span {
+  flex: 1;
+}
+
+/* ── Run All Optimizations (Part H) ── */
+
+.opt-run-all-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.opt-run-all-progress {
+  font-size: .78rem;
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+/* ── Optimization comparison overview (Part I) ── */
+
+.opt-overview-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.opt-overview-table-wrap {
+  overflow-x: auto;
+  margin-top: 8px;
+}
+
+.opt-overview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .78rem;
+  white-space: nowrap;
+}
+
+.opt-overview-table th {
+  text-align: left;
+  padding: 6px 8px;
+  color: var(--text-3);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  font-size: .68rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.opt-overview-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.opt-overview-table tbody tr:hover {
+  background: var(--surface-3);
+}
+
+.opt-overview-row--selected {
+  background: var(--accent-light);
+}
+
+.opt-overview-actions {
+  display: flex;
+  gap: 4px;
+}
+
+/* ── Optimizer vs optimizer comparison (Part J) ── */
+
+.opt-pair-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.opt-pair-selectors {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.opt-pair-selectors select {
+  flex: 1;
+  min-width: 0;
+}
+
+.opt-pair-selectors span {
+  font-size: .75rem;
+  color: var(--text-3);
+  font-weight: 600;
+}
+
 .opt-lab-congestion-compare {
   display: flex;
   gap: 1.5rem;
@@ -12063,7 +12322,13 @@ html, body, #root {
 .opt-card-small-value {
   font-size: .74rem;
   font-weight: 600;
-  overflow-wrap: anywhere;
+  /* Break opportunities come from <wbr> after each underscore
+     (utils/breakableText.tsx) at the call sites that render long
+     SCREAMING_SNAKE_CASE values (EXACT_ENUMERATION, SEGMENT_ROUTING) — so
+     wrapping only ever happens at a natural word boundary, never mid-word.
+     overflow-wrap:anywhere previously broke arbitrarily (final-polish
+     Part B/L) and is deliberately not used here anymore. */
+  overflow-wrap: break-word;
 }
 
 .opt-card-explain {
