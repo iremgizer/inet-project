@@ -4,6 +4,8 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from app.services.mongo_config import get_server_selection_timeout_ms
+
 
 class AssignmentStorageService:
     """MongoDB-backed storage for assignments, submissions, and challenge attempts.
@@ -21,7 +23,7 @@ class AssignmentStorageService:
         self._available = False
         try:
             from pymongo import MongoClient
-            client = MongoClient(self.uri, serverSelectionTimeoutMS=500)
+            client = MongoClient(self.uri, serverSelectionTimeoutMS=get_server_selection_timeout_ms())
             client.admin.command("ping")
             db = client[self.database_name]
             self._assignments = db["assignments"]

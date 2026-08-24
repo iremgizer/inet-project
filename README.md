@@ -336,6 +336,10 @@ Once it's running, start the backend as in [Backend Setup](#backend-setup) above
 
 **Starting FastAPI does *not* start MongoDB** — they're independent processes; MongoDB (Docker container or native `mongod`) must already be running before (or independently of) the backend.
 
+**Local vs. shared/cloud MongoDB:** `MONGODB_URI` is the single switch between them — the same `AssignmentStorageService`/`RunStorageService` code reads it either way, no code change needed. Point it at `mongodb://localhost:27018` (above) for solo local development, or at a **MongoDB Atlas** connection string (`mongodb+srv://...`) for a shared database everyone on the team reads/writes the same data through — see `docs/deployment-and-database-guide.md` for the full Atlas setup. Either way, `backend/.env` is where the real value goes; it is gitignored (the bare `.env` line in `.gitignore`) and **must never be committed** — `backend/.env.example` only ever holds placeholder/local values, never a real connection string.
+
+An additional variable, `MONGODB_SERVER_SELECTION_TIMEOUT_MS` (default `5000`), controls how long the backend waits for a MongoDB connection before falling back to "unavailable" mode — the default is generous enough for both local MongoDB and a remote Atlas cluster; see `backend/.env.example`.
+
 **Note for teams:** if a teammate clones this repo and runs their own local MongoDB, their assignments/submissions live only on their machine — nothing here syncs data between contributors. For a shared/deployed setup (MongoDB Atlas, Render), plus the native-macOS-MongoDB alternative, full Atlas migration steps, and the full deployment plan, see **[`docs/deployment-and-database-guide.md`](docs/deployment-and-database-guide.md)**.
 
 ## Demo / Quick Start
