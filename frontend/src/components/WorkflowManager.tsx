@@ -13,6 +13,7 @@ import CanvasToolbar from "./CanvasToolbar";
 import LandingPage from "../pages/LandingPage";
 import TeacherDashboard from "../pages/TeacherDashboard";
 import StudentDashboard from "../pages/StudentDashboard";
+import DemoScenarioDashboard from "../pages/DemoScenarioDashboard";
 import NetworkBuilderPage from "../pages/NetworkBuilderPage";
 import TrafficConfigurationPage from "../pages/TrafficConfigurationPage";
 import AlgorithmSelectionPage from "../pages/AlgorithmSelectionPage";
@@ -25,10 +26,10 @@ import JsonHelpModal from "./JsonHelpModal";
 import { useToast } from "./Toast";
 import { UserRole } from "../utils/demoAuth";
 import { AssignedWork } from "../types/classroom";
-import { DEMO_STUDENTS } from "../utils/demoUsers";
+import { DEMO_STUDENTS, DEMO_STUDENT_ID } from "../utils/demoUsers";
 import { loadAssignedWorks, saveAssignedWorks, loadCurrentStudentId, saveCurrentStudentId } from "../utils/classroomStorage";
 import { exportAssignmentPdf } from "../utils/pdfExport";
-import { simulateNetwork, listSavedRuns, getSavedRun, deleteSavedRun, listAssignments, saveAssignment, getAssignment, gradeAttempt } from "../api/simulationApi";
+import { simulateNetwork, listSavedRuns, getSavedRun, deleteSavedRun, listAssignments, saveAssignment, getAssignment, getAssignmentForStudent, seedDemoScenarios, gradeAttempt } from "../api/simulationApi";
 import { runOptimization } from "../api/optimizationApi";
 import { OptimizationHistoryEntry, OptimizationLabMode, OptimizationRunRecord } from "../types/optimization";
 import { projectOptimizationResult } from "../utils/optimizationProjection";
@@ -1256,6 +1257,38 @@ const WorkflowManager: React.FC = () => {
     toast(`${a.mode === "challenge" ? "Challenge" : "Assignment"} "${a.title}" loaded.`, "success");
   }, [toast]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Demo Scenario Pack — opens a pre-seeded scenario (topology, demands,
+  // algorithm, policies, waypoints, failure schedule all come along
+  // together, nested inside starterAlgorithmConfig) via the same
+  // student-safe endpoint (/assignments/{id}/student) every other "open an
+  // assignment" flow uses. Deliberately does NOT run simulate/optimize —
+  // the presenter clicks Run/Optimize themselves, per the Demo Scenario
+  // Pack's own design (never auto-run anything expensive on open).
+  const handleOpenDemoScenario = useCallback(async (assignmentId: string) => {
+    try {
+      const a = await getAssignmentForStudent(assignmentId);
+      setNetwork(structuredClone(a.starterNetwork));
+      if (a.starterAlgorithmConfig) {
+        setAlgorithmConfig(structuredClone(a.starterAlgorithmConfig));
+      }
+      setActiveAssignment(null);
+      setSimulationResult(null);
+      setGradingResult(null);
+      setBaselineResult(null);
+      setOptimizationRunRecords({});
+      setOptimizationHistory([]);
+      setSelectedOptimizationMode(null);
+      setComparingOptimizationMode(null);
+      setReplayMode(null);
+      setIsTraceMode(false);
+      setIsPlaying(false);
+      setCurrentStep(3); // land on Algorithm — preloaded and ready to Run
+      toast(`Demo scenario "${a.title}" loaded.`, "success");
+    } catch {
+      toast("Could not load demo scenario. Is the backend/MongoDB running? Try Reseed pack.", "error");
+    }
+  }, [toast]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSwitchMode = useCallback((mode: AppMode) => {
     if (mode !== "challenge") {
       // Leaving challenge mode — clear stale challenge state
@@ -1721,8 +1754,9 @@ const WorkflowManager: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(EXAMPLE_CHALLENGES),
       });
+      await seedDemoScenarios(); // idempotent — safe to call every time this button is clicked
       await refreshSavedAssignments(); // eslint-disable-line
-      toast("Demo assignments seeded to MongoDB.", "success");
+      toast("Demo assignments and scenario pack seeded to MongoDB.", "success");
     } catch {
       toast("Seed failed. Is the backend running?", "error");
     }
@@ -2009,6 +2043,8 @@ const WorkflowManager: React.FC = () => {
               onResetDemoData={handleResetDemoData}
               onSeedDemoToMongoDB={handleSeedDemoToMongoDB}
             />
+          ) : currentStudentId === DEMO_STUDENT_ID ? (
+            <DemoScenarioDashboard onOpenScenario={handleOpenDemoScenario} />
           ) : (
             <StudentDashboard
               assignedWorks={assignedWorks}

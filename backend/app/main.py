@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from app.models import Assignment, GradeRequest, SimulationRequest, StudentSubmission, ChallengeAttemptRecord
 from app.optimization.models import OptimizeRequest, SearchSpaceEstimateRequest
 from app.services.assignment_service import AssignmentStorageService
+from app.services.demo_scenario_service import seed_demo_scenarios
 from app.services.optimization_service import estimate_search_space, run_optimization
 from app.services.simulation_service import SimulationService
 from app.services.topology_service import TopologyService
@@ -148,6 +149,24 @@ def seed_demo(assignments: List[Assignment]) -> Dict[str, Any]:
         assignment_storage.save_assignment(doc)
         count += 1
     return {"seeded": count, "message": f"Seeded {count} demo assignments."}
+
+# ── Demo Scenario Pack ───────────────────────────────────────────────────────
+# Server-side-configured, MongoDB-persisted teaching scenarios shown to the
+# "Demo Student" account (see app/demo/demo_scenarios.py). Idempotent —
+# calling this endpoint any number of times upserts the same 16 documents,
+# never creating duplicates (same replace_one(upsert=True)-by-assignmentId
+# path as /seed-demo above and every other assignment save).
+
+@app.post("/seed-demo-scenarios")
+def seed_demo_scenarios_route() -> Dict[str, Any]:
+    return seed_demo_scenarios(assignment_storage)
+
+@app.get("/demo-scenarios")
+def list_demo_scenarios() -> List[Dict[str, Any]]:
+    """Student-safe summaries (no starterNetwork/expectedSolution/lockedFields
+    payload) for the Demo Student dashboard. Returns [] if MongoDB is
+    unavailable or nothing has been seeded yet — never fabricated data."""
+    return assignment_storage.list_demo_scenarios()
 
 @app.get("/assignments/{assignment_id}/submissions")
 def list_submissions(assignment_id: str):
