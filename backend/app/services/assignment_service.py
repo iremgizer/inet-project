@@ -79,6 +79,35 @@ class AssignmentStorageService:
         result = self._assignments.delete_one({"assignmentId": assignment_id})
         return result.deleted_count > 0
 
+    # ── Demo Scenario Pack ──────────────────────────────────────────────────────
+    # Demo scenarios are ordinary assignment documents (mode="lecture",
+    # `demoScenario` set) stored in the SAME `assignments` collection above —
+    # no separate collection, per the "MongoDB-backed, not a parallel
+    # platform" design. This is just a dedicated query/projection for them.
+
+    def list_demo_scenarios(self) -> List[Dict[str, Any]]:
+        """Student-safe summaries of every seeded demo scenario, grouped for
+        dashboard display. Returns [] if MongoDB is unavailable — the Demo
+        Student dashboard shows a clean "not seeded yet" state in that case,
+        never fabricated data.
+        """
+        if not self._available or self._assignments is None:
+            return []
+        docs = self._assignments.find(
+            {"demoScenario": {"$ne": None}},
+            {
+                "_id": 0, "starterNetwork": 0, "starterAlgorithmConfig": 0,
+                "expectedSolution": 0, "lockedFields": 0, "gradingRules": 0,
+                "challengeConfig": 0, "studentTask": 0,
+            },
+        )
+        scenarios = list(docs)
+        scenarios.sort(key=lambda d: (
+            (d.get("demoScenario") or {}).get("category", ""),
+            (d.get("demoScenario") or {}).get("order", 0),
+        ))
+        return scenarios
+
     # ── Submissions ────────────────────────────────────────────────────────────
 
     def save_submission(self, submission: Dict[str, Any]) -> Dict[str, Any]:

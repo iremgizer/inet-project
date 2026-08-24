@@ -50,13 +50,16 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onGuestLab }) => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const role = demoAuthenticate(username, password);
-    if (!role) { setError("Invalid credentials."); return; }
-    if (role !== selectedRole) { setError("These credentials belong to a different role."); return; }
-    if (role === "student") {
+    const auth = demoAuthenticate(username, password);
+    if (!auth) { setError("Invalid credentials."); return; }
+    if (auth.role !== selectedRole) { setError("These credentials belong to a different role."); return; }
+    if (auth.boundStudentId) {
+      // Demo Student — skip the manual profile picker, sign straight in.
+      onLogin(auth.role, auth.boundStudentId);
+    } else if (auth.role === "student") {
       setStep("select-student");
     } else {
-      onLogin(role);
+      onLogin(auth.role);
     }
   };
 
@@ -145,6 +148,11 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onGuestLab }) => {
               </button>
             </form>
             <div className="landing-demo-hint">{ROLE_META[selectedRole].hint}</div>
+            {selectedRole === "student" && (
+              <div className="landing-demo-hint landing-demo-hint-secondary">
+                Or jump straight to the demo scenario pack — Username: demo · Password: demo
+              </div>
+            )}
           </div>
         )}
 

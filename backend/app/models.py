@@ -413,6 +413,41 @@ class GradingRules(BaseModel):
     allowEquivalentWeights: bool = True
     maxScore: int = 100
 
+# ── Demo Scenario Pack (Sprint 2 readiness) ─────────────────────────────────
+# Additive-only metadata for the curated, MongoDB-backed demo scenarios shown
+# to the "Demo Student" account. Deliberately reuses Assignment/mode="lecture"
+# rather than inventing a parallel scenario platform — a demo scenario IS an
+# Assignment, just one with `demoScenario` set and no expectedSolution (these
+# are presenter-driven walkthroughs, not graded exercises).
+DemoCategory = Literal[
+    "Routing Basics", "Traffic Engineering", "Failures", "Optimization", "Optimization Complexity"
+]
+DemoComplexity = Literal["Beginner", "Intermediate", "Advanced"]
+DemoOptimizationMode = Literal["OPT", "WPO", "LWO", "JOINT"]
+
+class DemoScenarioMeta(BaseModel):
+    """Dashboard/organizational metadata only — never a teaching-claim value.
+
+    `recommendedBudget`/`alternateBudget`/`recommendedMinWeight`/
+    `recommendedMaxWeight` are UI *suggestions* shown as plain text on the
+    scenario card (e.g. "try budget=1, then 1,000,000") so a presenter knows
+    what to type into the Optimization Lab's own settings panel — never a
+    pre-computed expected result. The actual MLU/searchMethod/provenOptimal
+    the student sees always comes from a fresh POST /optimize call, exactly
+    like every other Optimization Lab run.
+    """
+    category: DemoCategory
+    order: int = 0
+    shortDescription: str = ""
+    complexity: Optional[DemoComplexity] = None
+    recommended: bool = False
+    tags: List[str] = Field(default_factory=list)
+    optimizationMode: Optional[DemoOptimizationMode] = None
+    recommendedBudget: Optional[int] = None
+    alternateBudget: Optional[int] = None
+    recommendedMinWeight: Optional[int] = None
+    recommendedMaxWeight: Optional[int] = None
+
 class Assignment(BaseModel):
     assignmentId: str = Field(default_factory=lambda: str(uuid4()))
     title: str
@@ -427,6 +462,12 @@ class Assignment(BaseModel):
     expectedSolution: Optional[ExpectedSolution] = None
     gradingRules: GradingRules = Field(default_factory=GradingRules)
     challengeConfig: Optional[ChallengeConfig] = None
+    # Additive, optional — absent for every pre-existing Assignment (JSON
+    # files, MongoDB documents, in-flight teacher drafts) and ignored by
+    # every consumer that doesn't know about it yet, so this is a strictly
+    # backward-compatible extension, not a breaking schema change.
+    starterAlgorithmConfig: Optional[AlgorithmConfig] = None
+    demoScenario: Optional[DemoScenarioMeta] = None
     createdAt: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updatedAt: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 

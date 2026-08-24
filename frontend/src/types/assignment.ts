@@ -53,6 +53,30 @@ export interface GradingRules {
   maxScore: number;
 }
 
+// ── Demo Scenario Pack ──────────────────────────────────────────────────────
+// Additive-only — see backend/app/models.py's DemoScenarioMeta docstring.
+// `demoScenario` is dashboard/organizational metadata only; any
+// optimization-related fields on it are UI hints (what budget to try), never
+// a stored expected result. The real teaching claim always comes from a
+// fresh /simulate or /optimize call, exactly like every other run.
+export type DemoCategory = "Routing Basics" | "Traffic Engineering" | "Failures" | "Optimization" | "Optimization Complexity";
+export type DemoComplexity = "Beginner" | "Intermediate" | "Advanced";
+export type DemoOptimizationMode = "OPT" | "WPO" | "LWO" | "JOINT";
+
+export interface DemoScenarioMeta {
+  category: DemoCategory;
+  order: number;
+  shortDescription: string;
+  complexity?: DemoComplexity | null;
+  recommended: boolean;
+  tags: string[];
+  optimizationMode?: DemoOptimizationMode | null;
+  recommendedBudget?: number | null;
+  alternateBudget?: number | null;
+  recommendedMinWeight?: number | null;
+  recommendedMaxWeight?: number | null;
+}
+
 export interface Assignment {
   assignmentId: string;
   title: string;
@@ -67,6 +91,26 @@ export interface Assignment {
   expectedSolution: ExpectedSolution | null;
   gradingRules: GradingRules;
   challengeConfig?: ChallengeConfig;
+  starterAlgorithmConfig?: AlgorithmConfig | null;
+  demoScenario?: DemoScenarioMeta | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Lightweight summary shape returned by GET /demo-scenarios — everything
+// needed for a dashboard card, nothing needed to actually run one (no
+// starterNetwork/starterAlgorithmConfig — fetch the full Assignment via
+// GET /assignments/{id}/student, the same student-safe endpoint every other
+// "open an assignment" flow already uses, to actually open it).
+export interface DemoScenarioSummary {
+  assignmentId: string;
+  title: string;
+  description: string;
+  course: string;
+  topic: AssignmentTopic;
+  mode: AssignmentMode;
+  allowedAlgorithms: AlgorithmName[];
+  demoScenario: DemoScenarioMeta;
   createdAt: string;
   updatedAt: string;
 }

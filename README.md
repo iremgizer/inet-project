@@ -41,7 +41,9 @@ inet-project/
 │   └── package.json
 ├── backend/           # FastAPI + Python backend
 │   ├── app/
-│   │   ├── algorithms/    # ECMP and Distance Vector implementations
+│   │   ├── algorithms/    # ECMP, Distance Vector, Segment Routing implementations
+│   │   ├── optimization/  # OPT/WPO/LWO/Joint optimizers (Sprint 2)
+│   │   ├── demo/          # Demo Scenario Pack — pre-seeded topologies (see README's Demo Scenario Pack section)
 │   │   ├── services/      # MongoDB storage services
 │   │   ├── main.py        # API entrypoint and route definitions
 │   │   └── models.py      # Pydantic request/response models
@@ -62,8 +64,9 @@ inet-project/
 |---|---|---|
 | Teacher | `teacher` | `teacher` |
 | Student | `student` | `student` |
+| Demo Student | `demo` | `demo` |
 
-The credentials are defined in `frontend/src/utils/demoAuth.ts`.
+The credentials are defined in `frontend/src/utils/demoAuth.ts`. The `demo`/`demo` account is a distinct, clearly-labeled demo-only profile — see [Demo Student](#demo-student) below.
 
 ### Demo student roster
 
@@ -84,6 +87,42 @@ Each demo student has different pre-seeded progress data, so the Student Dashboa
 | Alice (s001) | ECMP, Congestion | 4 challenges solved, avg score 88% |
 | Bob (s002) | Shortest Path | 1 challenge solved, avg score 65%, using hints |
 | Charlie (s003) | Getting started | 0 challenges solved, needs encouragement |
+
+---
+
+## Demo Student
+
+A fourth, dedicated demo profile — distinct from Alice/Bob/Charlie above — built to showcase Sprint 1 and Sprint 2's most important behavior with zero manual setup.
+
+**Access:** On the landing page, choose **Student**, then sign in with `demo` / `demo`. Unlike the regular student login, this skips the "choose your profile" picker entirely and signs straight in as **Demo Student** — one login, no extra clicks. (You can also reach the same profile manually from the regular student picker, where it's listed alongside Alice/Bob/Charlie.)
+
+**What it shows:** Instead of the normal assignment-driven "My Work" tab, Demo Student's home screen is the **Demo Scenario Pack** (below) — a curated set of pre-loaded topologies covering ECMP, Segment Routing, Traffic Engineering policies, failures, and every Sprint 2 optimization mode. Nothing needs to be built or imported by hand.
+
+**Clearly demo-only:** this is the same kind of local-prototype credential as `teacher`/`teacher` and `student`/`student` — not real authentication, and it grants no elevated access. It is a fourth entry in the same demo roster, not a parallel login system.
+
+## Demo Scenario Pack
+
+Sixteen deterministic, mathematically verified scenarios, grouped into five categories:
+
+| Category | Scenarios | What it covers |
+|---|---|---|
+| Routing Basics | 3 | Clean ECMP split, ECMP congestion, Segment Routing with a waypoint + ECMP-within-segments |
+| Traffic Engineering | 4 | Custom ECMP distribution, FORBID_LINK, PREFER_LINK, link failure + rerouting |
+| Failures | 1 additional | Mid-simulation scheduled failure (watch it happen live in Replay) |
+| Optimization | 5 | OPT unavoidable congestion, current-routing-vs-OPT gap, WPO, LWO, Joint |
+| Optimization Complexity | 3 | Exact-vs-heuristic WPO, exact-vs-heuristic LWO (a genuine local optimum), Joint search-budget threshold |
+
+Every scenario's topology and demands are copied from an already mathematically-verified backend test fixture (never hand-invented) — see `backend/app/demo/demo_scenarios.py` for the exact source citation on each one, and `backend/tests/test_demo_scenarios.py` for a backend test that re-derives its teaching claim from the real simulate/optimize code paths.
+
+**How it's stored:** each scenario is an ordinary `Assignment` document (`mode: "lecture"`, no `expectedSolution`) in the same MongoDB `assignments` collection every other assignment uses — not a parallel data model, and not localStorage. Opening one loads its topology, demands, algorithm, TE/Segment-Routing policies, and failure schedule together; it never auto-runs a simulation or optimization — you click Run / Optimize yourself.
+
+**Seeding it:**
+
+```bash
+curl -X POST http://localhost:8000/seed-demo-scenarios
+```
+
+Idempotent — safe to run any number of times; it upserts the same 16 documents by their stable `assignmentId` (e.g. `demo-ecmp-basic`, `demo-wpo`, `demo-exact-vs-heuristic-lwo`) rather than inserting new copies. The **Reseed pack** button on the Demo Student dashboard, and the Teacher Dashboard's existing **Seed Demo to MongoDB** tool, both call the same endpoint. Requires MongoDB — see [Optional MongoDB](#optional-mongodb) above; without it, the Demo Student dashboard shows a clean "not seeded yet" message rather than fabricating data.
 
 ---
 
@@ -302,6 +341,8 @@ The fastest way to see the project with no login and no setup beyond the two dev
 3. Use a template or **Import JSON** and load `sample-json/triangle_ecmp.json` (three nodes, two equal-cost paths — the clearest ECMP demo)
 4. Add a traffic demand between two nodes, then choose **ECMP** and run the simulation to see traffic split and congestion coloring
 5. Click **Optimization Lab** on the same Choose Algorithm screen to compare the baseline against OPT / Waypoint / Link Weight / Joint optimization results
+
+**Even faster, with MongoDB running:** seed the [Demo Scenario Pack](#demo-scenario-pack) (`curl -X POST http://localhost:8000/seed-demo-scenarios`), then log in as **Demo Student** (`demo` / `demo`) — 16 pre-loaded scenarios are ready to open immediately, no template/import/demand-entry steps needed.
 
 For the full guided teacher/student/challenge walkthrough, see [Midterm Demo Script](#midterm-demo-script) below.
 

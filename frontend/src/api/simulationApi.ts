@@ -1,5 +1,5 @@
 import { SimulationRequest, SimulationResult, NetworkInput, SavedSimulationRun, SavedSimulationSummary, AlgorithmConfig } from "../types/network";
-import { Assignment, AssignmentSummary, StudentSubmission } from "../types/assignment";
+import { Assignment, AssignmentSummary, StudentSubmission, DemoScenarioSummary } from "../types/assignment";
 import { ChallengeGradingResult } from "../types/challenge";
 
 const BASE_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
@@ -77,6 +77,28 @@ export async function saveAssignment(assignment: Assignment): Promise<Assignment
 export async function deleteAssignment(assignmentId: string): Promise<void> {
   const r = await fetch(`${BASE_URL}/assignments/${assignmentId}`, { method: "DELETE" });
   if (!r.ok) throw new Error(await readError(r, "Failed to delete assignment"));
+}
+
+/** Student-safe full assignment (expectedSolution stripped server-side) —
+ * the same endpoint every "open an assignment" flow should use. */
+export async function getAssignmentForStudent(assignmentId: string): Promise<Assignment> {
+  const r = await fetch(`${BASE_URL}/assignments/${assignmentId}/student`);
+  if (!r.ok) throw new Error(await readError(r, "Assignment not found"));
+  return r.json();
+}
+
+// ── Demo Scenario Pack ───────────────────────────────────────────────────────
+
+export async function listDemoScenarios(): Promise<DemoScenarioSummary[]> {
+  const r = await fetch(`${BASE_URL}/demo-scenarios`);
+  if (!r.ok) throw new Error(await readError(r, "Failed to load demo scenarios"));
+  return r.json();
+}
+
+export async function seedDemoScenarios(): Promise<{ seeded: number; scenarioIds: string[]; message: string }> {
+  const r = await fetch(`${BASE_URL}/seed-demo-scenarios`, { method: "POST" });
+  if (!r.ok) throw new Error(await readError(r, "Failed to seed demo scenarios"));
+  return r.json();
 }
 
 export async function saveSubmission(submission: StudentSubmission): Promise<StudentSubmission> {
