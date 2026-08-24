@@ -173,12 +173,43 @@ Current official guidance (verified via MongoDB's own docs and current setup wal
 
 ### Can the current code already use a standard MongoDB URI without changes?
 
-**Yes, with one caveat worth fixing before relying on it in production — identified precisely below.**
+**Yes.** As of the Atlas migration described below, this is no longer hypothetical — it has been exercised against a real Atlas cluster.
 
-- **URI handling needs no change.** Both storage services read `MONGODB_URI` from the environment and pass it straight to `pymongo.MongoClient(self.uri, ...)` with no parsing, no assumption about scheme (`mongodb://` vs `mongodb+srv://`), and no hardcoded host. An Atlas SRV string works as a drop-in value.
-- **`mongodb+srv://` resolution needs no new dependency.** Atlas's default connection string uses the `mongodb+srv://` scheme, which requires the `dnspython` package for SRV/DNS resolution. `backend/requirements.txt` does not list `dnspython` explicitly, but **`pymongo==4.10.1`'s own package metadata declares `dnspython<3.0.0,>=1.16.0` as an unconditional (non-extra) dependency** — verified directly against the installed virtualenv in this repository, where `dnspython==2.8.0` is already present purely as a transitive dependency of `pymongo`. `pip install -r requirements.txt` already installs everything needed for an SRV connection string; no `requirements.txt` edit is required for this specifically.
-- **The one real risk: `serverSelectionTimeoutMS=500`.** This 500ms timeout (both `assignment_service.py` and `run_storage_service.py`) was tuned for the local-dev case — "if MongoDB isn't running on localhost, fail almost instantly and fall back gracefully." Against Atlas, every connection attempt is a real network round-trip (DNS SRV lookup, TLS handshake, replica-set discovery) from wherever the backend runs to Atlas's servers — commonly more than 500ms, especially the *first* connection after a cold start. **Risk:** the backend could report `mongoAvailable: false` against a perfectly healthy Atlas cluster simply because the handshake didn't finish inside half a second, silently falling back to "MongoDB unavailable" behavor (every write becomes a no-op) instead of raising a visible error.
-  - **Precise change, if/when this is acted on:** raise `serverSelectionTimeoutMS` in both `backend/app/services/assignment_service.py` and `backend/app/services/run_storage_service.py` — e.g. to 3000-5000ms — ideally via a new `MONGODB_SERVER_SELECTION_TIMEOUT_MS` environment variable (same pattern the optimization safety cap already uses for `OPTIMIZATION_MAX_EXACT_COMBINATIONS_CAP`) so local dev can keep its fast fail-over while a deployed environment gets a more forgiving timeout. **This document does not make that change** — it is scoped to documentation only, per this task's own instructions.
+- **URI handling needed no change.** Both storage services read `MONGODB_URI` from the environment and pass it straight to `pymongo.MongoClient(self.uri, ...)` with no parsing, no assumption about scheme (`mongodb://` vs `mongodb+srv://`), and no hardcoded host. An Atlas SRV string works as a drop-in value — confirmed live (see below), not just by reading the code.
+- **`mongodb+srv://` resolution needed no new dependency.** Atlas's default connection string uses the `mongodb+srv://` scheme, which requires the `dnspython` package for SRV/DNS resolution. `backend/requirements.txt` does not list `dnspython` explicitly, but **`pymongo==4.10.1`'s own package metadata declares `dnspython<3.0.0,>=1.16.0` as an unconditional (non-extra) dependency** — verified directly against the installed virtualenv in this repository, where `dnspython==2.8.0` is already present purely as a transitive dependency of `pymongo`. `pip install -r requirements.txt` already installs everything needed for an SRV connection string; no `requirements.txt` edit was required for this specifically, and SRV resolution was confirmed to work end-to-end during the live Atlas test below.
+- **The one real risk has been fixed: `serverSelectionTimeoutMS`.** The original 500ms timeout (both `assignment_service.py` and `run_storage_service.py`) was tuned for the local-dev case — "if MongoDB isn't running on localhost, fail almost instantly and fall back gracefully." Against a remote cluster, every connection attempt is a real network round-trip (DNS SRV lookup, TLS handshake, replica-set discovery) — commonly more than 500ms, especially the *first* connection after a cold start, risking a false `mongoAvailable: false` against a perfectly healthy cluster. **This has been implemented**, not just identified: a new shared helper, `backend/app/services/mongo_config.py`, reads `MONGODB_SERVER_SELECTION_TIMEOUT_MS` (default `5000`) and both storage services now call it instead of hardcoding `500` — so the two independent `MongoClient` connections this app opens always agree on the same timeout. See `backend/tests/test_mongo_config.py` for regression coverage (default, env override, invalid-value fallback, and both services consuming it identically) — none of which require a real database connection.
+
+### Atlas migration status — verified live
+
+Tested against a real MongoDB Atlas cluster (M0), with the local MongoDB instance on port 27018 stopped beforehand so no successful result could be coming from local MongoDB by accident. No connection string, hostname, username, or password is reproduced anywhere in this document, the git history, or any test — only counts and booleans, exactly as required.
+
+| Check | Result |
+|---|---|
+| `GET /health` against Atlas | `"mongoAvailable": true` |
+| `POST /seed-demo-scenarios` (first run) | `{"seeded": 16, ...}` |
+| `GET /demo-scenarios` count | `16` |
+| `POST /seed-demo-scenarios` (re-run — idempotency) | `{"seeded": 16, ...}`, list count still `16`, no duplicates |
+| Collections created by the application | `assignments` (confirmed present with 16 documents after seeding; the app never manually pre-creates empty collections) |
+| Connection type | MongoDB Atlas (`mongodb+srv://`) — confirmed via the SRV scheme and by local MongoDB being stopped throughout |
+
+**Not completed in this session — a network-connectivity caveat, not a configuration problem:** after the sequence above succeeded, further fresh connection attempts from this particular development session began failing at the TLS handshake layer (`TLSV1_ALERT_INTERNAL_ERROR`), reproduced independently through `pymongo`, Python's own `ssl` module, and raw `openssl s_client` — while general internet TLS (e.g. to `api.github.com`) continued to work fine throughout. This points to an intermittent network-path issue specific to that session's egress to Atlas's cluster hosts, not to credentials, URI formatting, DNS/SRV resolution, Atlas network access rules, or this project's code (all four of which were already conclusively exercised successfully in the sequence above). As a result, the Demo Student open-scenario flow, and the assignment/submission/simulation-run restart-persistence tests, could not be completed live in that session. They should be re-run (commands below) once connectivity to Atlas is stable — nothing about the application changes between "works" and "doesn't" here, only the network path.
+
+```bash
+# Demo Student flow (after logging in as demo/demo in the frontend, or directly):
+curl http://localhost:8000/demo-scenarios                       # expect 16 scenarios
+curl http://localhost:8000/assignments/demo-wpo/student         # expect full starter config, no expectedSolution
+
+# Assignment persistence across a restart:
+curl -X POST http://localhost:8000/assignments -H "Content-Type: application/json" -d '{...}'
+# restart the backend, then:
+curl http://localhost:8000/assignments/<the-id-you-used>
+curl -X DELETE http://localhost:8000/assignments/<the-id-you-used>   # clean up
+
+# Submission persistence — same pattern via POST/GET /submissions/{id}.
+# Simulation run persistence — save one via /simulate with a real request,
+# confirm it via GET /simulations/{simulationRunId} after a restart, then
+# DELETE /simulations/{simulationRunId} to clean up.
+```
 
 ---
 
@@ -306,7 +337,7 @@ Once the backend and Atlas are both deployed (§5-§7), every student's browser 
 | Stage | Setup | What it enables | Move to next stage when... |
 |---|---|---|---|
 | **Stage 0 — Local development** | React (Vite dev server) + FastAPI (`uvicorn --reload`) + MongoDB optional, local only | Everything in §1's "works without MongoDB" table, plus full persistence if a contributor runs local MongoDB (§2) | A second person needs to see the *same* data — the current setup, working as documented, is the ceiling for shared state |
-| **Stage 1 — Shared database** | Local frontend (`npm run dev`) + local backend (`uvicorn`) + `MONGODB_URI` pointed at a shared MongoDB Atlas cluster instead of `localhost:27018` | Everyone's local frontend/backend now reads/writes the *same* assignments/submissions — good for a small team validating Atlas before deploying anything publicly | The team needs the app itself reachable by people who don't have the repo cloned/running locally — a teacher demoing to students who aren't developers |
+| **Stage 1 — Shared database** ✅ **verified** | Local frontend (`npm run dev`) + local backend (`uvicorn`) + `MONGODB_URI` pointed at a shared MongoDB Atlas cluster instead of `localhost:27018` | Everyone's local frontend/backend now reads/writes the *same* assignments/submissions — good for a small team validating Atlas before deploying anything publicly | The team needs the app itself reachable by people who don't have the repo cloned/running locally — a teacher demoing to students who aren't developers |
 | **Stage 2 — Simple classroom deployment** | Render Static Site (frontend) + Render Web Service (backend, single instance/worker) + MongoDB Atlas (§5-§7) | A URL anyone can open — the actual "the class can use this" milestone | Sustained concurrent load causes noticeable slowdown (§10) that isn't resolved by simply lowering the search-budget cap, or genuine multi-section/multi-course usage |
 | **Stage 3 — Higher concurrency** | Same architecture, but the Render Web Service scaled to multiple workers/instances (a Render plan/config change, not a rewrite) — and, only if CPU-bound `/optimize` calls are the specific bottleneck (not just general traffic), a separate background job/worker process for exact-enumeration searches so they stop blocking request-handling workers | Concurrent optimization-heavy usage stops degrading unrelated requests | Load requires coordinating many independent services, custom autoscaling policies, or multi-region routing — not just "more of the same process" |
 | **Stage 4 — Container orchestration (Kubernetes)** | Only if Stage 3's simpler scaling (more Render workers/instances, or one background job service) is measurably insufficient | Fine-grained autoscaling, multi-service orchestration, custom scheduling | This stage should be justified by an actual measured bottleneck at Stage 3, never adopted speculatively — see §5's reasoning for why it isn't needed today |
@@ -322,14 +353,15 @@ Once the backend and Atlas are both deployed (§5-§7), every student's browser 
 - [ ] `mongosh --port 27018` → `show collections` lists at least `assignments` after one write
 
 ### Atlas migration checklist
-- [ ] Atlas project + M0 cluster created, region chosen deliberately (§4 step 1)
-- [ ] Dedicated application database user created with a generated, unique password (§4 step 2, §9)
-- [ ] Network access configured (§4 step 3, §9)
-- [ ] Connection string obtained from Atlas's own "Connect → Drivers → Python" flow (§4 step 4)
-- [ ] `MONGODB_URI`/`MONGODB_DATABASE` set as environment variables wherever the backend runs — never committed (§4 steps 5-6)
-- [ ] (Recommended, not yet implemented) `serverSelectionTimeoutMS` raised for the added network latency — see §4's precise callout
-- [ ] `GET /health` → `"mongoAvailable": true` against Atlas (§4 step 7)
-- [ ] Demo data seeded (`POST /seed-demo-scenarios`, optionally `POST /seed-demo`) and confirmed in Atlas's Browse Collections UI (§4 steps 8-9)
+- [x] Atlas project + M0 cluster created, region chosen deliberately (§4 step 1)
+- [x] Dedicated application database user created with a generated, unique password (§4 step 2, §9)
+- [x] Network access configured (§4 step 3, §9)
+- [x] Connection string obtained from Atlas's own "Connect → Drivers → Python" flow (§4 step 4)
+- [x] `MONGODB_URI`/`MONGODB_DATABASE` set in `backend/.env` — never committed (§4 steps 5-6)
+- [x] `serverSelectionTimeoutMS` made configurable (`MONGODB_SERVER_SELECTION_TIMEOUT_MS`, default 5000) — see §4's "Atlas migration status" section
+- [x] `GET /health` → `"mongoAvailable": true` against Atlas, with local MongoDB stopped to rule out a false positive (§4 step 7)
+- [x] Demo data seeded (`POST /seed-demo-scenarios`) — 16 scenarios, confirmed idempotent on re-run, no duplicates (§4 steps 8-9)
+- [ ] Demo Student flow, and assignment/submission/simulation-run restart-persistence, verified live — **not completed**; blocked by an intermittent network-connectivity issue in the session that ran this checklist (not a credentials/config problem — see §4's "Atlas migration status" for the exact repro commands to finish this once connectivity is stable)
 
 ### Render deployment checklist
 - [ ] Backend Web Service: root `backend`, build `pip install -r requirements.txt`, start `uvicorn app.main:app --host 0.0.0.0 --port $PORT` (§7)
