@@ -4,6 +4,27 @@ import { ChallengeGradingResult } from "../types/challenge";
 
 const BASE_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
+/** Thrown by API calls that got a real HTTP response back (so `status` is
+ * known) — as opposed to `fetch()` itself throwing (network failure, CORS
+ * block, backend unreachable), which surfaces as a plain TypeError with no
+ * `status` at all. Callers that need to tell "backend unreachable" apart
+ * from "backend responded but rejected the request" can check
+ * `err instanceof ApiError` first. */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+export async function getBackendHealth(): Promise<{ status: string; mongoAvailable: boolean }> {
+  const r = await fetch(`${BASE_URL}/health`);
+  if (!r.ok) throw new ApiError(await readError(r, "Health check failed"), r.status);
+  return r.json();
+}
+
 export async function simulateNetwork(request: SimulationRequest): Promise<SimulationResult> {
   const response = await fetch(`${BASE_URL}/simulate`, {
     method: "POST",
@@ -91,13 +112,26 @@ export async function getAssignmentForStudent(assignmentId: string): Promise<Ass
 
 export async function listDemoScenarios(): Promise<DemoScenarioSummary[]> {
   const r = await fetch(`${BASE_URL}/demo-scenarios`);
-  if (!r.ok) throw new Error(await readError(r, "Failed to load demo scenarios"));
+  if (!r.ok) throw new ApiError(await readError(r, "Failed to load demo scenarios"), r.status);
   return r.json();
 }
 
 export async function seedDemoScenarios(): Promise<{ seeded: number; scenarioIds: string[]; message: string }> {
   const r = await fetch(`${BASE_URL}/seed-demo-scenarios`, { method: "POST" });
-  if (!r.ok) throw new Error(await readError(r, "Failed to seed demo scenarios"));
+  if (!r.ok) throw new ApiError(await readError(r, "Failed to seed demo scenarios"), r.status);
+  return r.json();
+}
+
+/** POST /seed-demo — the Teacher Dashboard's separate "example challenge
+ * assignments" seed (distinct from the Demo Scenario Pack above). Takes the
+ * raw assignment objects as the backend route itself expects. */
+export async function seedDemoAssignments(assignments: unknown[]): Promise<{ seeded: number; message: string }> {
+  const r = await fetch(`${BASE_URL}/seed-demo`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(assignments),
+  });
+  if (!r.ok) throw new ApiError(await readError(r, "Failed to seed demo assignments"), r.status);
   return r.json();
 }
 

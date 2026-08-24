@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -20,12 +21,51 @@ from app.services.grading_service import grade_attempt
 
 app = FastAPI(title="Network Algorithm Visualization Tool Backend")
 
-origins = [
+# ── CORS ─────────────────────────────────────────────────────────────────────
+# Local dev origins are always allowed, unconditionally, so nothing changes
+# for anyone running the project locally (backward compatible with every
+# prior deployment of this middleware). A deployed frontend's origin is
+# added on top via FRONTEND_ORIGIN/FRONTEND_ORIGINS — never hardcoded here,
+# since the exact Render URL isn't known at commit time and shouldn't
+# require a code change (or a redeploy of this file) to configure per
+# environment. `allow_origins=["*"]` is never used together with
+# `allow_credentials=True` — that combination is rejected by browsers
+# anyway (and pointless here, since every route this app exposes is
+# same-origin-cookie-free; credentials=True exists for future-proofing,
+# not because any current route needs cookies).
+LOCAL_DEV_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
+
+
+def _configured_frontend_origins() -> List[str]:
+    """Production frontend origin(s) from the environment.
+
+    Accepts either FRONTEND_ORIGIN (a single origin) or FRONTEND_ORIGINS
+    (comma-separated, for multiple deployed frontends — e.g. a preview
+    deploy alongside production) — both are read, since which name an
+    operator reaches for isn't worth gatekeeping. Blank entries and
+    surrounding whitespace are ignored; a trailing slash is stripped
+    since an Origin header never includes one and an accidental
+    "https://example.com/" would otherwise silently never match.
+    """
+    raw_values = [
+        os.environ.get("FRONTEND_ORIGIN", ""),
+        os.environ.get("FRONTEND_ORIGINS", ""),
+    ]
+    origins: List[str] = []
+    for raw in raw_values:
+        for candidate in raw.split(","):
+            candidate = candidate.strip().rstrip("/")
+            if candidate and candidate not in origins:
+                origins.append(candidate)
+    return origins
+
+
+origins = LOCAL_DEV_ORIGINS + _configured_frontend_origins()
 
 app.add_middleware(
     CORSMiddleware,

@@ -29,7 +29,7 @@ import { AssignedWork } from "../types/classroom";
 import { DEMO_STUDENTS, DEMO_STUDENT_ID } from "../utils/demoUsers";
 import { loadAssignedWorks, saveAssignedWorks, loadCurrentStudentId, saveCurrentStudentId } from "../utils/classroomStorage";
 import { exportAssignmentPdf } from "../utils/pdfExport";
-import { simulateNetwork, listSavedRuns, getSavedRun, deleteSavedRun, listAssignments, saveAssignment, getAssignment, getAssignmentForStudent, seedDemoScenarios, gradeAttempt } from "../api/simulationApi";
+import { simulateNetwork, listSavedRuns, getSavedRun, deleteSavedRun, listAssignments, saveAssignment, getAssignment, getAssignmentForStudent, seedDemoScenarios, seedDemoAssignments, getBackendHealth, gradeAttempt } from "../api/simulationApi";
 import { runOptimization } from "../api/optimizationApi";
 import { OptimizationHistoryEntry, OptimizationLabMode, OptimizationRunRecord } from "../types/optimization";
 import { projectOptimizationResult } from "../utils/optimizationProjection";
@@ -1747,18 +1747,14 @@ const WorkflowManager: React.FC = () => {
 
   const handleSeedDemoToMongoDB = useCallback(async () => {
     try {
-      const health = await fetch("http://localhost:8000/health").then((r) => r.json());
+      const health = await getBackendHealth();
       if (!health.mongoAvailable) { toast("MongoDB is not running — cannot seed.", "error"); return; }
-      await fetch("http://localhost:8000/seed-demo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(EXAMPLE_CHALLENGES),
-      });
+      await seedDemoAssignments(EXAMPLE_CHALLENGES);
       await seedDemoScenarios(); // idempotent — safe to call every time this button is clicked
       await refreshSavedAssignments(); // eslint-disable-line
       toast("Demo assignments and scenario pack seeded to MongoDB.", "success");
     } catch {
-      toast("Seed failed. Is the backend running?", "error");
+      toast("Seed failed. Is the backend reachable? (check VITE_BACKEND_URL and backend CORS settings)", "error");
     }
   }, [toast]); // eslint-disable-line
 
