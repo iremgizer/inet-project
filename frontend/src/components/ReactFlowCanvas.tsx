@@ -68,6 +68,14 @@ export interface SimulationOverlayContextType {
   // Segment Routing: which node id is the "active SID" right now (drives the
   // waypoint-active ring on NetworkNode). null outside SR trace playback.
   srActiveWaypointId: string | null;
+  // Segment Routing waypoint-selection mode (editing, not trace playback) —
+  // source/destination of the demand currently being edited, and any
+  // waypoints already chosen for it, so the graph itself makes obvious what
+  // the "Select waypoint for X → Y" banner says in text. All null/empty
+  // outside selection mode (see WorkflowManager's waypointSelectDemandId).
+  srSelectSourceId: string | null;
+  srSelectDestinationId: string | null;
+  srSelectChosenIds: Set<string>;
   // Traffic Engineering policies — visualized pre-simulation as small link/
   // node badges, kept visually separate from path identity/congestion/grading.
   tePolicies: TrafficEngineeringPolicy[];
@@ -88,6 +96,7 @@ export interface SimulationOverlayContextType {
 }
 
 const EMPTY_NETWORK: NetworkInput = { nodes: [], links: [], demands: [], topologyType: "custom", isDirected: false };
+const EMPTY_STRING_ARRAY: string[] = [];
 
 export const SimulationOverlayContext =
   createContext<SimulationOverlayContextType>({
@@ -108,6 +117,9 @@ export const SimulationOverlayContext =
     gradingLinkStatus: new Map(),
     gradingNodeIds: new Set(),
     srActiveWaypointId: null,
+    srSelectSourceId: null,
+    srSelectDestinationId: null,
+    srSelectChosenIds: new Set(),
     tePolicies: [],
     replayDownLinkIds: null,
     comparisonMode: "after",
@@ -178,6 +190,11 @@ interface ReactFlowCanvasProps {
   gradingHighlightLinks?: { linkId: string; status: "correct" | "wrong" | "missed" }[];
   gradingHighlightNodes?: string[];
   waypointSelectDemandId?: string | null;
+  // Waypoints already chosen for the demand currently being edited (i.e.
+  // `algorithmConfig.segmentRoutingPolicies` entry for
+  // `waypointSelectDemandId`) — purely for the "Selected waypoint" visual
+  // state during selection mode; ignored otherwise.
+  waypointSelectChosenIds?: string[];
   srDisplayState?: SRDisplayState | null;
   tePolicySelectMode?: "node" | "link" | null;
   tePolicies?: TrafficEngineeringPolicy[];
@@ -225,6 +242,7 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
   gradingHighlightLinks,
   gradingHighlightNodes,
   waypointSelectDemandId = null,
+  waypointSelectChosenIds = EMPTY_STRING_ARRAY,
   srDisplayState = null,
   tePolicySelectMode = null,
   tePolicies = [],
@@ -342,6 +360,13 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
         ? srDisplayState.segmentList[srDisplayState.activeSegmentIndex] ?? null
         : null;
 
+    const selectedDemand = waypointSelectDemandId
+      ? network.demands.find((d) => d.id === waypointSelectDemandId) ?? null
+      : null;
+    const srSelectSourceId = selectedDemand?.source ?? null;
+    const srSelectDestinationId = selectedDemand?.target ?? null;
+    const srSelectChosenIds = new Set(waypointSelectDemandId ? waypointSelectChosenIds : []);
+
     if (isTraceMode && currentTraceEvent) {
       const activeDemandId = currentTraceEvent.activeDemandId ?? null;
       const tracePath = activeDemandId
@@ -365,6 +390,9 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
         gradingLinkStatus,
         gradingNodeIds,
         srActiveWaypointId,
+        srSelectSourceId,
+        srSelectDestinationId,
+        srSelectChosenIds,
         tePolicies,
         replayDownLinkIds,
         comparisonMode,
@@ -389,12 +417,15 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
       gradingLinkStatus,
       gradingNodeIds,
       srActiveWaypointId,
+      srSelectSourceId,
+      srSelectDestinationId,
+      srSelectChosenIds,
       tePolicies,
       replayDownLinkIds: null,
       comparisonMode,
       comparisonByLink,
     };
-  }, [currentTraceEvent, linkResults, pathResults, isSimulated, isTraceMode, hoveredNodeId, stableSetHoveredNodeId, connectSourceId, network, gradingHighlightLinks, gradingHighlightNodes, srDisplayState, tePolicies, replayDownLinkIds, comparisonMode, comparisonByLink]);
+  }, [currentTraceEvent, linkResults, pathResults, isSimulated, isTraceMode, hoveredNodeId, stableSetHoveredNodeId, connectSourceId, network, gradingHighlightLinks, gradingHighlightNodes, srDisplayState, waypointSelectDemandId, waypointSelectChosenIds, tePolicies, replayDownLinkIds, comparisonMode, comparisonByLink]);
 
   // ── RF callbacks ──────────────────────────────────────────────────────────
 

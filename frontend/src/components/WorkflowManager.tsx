@@ -37,7 +37,9 @@ import { buildOptimizationHighlightEvent } from "../utils/optimizationHighlight"
 import { resolveVisualizationOwner } from "../utils/optimizationVisualState";
 import { OptimizationSettings } from "../utils/optimizationSettings";
 import { triangleTemplate } from "../utils/topologyTemplates";
-import { applyAutoLayout } from "../utils/generatedTopologies";
+import { applyAutoLayout, ensureUsableNodeLayout } from "../utils/generatedTopologies";
+import { resolveNodeLabel } from "../utils/nodeLabels";
+import { buildPathFocusHighlightEvent } from "../utils/pathFocus";
 import {
   downloadTopologyJson,
   downloadExampleTopologyJson,
@@ -187,6 +189,19 @@ const WorkflowManager: React.FC = () => {
   const [showRoutingTable, setShowRoutingTable] = useState(false);
   const [rightWide, setRightWide] = useState(false);
 
+  // ── Path focus (final-polish Part E) — which single path from the Result
+  // step's "Show paths" list is focused on the canvas right now. Cleared on
+  // every fresh simulation run (a stale path from a previous result isn't
+  // meaningful once the routing has actually changed) and whenever trace
+  // replay starts (that's its own, separate highlight mechanism — see
+  // WorkflowManager's currentTraceEvent precedence below).
+  const [focusedPathKey, setFocusedPathKey] = useState<string | null>(null);
+  const [focusedPathNodes, setFocusedPathNodes] = useState<string[]>([]);
+  const handleFocusPath = useCallback((key: string | null, nodes: string[]) => {
+    setFocusedPathKey(key);
+    setFocusedPathNodes(key ? nodes : []);
+  }, []);
+
   // ── Saved runs ────────────────────────────────────────────────────────────
   const [savedRuns, setSavedRuns] = useState<SavedSimulationSummary[]>([]);
   const [savedRunsOpen, setSavedRunsOpen] = useState(false);
@@ -331,6 +346,15 @@ const WorkflowManager: React.FC = () => {
     : baseDisplayedResult;
 
   const traceEvents = currentStep === 5 ? [] : displayedResult?.traceEvents ?? [];
+  // Path focus (final-polish Part E/K) — its own precedence tier, below
+  // comparison/optimization-selected (step 5 only, so never actually
+  // competes with those in practice — path focus only exists at the
+  // normal Result step) and below real trace replay, above the plain
+  // "no highlight" default.
+  const focusedPathHighlightEvent = React.useMemo(() => {
+    if (!focusedPathKey || focusedPathNodes.length === 0) return null;
+    return buildPathFocusHighlightEvent(focusedPathNodes, network);
+  }, [focusedPathKey, focusedPathNodes, network]);
   // Comparison owns the canvas => no highlight overlay at all, even if a
   // card is also selected (PR6 §18's chosen precedence, documented in
   // utils/optimizationVisualState.ts).
@@ -340,8 +364,10 @@ const WorkflowManager: React.FC = () => {
     ? optHighlightEvent
     : isTraceMode
     ? traceEvents[activeStepIndex] ?? null
-    : null;
-  const canvasIsTraceMode = (isOptLabView || isOptComparingView) ? !!currentTraceEvent : isTraceMode;
+    : focusedPathHighlightEvent;
+  const canvasIsTraceMode = (isOptLabView || isOptComparingView)
+    ? !!currentTraceEvent
+    : (isTraceMode || !!focusedPathHighlightEvent);
   const linkResults = displayedResult?.linkResults ?? [];
   const pathResults = displayedResult?.pathResults ?? [];
 
@@ -1036,6 +1062,8 @@ const WorkflowManager: React.FC = () => {
     setIsRunning(true);
     setIsPlaying(false);
     setIsTraceMode(false);
+    setFocusedPathKey(null);
+    setFocusedPathNodes([]);
     try {
       const result = await simulateNetwork({ network, algorithmConfig });
       setSimulationResult(result);
@@ -1138,6 +1166,29 @@ const WorkflowManager: React.FC = () => {
     }
   }, [network, algorithmConfig, toast]);
 
+  // ── Run All Optimizations (final-polish Part H) — deliberately
+  // SEQUENTIAL, never Promise.all/parallel: the deployed Render backend may
+  // have limited CPU, and running four solver calls concurrently on a
+  // single-worker service would just queue behind each other anyway while
+  // looking like a race to the user. handleRunOptimization above already
+  // catches its own errors (toasts, never rethrows) and updates
+  // optimizationRunning per-mode — so one mode failing/timing out here
+  // simply leaves that card in an error/empty state while the loop moves
+  // on to the next mode, exactly the "continue with the remaining ones"
+  // behavior asked for. Never auto-applies anything — same as every
+  // individual Run button.
+  const [runAllProgress, setRunAllProgress] = useState<{ index: number; total: number; mode: Exclude<OptimizationLabMode, "CURRENT"> } | null>(null);
+  const RUN_ALL_ORDER: Exclude<OptimizationLabMode, "CURRENT">[] = ["OPT", "WPO", "LWO", "JOINT"];
+  const handleRunAllOptimizations = useCallback(async (settings: OptimizationSettings) => {
+    for (let i = 0; i < RUN_ALL_ORDER.length; i++) {
+      const mode = RUN_ALL_ORDER[i];
+      setRunAllProgress({ index: i + 1, total: RUN_ALL_ORDER.length, mode });
+      // eslint-disable-next-line no-await-in-loop
+      await handleRunOptimization(mode, settings);
+    }
+    setRunAllProgress(null);
+  }, [handleRunOptimization]);
+
   // Applying a recommendation updates the real network configuration —
   // gated behind OptimizationCard's own explicit "click to confirm" step
   // (PR5 §5: "nothing should be silently overwritten"). WPO/JOINT
@@ -1146,6 +1197,22 @@ const WorkflowManager: React.FC = () => {
   // §11), so applying one also switches the active algorithm; LWO's weights
   // only matter under ECMP, so applying it switches back. Structural edit,
   // same invalidation pattern as every other network mutation in this file.
+  // Activating "Compare vs current" must land the student in an explicit,
+  // visually distinct COMPARISON MODE (difference heatmap), not silently
+  // keep whatever plain-utilization mode ("after") the toggle happened to
+  // be on before — that was the actual bug behind "the app already has a
+  // comparison/heatmap engine, but Compare vs current is not visually
+  // obvious" (Part G). Only forces the switch when a comparison is starting
+  // (mode was null); toggling the same comparison back off, or switching
+  // which mode is compared, doesn't fight a student who deliberately picked
+  // "Before"/"After" for a specific reason mid-comparison.
+  const handleOptCompare = useCallback((mode: OptimizationLabMode | null) => {
+    setComparingOptimizationMode((prev) => {
+      if (mode !== null && prev === null) setOptComparisonMode("difference");
+      return mode;
+    });
+  }, []);
+
   const handleApplyOptimization = useCallback((mode: Exclude<OptimizationLabMode, "CURRENT">) => {
     const result = optimizationRunRecords[mode]?.result;
     if (!result) return;
@@ -1267,7 +1334,15 @@ const WorkflowManager: React.FC = () => {
   const handleOpenDemoScenario = useCallback(async (assignmentId: string) => {
     try {
       const a = await getAssignmentForStudent(assignmentId);
-      setNetwork(structuredClone(a.starterNetwork));
+      // Demo scenario starter networks carry no real node layout (position
+      // is a frontend-owned visual concern the backend deliberately doesn't
+      // compute — see app/demo/demo_scenarios.py) — every node defaults to
+      // the same placeholder coordinate, which would render as a stack of
+      // fully overlapping nodes. ensureUsableNodeLayout is a no-op for any
+      // network that already has a real layout (preserves it untouched);
+      // it only kicks in for exactly this "no usable layout at all" case,
+      // via the same deterministic circular layout used everywhere else.
+      setNetwork(ensureUsableNodeLayout(structuredClone(a.starterNetwork)));
       if (a.starterAlgorithmConfig) {
         setAlgorithmConfig(structuredClone(a.starterAlgorithmConfig));
       }
@@ -1283,6 +1358,12 @@ const WorkflowManager: React.FC = () => {
       setIsTraceMode(false);
       setIsPlaying(false);
       setCurrentStep(3); // land on Algorithm — preloaded and ready to Run
+      // Re-fit the canvas explicitly rather than relying on the node-count
+      // heuristic in ReactFlowCanvas's own fitView effect — two scenarios
+      // can easily share the same node count, in which case that effect
+      // would never fire and the view would stay centered on whatever the
+      // previous topology looked like.
+      setFitViewTrigger((p) => p + 1);
       toast(`Demo scenario "${a.title}" loaded.`, "success");
     } catch {
       toast("Could not load demo scenario. Is the backend/MongoDB running? Try Reseed pack.", "error");
@@ -1675,13 +1756,16 @@ const WorkflowManager: React.FC = () => {
           onComparisonModeChange={setOptComparisonMode}
           onBack={() => setCurrentStep(3)}
           onRun={handleRunOptimization}
+          onRunAll={handleRunAllOptimizations}
+          runAllProgress={runAllProgress}
           onSelectForView={setSelectedOptimizationMode}
-          onCompare={setComparingOptimizationMode}
+          onCompare={handleOptCompare}
           onApply={handleApplyOptimization}
         />
       );
     return (
       <SimulationStudioPage
+        network={network}
         result={simulationResult}
         isTraceMode={isTraceMode}
         currentTraceEvent={currentTraceEvent}
@@ -1696,6 +1780,8 @@ const WorkflowManager: React.FC = () => {
           setIsTraceMode(true);
           setActiveStepIndex(0);
           setShowRoutingTable(false);
+          setFocusedPathKey(null);
+          setFocusedPathNodes([]);
         }}
         onDisableTrace={() => { setIsTraceMode(false); setIsPlaying(false); setShowRoutingTable(false); }}
         onBack={() => setCurrentStep(3)}
@@ -1705,6 +1791,8 @@ const WorkflowManager: React.FC = () => {
         comparisonMode={comparisonMode}
         onComparisonModeChange={handleComparisonModeChange}
         onSetBaseline={handleSetBaseline}
+        focusedPathKey={focusedPathKey}
+        onFocusPath={handleFocusPath}
       />
     );
   })();
@@ -2124,7 +2212,7 @@ const WorkflowManager: React.FC = () => {
 
           {waypointSelectDemandId && (() => {
             const d = network.demands.find((dm) => dm.id === waypointSelectDemandId);
-            const label = (id: string) => network.nodes.find((n) => n.id === id)?.label ?? id;
+            const label = (id: string) => resolveNodeLabel(id, network);
             return (
               <div className="connect-mode-banner connect-mode-banner--sr">
                 {d ? `Select waypoint for ${label(d.source)} → ${label(d.target)}` : "Select waypoint"} ·{" "}
@@ -2162,6 +2250,9 @@ const WorkflowManager: React.FC = () => {
             gradingHighlightLinks={challengeGradingResult?.highlightedLinks}
             gradingHighlightNodes={challengeGradingResult?.highlightedNodes}
             waypointSelectDemandId={waypointSelectDemandId}
+            waypointSelectChosenIds={
+              (algorithmConfig.segmentRoutingPolicies ?? []).find((p) => p.demandId === waypointSelectDemandId)?.segments
+            }
             srDisplayState={srDisplayState}
             replayDownLinkIds={replayDownLinkIds}
             comparisonMode={activeComparisonMode}
@@ -2257,7 +2348,13 @@ const WorkflowManager: React.FC = () => {
 // ── Panel layout helper ───────────────────────────────────────────────────────
 
 function wsGridCols(mode: AppMode, lc: boolean, showRight: boolean, wide = false): string {
-  const lw = lc ? "48px" : mode === "teacher" ? "minmax(560px, 50%)" : "300px";
+  // 360px (up from 300px, final-polish Part B) — enough for metric-card
+  // values like EXACT_ENUMERATION/SEGMENT_ROUTING to sit on one line and
+  // for the Optimization Lab's cards/comparison table to breathe, without
+  // eating so much width that the canvas loses too much space at a
+  // 1366px-wide viewport (canvas still gets 1fr, i.e. everything left
+  // over after this and the optional right panel).
+  const lw = lc ? "48px" : mode === "teacher" ? "minmax(560px, 50%)" : "360px";
   if (mode === "teacher" || !showRight) return `${lw} 1fr`;
   return `${lw} 1fr ${wide ? "420px" : "280px"}`;
 }

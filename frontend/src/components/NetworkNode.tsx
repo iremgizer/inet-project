@@ -1,6 +1,6 @@
 import React, { useCallback, useContext } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
-import { MapPin } from "lucide-react";
+import { MapPin, LogIn, LogOut, CheckCircle2 } from "lucide-react";
 import { SimulationOverlayContext } from "./ReactFlowCanvas";
 
 const NetworkNode: React.FC<NodeProps> = ({ id, data, selected }) => {
@@ -14,6 +14,9 @@ const NetworkNode: React.FC<NodeProps> = ({ id, data, selected }) => {
     isSimulated,
     gradingNodeIds,
     srActiveWaypointId,
+    srSelectSourceId,
+    srSelectDestinationId,
+    srSelectChosenIds,
     tePolicies,
   } = useContext(SimulationOverlayContext);
 
@@ -22,6 +25,14 @@ const NetworkNode: React.FC<NodeProps> = ({ id, data, selected }) => {
   const isHovered         = hoveredNodeId === id;
   const isConnectSource   = connectSourceId === id;
   const isActiveWaypoint  = srActiveWaypointId === id;
+  // Segment Routing waypoint-selection mode (editing) — deliberately
+  // distinct states/classes from isActiveWaypoint above (trace playback):
+  // source/destination use their own icon+color, never the waypoint ring,
+  // so "which node is the demand's source" is never confused with "this
+  // waypoint is currently being replayed".
+  const isSrSelectSource      = srSelectSourceId === id;
+  const isSrSelectDestination = srSelectDestinationId === id;
+  const isSrSelectChosen      = srSelectChosenIds.has(id) && !isSrSelectSource && !isSrSelectDestination;
   // A REQUIRE_WAYPOINT policy marker — visually distinct (amber pin, dashed
   // ring) from SR's own solid teal "active SID" ring above.
   const isRequiredWaypoint = tePolicies.some((p) => p.type === "REQUIRE_WAYPOINT" && p.nodeId === id);
@@ -47,6 +58,9 @@ const NetworkNode: React.FC<NodeProps> = ({ id, data, selected }) => {
         isGradingNode     ? "rf-node--grading"        : "",
         isActiveWaypoint  ? "rf-node--waypoint-active" : "",
         isRequiredWaypoint ? "rf-node--te-required"    : "",
+        isSrSelectSource      ? "rf-node--sr-select-source"      : "",
+        isSrSelectDestination ? "rf-node--sr-select-destination" : "",
+        isSrSelectChosen      ? "rf-node--sr-select-chosen"      : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -62,6 +76,24 @@ const NetworkNode: React.FC<NodeProps> = ({ id, data, selected }) => {
       {isRequiredWaypoint && (
         <span className="rf-node-te-badge" title="Required waypoint">
           <MapPin size={9} />
+        </span>
+      )}
+      {/* Waypoint-selection mode badges — text + icon, not color alone, so
+          source/destination/already-chosen are distinguishable even without
+          relying on the ring color. */}
+      {isSrSelectSource && (
+        <span className="rf-node-sr-badge rf-node-sr-badge--source" title="Demand source">
+          <LogOut size={9} /> SRC
+        </span>
+      )}
+      {isSrSelectDestination && (
+        <span className="rf-node-sr-badge rf-node-sr-badge--destination" title="Demand destination">
+          <LogIn size={9} /> DST
+        </span>
+      )}
+      {isSrSelectChosen && (
+        <span className="rf-node-sr-badge rf-node-sr-badge--chosen" title="Already-selected waypoint">
+          <CheckCircle2 size={9} /> WP
         </span>
       )}
 

@@ -2,10 +2,11 @@ import React from "react";
 import { ArrowLeft, X, BarChart3, Lightbulb } from "lucide-react";
 import ResultSummaryPanel from "../components/ResultSummaryPanel";
 import ComparisonPanel from "../components/ComparisonPanel";
-import { SimulationResult, SimulationTraceEvent } from "../types/network";
+import { NetworkInput, SimulationResult, SimulationTraceEvent } from "../types/network";
 import { ComparisonMode, SimulationComparison } from "../utils/comparison";
 
 interface SimulationStudioPageProps {
+  network: NetworkInput;
   result: SimulationResult | null;
   isTraceMode: boolean;
   currentTraceEvent: SimulationTraceEvent | null;
@@ -22,9 +23,13 @@ interface SimulationStudioPageProps {
   comparisonMode: ComparisonMode;
   onComparisonModeChange: (mode: ComparisonMode) => void;
   onSetBaseline: () => void;
+  // Path focus (final-polish Part E) — see ResultSummaryPanel's own props.
+  focusedPathKey: string | null;
+  onFocusPath: (key: string | null, nodes: string[]) => void;
 }
 
 const SimulationStudioPage: React.FC<SimulationStudioPageProps> = ({
+  network,
   result,
   isTraceMode,
   activeStepIndex,
@@ -38,6 +43,8 @@ const SimulationStudioPage: React.FC<SimulationStudioPageProps> = ({
   comparisonMode,
   onComparisonModeChange,
   onSetBaseline,
+  focusedPathKey,
+  onFocusPath,
 }) => {
   // ── No result yet ──────────────────────────────────────────────────────────
   if (!result) {
@@ -85,7 +92,13 @@ const SimulationStudioPage: React.FC<SimulationStudioPageProps> = ({
           onSetBaseline={onSetBaseline}
         />
 
-        <ResultSummaryPanel result={result} onShowTrace={onEnableTrace} />
+        <ResultSummaryPanel
+          result={result}
+          onShowTrace={onEnableTrace}
+          network={network}
+          focusedPathKey={focusedPathKey}
+          onFocusPath={onFocusPath}
+        />
 
         <div className="page-actions">
           <button className="btn-secondary btn-sm" onClick={onBack}>
