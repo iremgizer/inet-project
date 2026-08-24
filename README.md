@@ -321,7 +321,7 @@ To enable it, start a MongoDB 7 container with Docker:
 docker run -d --name network-viz-mongo -p 27018:27017 --restart unless-stopped mongo:7
 ```
 
-(If the container already exists: `docker start network-viz-mongo`.)
+(If the container already exists: `docker start network-viz-mongo`. To stop it: `docker stop network-viz-mongo`. To verify it's running: `docker ps --filter name=network-viz-mongo`.)
 
 Then configure the backend by copying `backend/.env.example` to `backend/.env` (already set to the values below by default — only edit if you need a different port/database):
 
@@ -331,6 +331,12 @@ MONGODB_DATABASE=network_visualizer
 ```
 
 Note the non-default port **27018** — this project intentionally runs its own MongoDB container on 27018 (not MongoDB's usual 27017) so it doesn't collide with any other local MongoDB instance.
+
+Once it's running, start the backend as in [Backend Setup](#backend-setup) above and confirm `curl http://localhost:8000/health` reports `"mongoAvailable": true`.
+
+**Starting FastAPI does *not* start MongoDB** — they're independent processes; MongoDB (Docker container or native `mongod`) must already be running before (or independently of) the backend.
+
+**Note for teams:** if a teammate clones this repo and runs their own local MongoDB, their assignments/submissions live only on their machine — nothing here syncs data between contributors. For a shared/deployed setup (MongoDB Atlas, Render), plus the native-macOS-MongoDB alternative, full Atlas migration steps, and the full deployment plan, see **[`docs/deployment-and-database-guide.md`](docs/deployment-and-database-guide.md)**.
 
 ## Demo / Quick Start
 
