@@ -4,6 +4,7 @@ import {
   getStraightPath,
   EdgeLabelRenderer,
   BaseEdge,
+  useInternalNode,
 } from "@xyflow/react";
 import { Ban, ShieldAlert, Star, XCircle } from "lucide-react";
 import { SimulationOverlayContext } from "./ReactFlowCanvas";
@@ -15,6 +16,7 @@ import {
   severityGlowColor,
 } from "../utils/graphVisuals";
 import { COMPARISON_STATUS_COLOR } from "../utils/comparison";
+import { computeCircleEdgeAnchors, computeLabelPerpendicularOffset, NODE_RADIUS } from "../utils/edgeGeometry";
 
 export interface NetworkEdgeData extends Record<string, unknown> {
   weight: number;
@@ -29,10 +31,18 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
   id,
   source,
   target,
-  sourceX,
-  sourceY,
-  targetX,
-  targetY,
+  // Handle-resolved fallback only (see below) — NOT used directly for the
+  // rendered path anymore. With 4 fixed same-type handles and no
+  // sourceHandle/targetHandle set per edge (ReactFlowCanvas's toRFEdge),
+  // these don't reliably represent "the point on this node's own circle
+  // facing its neighbor" — they're whichever handle React Flow happened to
+  // resolve, independent of the neighbor's real direction. Kept only as a
+  // fallback for the one render tick before useInternalNode below has
+  // measured both nodes.
+  sourceX: handleSourceX,
+  sourceY: handleSourceY,
+  targetX: handleTargetX,
+  targetY: handleTargetY,
   data,
   selected,
   markerEnd,
@@ -54,6 +64,38 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
     comparisonMode,
     comparisonByLink,
   } = useContext(SimulationOverlayContext);
+
+  // ── Circle-boundary edge anchoring ──────────────────────────────────────
+  // React Flow's own documented "floating edge" pattern: compute each
+  // node's actual current center from its internal (measured) position
+  // rather than trusting a resolved handle, then find where the straight
+  // line between the two centers crosses each node's own circular boundary
+  // (utils/edgeGeometry.ts). Works for any direction — horizontal,
+  // vertical, diagonal, arbitrary angle — with one formula, no per-
+  // topology special-casing. Falls back to the handle-resolved coordinates
+  // above only if a node hasn't been measured yet (first paint).
+  const sourceInternalNode = useInternalNode(source);
+  const targetInternalNode = useInternalNode(target);
+  let sourceX = handleSourceX, sourceY = handleSourceY, targetX = handleTargetX, targetY = handleTargetY;
+  if (sourceInternalNode && targetInternalNode) {
+    const sourceWidth = sourceInternalNode.measured.width ?? NODE_RADIUS * 2;
+    const sourceHeight = sourceInternalNode.measured.height ?? NODE_RADIUS * 2;
+    const targetWidth = targetInternalNode.measured.width ?? NODE_RADIUS * 2;
+    const targetHeight = targetInternalNode.measured.height ?? NODE_RADIUS * 2;
+    const sourceCenter = {
+      x: sourceInternalNode.internals.positionAbsolute.x + sourceWidth / 2,
+      y: sourceInternalNode.internals.positionAbsolute.y + sourceHeight / 2,
+    };
+    const targetCenter = {
+      x: targetInternalNode.internals.positionAbsolute.x + targetWidth / 2,
+      y: targetInternalNode.internals.positionAbsolute.y + targetHeight / 2,
+    };
+    const anchors = computeCircleEdgeAnchors(sourceCenter, sourceWidth / 2, targetCenter, targetWidth / 2);
+    sourceX = anchors.source.x;
+    sourceY = anchors.source.y;
+    targetX = anchors.target.x;
+    targetY = anchors.target.y;
+  }
 
   const d = data as NetworkEdgeData;
   const result: LinkResult | undefined = linkResults.get(id);
@@ -171,14 +213,14 @@ const NetworkEdge: React.FC<EdgeProps & { source: string; target: string }> = ({
 
   const [edgePath, labelX, labelY] = getStraightPath({ sourceX, sourceY, targetX, targetY });
 
-  // Perpendicular offset so the label doesn't sit on the edge line itself.
-  // Shift label to the "left" of the edge direction vector.
-  const dx = targetX - sourceX;
-  const dy = targetY - sourceY;
-  const edgeLen = Math.sqrt(dx * dx + dy * dy) || 1;
-  const PERP = 11;
-  const perpX = (-dy / edgeLen) * PERP;
-  const perpY = (dx / edgeLen) * PERP;
+  // Perpendicular offset so the label doesn't sit on the edge line itself —
+  // shifted to the "left" of the edge direction vector, scaled down for
+  // short edges (Part 4: a short edge's label shouldn't sit disproportion-
+  // ately far from its own line, which is what pushes it toward a
+  // neighboring edge/node's label in a compact/dense layout). Deterministic
+  // and derived only from this edge's own two endpoints — not a collision
+  // detector against other edges.
+  const { perpX, perpY } = computeLabelPerpendicularOffset(sourceX, sourceY, targetX, targetY);
 
   // ── Label content ────────────────────────────────────────────────────────────
   // Before sim: "w=1" (small, gray)
