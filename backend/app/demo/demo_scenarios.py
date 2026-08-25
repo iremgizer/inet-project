@@ -640,5 +640,283 @@ DEMO_SCENARIO_BUILDERS = [
 
 
 def build_demo_scenarios() -> List[Assignment]:
-    """Construct all 16 demo scenarios fresh. Pure — no I/O, no MongoDB."""
+    """Construct all 16 demo scenarios fresh. Pure — no I/O, no MongoDB.
+
+    These are the ORIGINAL Sprint 1/2 scenarios — kept exactly as-is and
+    still exercised directly by test_demo_scenarios.py's Section A (one
+    verified teaching-claim test per scenario). Per instructor feedback,
+    none of these are shown on the student-facing Demo Scenario Dashboard
+    any more (see CURATED_DEMO_SCENARIO_BUILDERS below) — they remain here
+    purely as validated backend/test fixtures, not dead code.
+    """
     return [builder() for builder in DEMO_SCENARIO_BUILDERS]
+
+
+# ── The curated, course-aligned Demo Scenario Pack ──────────────────────────
+#
+# Per final instructor feedback, the student-facing Demo Student dashboard
+# was cut from the 16 scenarios above down to exactly these 4 — one per
+# distinct capability (ECMP weight-setting, Segment Routing waypoints,
+# Distance Vector, TE policy), each mapping directly to a step in the
+# course/tutorial workflow. This is a SEPARATE builder list, not a filter
+# over DEMO_SCENARIO_BUILDERS: the 16 above stay fully intact as backend/
+# test fixtures (per instruction, "do NOT delete backend test fixtures or
+# teaching examples"); only what MongoDB seeds for GET /demo-scenarios
+# changed. See demo_scenario_service.seed_demo_scenarios() for how a reseed
+# also prunes any stale demoScenario-tagged document left over from the old
+# 16-scenario pack.
+
+
+def _positioned_net(node_positions, links, demands, topology_type="custom", is_directed=False) -> NetworkInput:
+    """Like `_net()`, but with explicit, hand-placed (x, y) coordinates
+    instead of the shared (0, 0) placeholder. Used only where the on-screen
+    layout is itself part of the teaching content (see
+    `inet_exercise2_network()`'s diamond, matching the exercise sheet's own
+    figure) — this bypasses the frontend's circular auto-layout fallback
+    (`generatedTopologies.ts`'s `applyAutoLayout`/`ensureUsableNodeLayout`)
+    entirely, rather than depending on node array order coincidentally
+    producing the right shape.
+    """
+    return NetworkInput(
+        nodes=[NodeInput(id=n, label=n, x=x, y=y) for n, x, y in node_positions],
+        links=links,
+        demands=demands,
+        topologyType=topology_type,
+        isDirected=is_directed,
+    )
+
+
+def _dv_config(**overrides) -> AlgorithmConfig:
+    base = dict(
+        selectedAlgorithm="DISTANCE_VECTOR", algorithmType="real_world_heuristic",
+        objective="minimize_max_utilization", congestionThreshold=1.0,
+    )
+    base.update(overrides)
+    return AlgorithmConfig(**base)
+
+
+# ── 1. INET Exercise 2 — ECMP Weight Setting ────────────────────────────────
+
+
+def inet_exercise2_network() -> NetworkInput:
+    """The A/B/C/D diamond-with-diagonal from "INET Network Algorithms —
+    Exercise 2" (ECMP weight setting). Node positions are hand-placed to
+    match the exercise sheet's own figure (B top, A left, D right, C
+    bottom, with B-C as the vertical diagonal) rather than relying on the
+    frontend's circular auto-layout fallback, so the on-screen shape stays
+    recognizable regardless of node array order.
+
+    Weights A-C=1, B-C=1, C-D=1, B-D=2 are exactly the exercise sheet's own
+    values. The sheet only constrains A-B to "greater than 2" (so it never
+    competes with the B-C-D detour) without giving one single canonical
+    number in the source material available here; 3 is used as the
+    concrete representative value — documented here rather than silently
+    invented as if it were the one true number from the sheet.
+
+    All capacities are 10, per the exercise. Demands: B->D=15, A->D=5 —
+    single destination D. Verified live against the real ECMPAlgorithm
+    (see test_curated_demo_scenarios.py's Exercise 2 section): baseline
+    ties B-D against B-C-D (both cost 2), congesting C-D at 125%; taking
+    B-C down removes that tie, forcing all of B->D onto B-D alone and
+    moving/worsening the congestion (150%) instead of relieving it — a
+    genuine, backend-verified feasibility/congestion change, not a
+    hardcoded frontend guess.
+    """
+    return _positioned_net(
+        [("B", 350, 150), ("A", 240, 260), ("D", 460, 260), ("C", 350, 370)],
+        [
+            LinkInput(id="AB", source="A", target="B", capacity=10, weight=3),
+            LinkInput(id="AC", source="A", target="C", capacity=10, weight=1),
+            LinkInput(id="BC", source="B", target="C", capacity=10, weight=1),
+            LinkInput(id="BD", source="B", target="D", capacity=10, weight=2),
+            LinkInput(id="CD", source="C", target="D", capacity=10, weight=1),
+        ],
+        [
+            TrafficDemandInput(id="bd", source="B", target="D", amount=15.0),
+            TrafficDemandInput(id="ad", source="A", target="D", amount=5.0),
+        ],
+    )
+
+
+def _curated_inet_exercise2() -> Assignment:
+    return _demo_assignment(
+        assignment_id="demo-inet-ex2-ecmp",
+        title="INET Exercise 2 — ECMP Weight Setting",
+        topic="ECMP",
+        network=inet_exercise2_network(),
+        algorithm_config=_ecmp_config(),
+        prompt=(
+            "Run ECMP with the exercise's own starting weights. Try changing link weights and "
+            "rerunning to see how utilization responds. Then take link B-C down and rerun to see "
+            "how losing that path changes congestion. When ready, open the Optimization Lab and "
+            "try OPT, Waypoint, Link Weight, or Joint optimization on the same network."
+        ),
+        meta=DemoScenarioMeta(
+            category="Demo Scenarios", order=1,
+            shortDescription="Explore the ECMP weight-setting exercise from the course sheet and see how weight choices affect congestion.",
+            complexity="Intermediate",
+            tags=["ecmp", "inet-exercise", "weight-setting"],
+            courseSource="INET Network Algorithms — Exercise 2",
+        ),
+    )
+
+
+# ── 2. Segment Routing — Waypoint Exploration ───────────────────────────────
+
+
+def sr_waypoint_exploration_network() -> NetworkInput:
+    """Same verified topology/weights/capacities as `sr_waypoint_ecmp_network()`
+    (A->D via required waypoint C, both legs tied — see that function's own
+    docstring for the source citation), laid out explicitly as an hourglass
+    (A on the left, two parallel first-hop routers, C as the waypoint in
+    the middle, two parallel second-hop routers, D on the right) instead of
+    the frontend's circular fallback.
+    """
+    return _positioned_net(
+        [
+            ("A", 120, 260), ("B", 260, 150), ("E", 260, 370),
+            ("C", 380, 260),
+            ("F", 500, 150), ("G", 500, 370), ("D", 640, 260),
+        ],
+        [
+            LinkInput(id="AB", source="A", target="B", capacity=10, weight=1),
+            LinkInput(id="BC", source="B", target="C", capacity=10, weight=1),
+            LinkInput(id="AE", source="A", target="E", capacity=10, weight=1),
+            LinkInput(id="EC", source="E", target="C", capacity=10, weight=1),
+            LinkInput(id="CF", source="C", target="F", capacity=10, weight=1),
+            LinkInput(id="FD", source="F", target="D", capacity=10, weight=1),
+            LinkInput(id="CG", source="C", target="G", capacity=10, weight=1),
+            LinkInput(id="GD", source="G", target="D", capacity=10, weight=1),
+        ],
+        [TrafficDemandInput(id="d1", source="A", target="D", amount=10.0)],
+    )
+
+
+def _curated_sr_waypoint_exploration() -> Assignment:
+    return _demo_assignment(
+        assignment_id="demo-sr-waypoint",
+        title="Segment Routing — Waypoint Exploration",
+        topic="SEGMENT_ROUTING",
+        network=sr_waypoint_exploration_network(),
+        algorithm_config=_sr_config(
+            segmentRoutingPolicies=[SegmentRoutingPolicy(demandId="d1", segments=["C"])]
+        ),
+        prompt="Run Segment Routing. Then choose a different waypoint and rerun to see how the path and its ECMP split change.",
+        meta=DemoScenarioMeta(
+            category="Demo Scenarios", order=2,
+            shortDescription="Explore how waypoint choices steer traffic through the network.",
+            complexity="Intermediate",
+            tags=["segment-routing", "waypoint"],
+        ),
+    )
+
+
+# ── 3. Distance Vector — Routing Change ─────────────────────────────────────
+
+
+def dv_routing_change_network() -> NetworkInput:
+    """S/M1/M2/M3/Z: a 2-hop path (S-M1-Z, cost 2) that is strictly (not a
+    tie) shorter than a 3-hop detour (S-M2-M3-Z, cost 3) — so Distance
+    Vector's initial next hop from S is unambiguous (M1). Raising M1-Z's
+    weight from 1 to 4 (student-editable — canEditWeights is always True
+    for demo scenarios) makes the direct route cost 5, flipping the
+    resolved shortest path — and S's next hop — onto the detour (cost 3,
+    via M2); a link failure on S-M1 or M1-Z produces the same reroute by
+    forcing the issue instead of costing it out. Verified live against the
+    real DistanceVectorAlgorithm (see test_curated_demo_scenarios.py).
+
+    Per DistanceVectorAlgorithm's own "instant stable" design (see its
+    module docstring/first trace event), this models a single fresh
+    recomputation after the change — not simulated round-by-round
+    Bellman-Ford convergence, which this codebase does not implement.
+    """
+    return _positioned_net(
+        [("S", 150, 260), ("M1", 320, 180), ("Z", 560, 260), ("M2", 320, 340), ("M3", 440, 340)],
+        [
+            LinkInput(id="S-M1", source="S", target="M1", capacity=10, weight=1),
+            LinkInput(id="M1-Z", source="M1", target="Z", capacity=10, weight=1),
+            LinkInput(id="S-M2", source="S", target="M2", capacity=10, weight=1),
+            LinkInput(id="M2-M3", source="M2", target="M3", capacity=10, weight=1),
+            LinkInput(id="M3-Z", source="M3", target="Z", capacity=10, weight=1),
+        ],
+        [TrafficDemandInput(id="d1", source="S", target="Z", amount=6.0)],
+    )
+
+
+def _curated_dv_routing_change() -> Assignment:
+    return _demo_assignment(
+        assignment_id="demo-dv-routing-change",
+        title="Distance Vector — Routing Change",
+        topic="DISTANCE_VECTOR",
+        network=dv_routing_change_network(),
+        algorithm_config=_dv_config(),
+        prompt="Run Distance Vector to see the initial resolved route. Then raise a link's weight (or take a link down) and rerun to see the route — and next hop — change.",
+        meta=DemoScenarioMeta(
+            category="Demo Scenarios", order=3,
+            shortDescription="See how routing changes when the network topology or link costs change.",
+            complexity="Beginner",
+            tags=["distance-vector", "routing-change"],
+        ),
+    )
+
+
+# ── 4. Traffic Engineering Policy — Interactive Routing ─────────────────────
+
+
+def te_policy_interactive_network() -> NetworkInput:
+    """Same verified topology/weights/capacities as `te_prefer_diamond_network()`
+    (A-B weighted 2, so A-C-D alone is the baseline shortest path — see that
+    function's own docstring for its test-file source), laid out explicitly
+    (A left, C top on the baseline path, D right, B bottom on the
+    currently-unused alternate) instead of the frontend's circular
+    fallback.
+    """
+    return _positioned_net(
+        [("A", 240, 260), ("C", 350, 150), ("D", 460, 260), ("B", 350, 370)],
+        [
+            LinkInput(id="AB", source="A", target="B", capacity=10, weight=2),
+            LinkInput(id="BD", source="B", target="D", capacity=10, weight=1),
+            LinkInput(id="AC", source="A", target="C", capacity=10, weight=1),
+            LinkInput(id="CD", source="C", target="D", capacity=10, weight=1),
+        ],
+        [TrafficDemandInput(id="d1", source="A", target="D", amount=10.0)],
+    )
+
+
+def _curated_te_policy_interactive() -> Assignment:
+    return _demo_assignment(
+        assignment_id="demo-te-policy-interactive",
+        title="Traffic Engineering Policy — Interactive Routing",
+        topic="TRAFFIC_ENGINEERING",
+        network=te_policy_interactive_network(),
+        algorithm_config=_ecmp_config(),
+        prompt=(
+            "Run ECMP to see the baseline route (A-C-D). Then add a FORBID_LINK policy on A-C "
+            "from the graph — or try AVOID_LINK/PREFER_LINK — and rerun to see traffic move to "
+            "the alternate route. The forbidden/avoided link stays visible on the canvas; this is "
+            "not the same as a physical link failure."
+        ),
+        meta=DemoScenarioMeta(
+            category="Demo Scenarios", order=4,
+            shortDescription="Apply routing policies and observe how traffic moves without changing the physical topology.",
+            complexity="Intermediate",
+            tags=["te-policy", "forbid-link"],
+        ),
+    )
+
+
+CURATED_DEMO_SCENARIO_BUILDERS = [
+    _curated_inet_exercise2,
+    _curated_sr_waypoint_exploration,
+    _curated_dv_routing_change,
+    _curated_te_policy_interactive,
+]
+
+
+def build_curated_demo_scenarios() -> List[Assignment]:
+    """Construct the 4 curated, student-facing demo scenarios fresh. Pure —
+    no I/O, no MongoDB. This is what `seed_demo_scenarios()` seeds and what
+    GET /demo-scenarios ultimately reflects — the Demo Student dashboard's
+    entire scenario list, not a subset of a larger visible set.
+    """
+    return [builder() for builder in CURATED_DEMO_SCENARIO_BUILDERS]

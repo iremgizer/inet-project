@@ -12799,6 +12799,13 @@ html, body, #root {
   flex: 1;
 }
 
+.demo-scenario-source {
+  font-size: 10.5px;
+  font-style: italic;
+  color: var(--text-3);
+  margin: -4px 0 0;
+}
+
 .demo-scenario-card-bottom {
   display: flex;
   align-items: center;

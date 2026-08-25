@@ -1,9 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
-import {
-  GraduationCap, FlaskConical, Sparkles, ChevronRight, RefreshCw,
-  Network as NetworkIcon, Zap, ShieldAlert, Gauge, Layers, LucideIcon,
-} from "lucide-react";
-import { DemoScenarioSummary, DemoCategory } from "../types/assignment";
+import React, { useEffect, useState } from "react";
+import { GraduationCap, FlaskConical, ChevronRight, RefreshCw } from "lucide-react";
+import { DemoScenarioSummary } from "../types/assignment";
 import { listDemoScenarios, seedDemoScenarios, ApiError } from "../api/simulationApi";
 
 // ── Error classification ─────────────────────────────────────────────────
@@ -34,27 +31,22 @@ interface DemoScenarioDashboardProps {
   onOpenScenario: (assignmentId: string) => void;
 }
 
-// Fixed display order — matches the teaching progression, not the backend's
-// alphabetical Mongo sort (which only guarantees stable ordering within a
-// category, not across categories).
-const CATEGORY_ORDER: DemoCategory[] = [
-  "Routing Basics", "Traffic Engineering", "Failures", "Optimization", "Optimization Complexity",
-];
-
-const CATEGORY_ICON: Record<DemoCategory, LucideIcon> = {
-  "Routing Basics": NetworkIcon,
-  "Traffic Engineering": Zap,
-  "Failures": ShieldAlert,
-  "Optimization": Gauge,
-  "Optimization Complexity": Layers,
-};
-
 const COMPLEXITY_CLASS: Record<string, string> = {
   Beginner: "demo-complexity-beginner",
   Intermediate: "demo-complexity-intermediate",
   Advanced: "demo-complexity-advanced",
 };
 
+// ── The dashboard ─────────────────────────────────────────────────────────
+// A curated tutorial menu, not a test catalog: exactly the 4 course-aligned
+// scenarios instructor feedback settled on (see backend/app/demo/
+// demo_scenarios.py's CURATED_DEMO_SCENARIO_BUILDERS), one flat list sorted
+// by `demoScenario.order`, no category grouping (there is now only one
+// category — "Demo Scenarios" — so a second grouping layer would just add
+// visual noise for 4 cards). Each card carries only what a presenter needs
+// to pick a scenario: title, one short non-spoiler sentence, an optional
+// course citation, a difficulty tag, and Open — never a preview of the
+// expected numeric/optimization outcome.
 const DemoScenarioDashboard: React.FC<DemoScenarioDashboardProps> = ({ onOpenScenario }) => {
   const [scenarios, setScenarios] = useState<DemoScenarioSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +55,7 @@ const DemoScenarioDashboard: React.FC<DemoScenarioDashboardProps> = ({ onOpenSce
   const load = () => {
     setError(null);
     listDemoScenarios()
-      .then(setScenarios)
+      .then((list) => setScenarios([...list].sort((a, b) => a.demoScenario.order - b.demoScenario.order)))
       .catch((err) => setError(describeApiError(err, "load")));
   };
 
@@ -91,28 +83,14 @@ const DemoScenarioDashboard: React.FC<DemoScenarioDashboardProps> = ({ onOpenSce
     }
   };
 
-  const grouped = useMemo(() => {
-    if (!scenarios) return [];
-    const byCategory = new Map<DemoCategory, DemoScenarioSummary[]>();
-    for (const s of scenarios) {
-      const cat = s.demoScenario.category;
-      if (!byCategory.has(cat)) byCategory.set(cat, []);
-      byCategory.get(cat)!.push(s);
-    }
-    for (const list of byCategory.values()) {
-      list.sort((a, b) => a.demoScenario.order - b.demoScenario.order);
-    }
-    return CATEGORY_ORDER.filter((c) => byCategory.has(c)).map((c) => ({ category: c, items: byCategory.get(c)! }));
-  }, [scenarios]);
-
   return (
     <div className="demo-dashboard">
       <div className="demo-dashboard-header">
         <div className="demo-dashboard-title">
           <FlaskConical size={22} className="demo-dashboard-title-icon" />
           <div>
-            <h1>Demo Scenario Pack</h1>
-            <p>Curated Sprint 1 &amp; Sprint 2 teaching scenarios — pre-loaded topology, demands, and configuration. Click Open, then Run.</p>
+            <h1>Demo Scenarios</h1>
+            <p>Pre-loaded topology, demands, and configuration. Click Open, then Run.</p>
           </div>
         </div>
         <button className="btn-secondary demo-reseed-btn" onClick={handleSeed} disabled={seeding}>
@@ -134,46 +112,35 @@ const DemoScenarioDashboard: React.FC<DemoScenarioDashboardProps> = ({ onOpenSce
         </div>
       )}
 
-      {grouped.map(({ category, items }) => {
-        const Icon = CATEGORY_ICON[category];
-        return (
-          <section key={category} className="demo-category-section">
-            <div className="demo-category-header">
-              <Icon size={16} />
-              <h2>{category}</h2>
-            </div>
-            <div className="demo-scenario-grid">
-              {items.map((s) => (
-                <button
-                  key={s.assignmentId}
-                  className="demo-scenario-card"
-                  onClick={() => onOpenScenario(s.assignmentId)}
-                >
-                  <div className="demo-scenario-card-top">
-                    <span className="demo-scenario-title">{s.title}</span>
-                    {s.demoScenario.recommended && (
-                      <span className="demo-scenario-recommended" title="Recommended demo">
-                        <Sparkles size={11} /> Recommended
-                      </span>
-                    )}
-                  </div>
-                  <p className="demo-scenario-desc">{s.demoScenario.shortDescription}</p>
-                  <div className="demo-scenario-card-bottom">
-                    {s.demoScenario.complexity && (
-                      <span className={`demo-complexity-badge ${COMPLEXITY_CLASS[s.demoScenario.complexity] ?? ""}`}>
-                        {s.demoScenario.complexity}
-                      </span>
-                    )}
-                    <span className="demo-scenario-open">
-                      Open <ChevronRight size={13} />
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </section>
-        );
-      })}
+      {scenarios && scenarios.length > 0 && (
+        <div className="demo-scenario-grid">
+          {scenarios.map((s) => (
+            <button
+              key={s.assignmentId}
+              className="demo-scenario-card"
+              onClick={() => onOpenScenario(s.assignmentId)}
+            >
+              <div className="demo-scenario-card-top">
+                <span className="demo-scenario-title">{s.title}</span>
+              </div>
+              <p className="demo-scenario-desc">{s.demoScenario.shortDescription}</p>
+              {s.demoScenario.courseSource && (
+                <p className="demo-scenario-source">{s.demoScenario.courseSource}</p>
+              )}
+              <div className="demo-scenario-card-bottom">
+                {s.demoScenario.complexity && (
+                  <span className={`demo-complexity-badge ${COMPLEXITY_CLASS[s.demoScenario.complexity] ?? ""}`}>
+                    {s.demoScenario.complexity}
+                  </span>
+                )}
+                <span className="demo-scenario-open">
+                  Open <ChevronRight size={13} />
+                </span>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

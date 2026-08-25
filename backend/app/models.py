@@ -420,7 +420,14 @@ class GradingRules(BaseModel):
 # Assignment, just one with `demoScenario` set and no expectedSolution (these
 # are presenter-driven walkthroughs, not graded exercises).
 DemoCategory = Literal[
-    "Routing Basics", "Traffic Engineering", "Failures", "Optimization", "Optimization Complexity"
+    # "Demo Scenarios" is the single category the curated, student-facing
+    # pack (app/demo/demo_scenarios.py's CURATED_DEMO_SCENARIO_BUILDERS) uses
+    # — the five categories before it are kept only because the original 16
+    # scenario builders (still used internally as backend/test fixtures, see
+    # that module's docstring) still carry them; removing those values would
+    # be a breaking change to data those builders still produce.
+    "Routing Basics", "Traffic Engineering", "Failures", "Optimization", "Optimization Complexity",
+    "Demo Scenarios",
 ]
 DemoComplexity = Literal["Beginner", "Intermediate", "Advanced"]
 DemoOptimizationMode = Literal["OPT", "WPO", "LWO", "JOINT"]
@@ -435,6 +442,10 @@ class DemoScenarioMeta(BaseModel):
     pre-computed expected result. The actual MLU/searchMethod/provenOptimal
     the student sees always comes from a fresh POST /optimize call, exactly
     like every other Optimization Lab run.
+
+    `courseSource` is an optional, short attribution line ("INET Network
+    Algorithms — Exercise 2") for a scenario that reproduces a real course
+    exercise — never the exercise's own text/PDF content, just a citation.
     """
     category: DemoCategory
     order: int = 0
@@ -447,6 +458,7 @@ class DemoScenarioMeta(BaseModel):
     alternateBudget: Optional[int] = None
     recommendedMinWeight: Optional[int] = None
     recommendedMaxWeight: Optional[int] = None
+    courseSource: Optional[str] = None
 
 class Assignment(BaseModel):
     assignmentId: str = Field(default_factory=lambda: str(uuid4()))

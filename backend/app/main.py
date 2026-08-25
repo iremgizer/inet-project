@@ -193,9 +193,11 @@ def seed_demo(assignments: List[Assignment]) -> Dict[str, Any]:
 # ── Demo Scenario Pack ───────────────────────────────────────────────────────
 # Server-side-configured, MongoDB-persisted teaching scenarios shown to the
 # "Demo Student" account (see app/demo/demo_scenarios.py). Idempotent —
-# calling this endpoint any number of times upserts the same 16 documents,
-# never creating duplicates (same replace_one(upsert=True)-by-assignmentId
-# path as /seed-demo above and every other assignment save).
+# calling this endpoint any number of times upserts the same 4 curated
+# documents, never creating duplicates (same replace_one(upsert=True)-by-
+# assignmentId path as /seed-demo above and every other assignment save),
+# and prunes any demoScenario-tagged document left over from a previous,
+# larger pack (see seed_demo_scenarios()'s own docstring).
 
 @app.post("/seed-demo-scenarios")
 def seed_demo_scenarios_route() -> Dict[str, Any]:

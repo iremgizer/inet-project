@@ -110,6 +110,25 @@ class AssignmentStorageService:
         ))
         return scenarios
 
+    def prune_demo_scenarios(self, keep_ids: List[str]) -> int:
+        """Deletes any demoScenario-tagged assignment document whose
+        assignmentId is not in `keep_ids`. Used when the curated Demo
+        Scenario Pack shrinks (e.g. 16 -> 4 scenarios) so a reseed doesn't
+        leave stale entries behind on the dashboard.
+
+        Scoped strictly by the SAME `demoScenario != None` filter
+        `list_demo_scenarios()` uses to identify a demo scenario document —
+        an ordinary teacher-created assignment never has `demoScenario` set,
+        so it can never match this filter regardless of its assignmentId.
+        """
+        if not self._available or self._assignments is None:
+            return 0
+        result = self._assignments.delete_many({
+            "demoScenario": {"$ne": None},
+            "assignmentId": {"$nin": keep_ids},
+        })
+        return result.deleted_count
+
     # ── Submissions ────────────────────────────────────────────────────────────
 
     def save_submission(self, submission: Dict[str, Any]) -> Dict[str, Any]:

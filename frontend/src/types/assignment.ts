@@ -59,7 +59,13 @@ export interface GradingRules {
 // optimization-related fields on it are UI hints (what budget to try), never
 // a stored expected result. The real teaching claim always comes from a
 // fresh /simulate or /optimize call, exactly like every other run.
-export type DemoCategory = "Routing Basics" | "Traffic Engineering" | "Failures" | "Optimization" | "Optimization Complexity";
+// "Demo Scenarios" is the single category the curated, student-facing pack
+// uses; the five before it are kept only because the original 16 (internal
+// backend/test fixture) scenarios still carry them — see
+// backend/app/demo/demo_scenarios.py's module docstring.
+export type DemoCategory =
+  | "Routing Basics" | "Traffic Engineering" | "Failures" | "Optimization" | "Optimization Complexity"
+  | "Demo Scenarios";
 export type DemoComplexity = "Beginner" | "Intermediate" | "Advanced";
 export type DemoOptimizationMode = "OPT" | "WPO" | "LWO" | "JOINT";
 
@@ -75,6 +81,10 @@ export interface DemoScenarioMeta {
   alternateBudget?: number | null;
   recommendedMinWeight?: number | null;
   recommendedMaxWeight?: number | null;
+  /** Short attribution line for a scenario reproducing a real course
+   * exercise (e.g. "INET Network Algorithms — Exercise 2") — never the
+   * exercise's own text/PDF content, just a citation. */
+  courseSource?: string | null;
 }
 
 export interface Assignment {
