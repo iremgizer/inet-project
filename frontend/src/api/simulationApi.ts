@@ -116,7 +116,7 @@ export async function listDemoScenarios(): Promise<DemoScenarioSummary[]> {
   return r.json();
 }
 
-export async function seedDemoScenarios(): Promise<{ seeded: number; scenarioIds: string[]; message: string }> {
+export async function seedDemoScenarios(): Promise<{ seeded: number; removed?: number; scenarioIds: string[]; message: string }> {
   const r = await fetch(`${BASE_URL}/seed-demo-scenarios`, { method: "POST" });
   if (!r.ok) throw new ApiError(await readError(r, "Failed to seed demo scenarios"), r.status);
   return r.json();

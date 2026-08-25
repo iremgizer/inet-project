@@ -283,6 +283,15 @@ def test_p_joint_search_budget_crosses_threshold():
 
 
 # ── B (MongoDB) — seed / list / get, skipped gracefully if unavailable ─────
+#
+# NOTE: as of the final instructor-curated pack (see
+# app/demo/demo_scenarios.py's CURATED_DEMO_SCENARIO_BUILDERS), the
+# seed/list endpoints below now seed/return the 4 CURATED scenarios, not
+# these 16 fixtures — build_demo_scenarios() above is exercised directly
+# (in-memory, no MongoDB) by Section A, never through these endpoints any
+# more. See test_curated_demo_scenarios.py for the endpoint-level tests
+# (curated count, idempotency, stale-record pruning, student payload
+# safety) that replaced the old assertions here.
 
 pytestmark_mongo = pytest.mark.skipif(
     not assignment_storage.available, reason="MongoDB not available in this environment"
@@ -290,47 +299,22 @@ pytestmark_mongo = pytest.mark.skipif(
 
 
 @pytestmark_mongo
-def test_seed_endpoint_persists_all_sixteen():
+def test_seed_endpoint_persists_curated_four():
     r = client.post("/seed-demo-scenarios")
     assert r.status_code == 200
     body = r.json()
-    assert body["seeded"] == 16
-    assert len(body["scenarioIds"]) == 16
+    assert body["seeded"] == 4
+    assert len(body["scenarioIds"]) == 4
 
 
 @pytestmark_mongo
 def test_seed_endpoint_idempotent_no_duplicates():
     r1 = client.post("/seed-demo-scenarios")
     r2 = client.post("/seed-demo-scenarios")
-    assert r1.json()["seeded"] == r2.json()["seeded"] == 16
+    assert r1.json()["seeded"] == r2.json()["seeded"] == 4
     listed = client.get("/demo-scenarios").json()
     ids = [s["assignmentId"] for s in listed]
-    assert len(ids) == len(set(ids)) == 16
-
-
-@pytestmark_mongo
-def test_list_demo_scenarios_grouped_and_sorted():
-    client.post("/seed-demo-scenarios")
-    r = client.get("/demo-scenarios")
-    assert r.status_code == 200
-    listed = r.json()
-    assert len(listed) == 16
-    categories = {s["demoScenario"]["category"] for s in listed}
-    assert categories == {
-        "Routing Basics", "Traffic Engineering", "Failures",
-        "Optimization", "Optimization Complexity",
-    }
-
-
-@pytestmark_mongo
-def test_demo_scenario_student_payload_has_no_expected_solution():
-    client.post("/seed-demo-scenarios")
-    r = client.get("/assignments/demo-wpo/student")
-    assert r.status_code == 200
-    body = r.json()
-    assert "expectedSolution" not in body
-    assert body["starterAlgorithmConfig"]["selectedAlgorithm"] == "ECMP"
-    assert body["demoScenario"]["optimizationMode"] == "WPO"
+    assert len(ids) == len(set(ids)) == 4
 
 
 @pytestmark_mongo
