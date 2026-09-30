@@ -54,8 +54,8 @@ export function getResultBadges(result: OptimizationResult): ResultBadge[] {
       variant: "warning",
       explanation: "The search stopped at the configured time limit before finishing. The result below is the best solution found so far — not proven optimal.",
     });
-  } else if (result.provenOptimal) {
-    badges.push({ label: "PROVEN OPTIMAL", variant: "success", explanation: proofExplanation(result) });
+  } else if (result.provenOptimal || (result.mode === "OPT" && result.status === "OPTIMAL")) {
+    badges.push({ label: "PROVEN", variant: "success", explanation: proofExplanation(result) });
   } else {
     badges.push({ label: "BEST FOUND", variant: "neutral", explanation: heuristicExplanation(result) });
   }
@@ -64,7 +64,7 @@ export function getResultBadges(result: OptimizationResult): ResultBadge[] {
   if (result.searchMethod) {
     badges.push(
       isExactMethod
-        ? { label: isTimeLimited ? "EXACT SEARCH (interrupted)" : "EXACT SEARCH", variant: "neutral", explanation: "Every candidate in the configured search space was (or would have been) evaluated one by one — a brute-force enumeration, not a heuristic." }
+        ? { label: isTimeLimited ? "EXACT · STOPPED" : "EXACT", variant: "neutral", explanation: "Every candidate in the configured search space was (or would have been) evaluated one by one — a brute-force enumeration, not a heuristic." }
         : { label: "HEURISTIC", variant: "neutral", explanation: `${result.searchMethod} — a fast, well-known algorithm with no optimality guarantee, used because the exact search space exceeded the configured budget.` }
     );
   }
