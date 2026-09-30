@@ -203,6 +203,7 @@ interface ReactFlowCanvasProps {
   // Before/After/Difference comparison (PR 6, Part 2) — see SimulationOverlayContextType.
   comparisonMode?: ComparisonMode;
   comparisonByLink?: Map<string, LinkComparisonEntry> | null;
+  showDemandPanel?: boolean;
   // Quick graph-first policy popup — opens once a link is clicked during the
   // "Select on Graph" quick-add flow (see TEPolicyEditor / WorkflowManager).
   // Additional to, not a replacement for, the dropdown-based draft flow above.
@@ -249,6 +250,7 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
   replayDownLinkIds = null,
   comparisonMode = "after",
   comparisonByLink = null,
+  showDemandPanel = false,
   teQuickPopupLinkId = null,
   onChooseTEQuickPolicy,
   onCancelTEQuickPopup,
@@ -597,6 +599,23 @@ const InnerCanvas: React.FC<ReactFlowCanvasProps> = ({
         <Panel position="bottom-left">
           <GraphLegend />
         </Panel>
+        {showDemandPanel && network.demands.length > 0 && (
+          <Panel position="top-left" className="canvas-demand-panel">
+            <div className="canvas-demand-panel-title">Demands <span>{network.demands.length}</span></div>
+            <ul>
+              {network.demands.map((demand) => {
+                const source = network.nodes.find((node) => node.id === demand.source)?.label ?? demand.source;
+                const target = network.nodes.find((node) => node.id === demand.target)?.label ?? demand.target;
+                return (
+                  <li key={demand.id}>
+                    <span>{source} <b>→</b> {target}</span>
+                    <strong>{demand.amount.toLocaleString(undefined, { maximumFractionDigits: 3 })}</strong>
+                  </li>
+                );
+              })}
+            </ul>
+          </Panel>
+        )}
         {tokenNode && <PacketToken node={tokenNode} label={srDisplayState?.demandId ?? ""} />}
         {teQuickPopupLink && onChooseTEQuickPolicy && onCancelTEQuickPopup && (
           <TEQuickPolicyPopup
